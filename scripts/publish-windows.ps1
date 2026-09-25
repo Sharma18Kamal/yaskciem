@@ -18,7 +18,10 @@ if (Test-Path $output) {
 }
 
 & dotnet restore $solutionPath --configfile $nugetConfigPath
-if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed with exit code $LASTEXITCODE." }
+if ($LASTEXITCODE -ne 0) { throw "dotnet solution restore failed with exit code $LASTEXITCODE." }
+
+& dotnet restore $projectPath --runtime $Runtime --configfile $nugetConfigPath
+if ($LASTEXITCODE -ne 0) { throw "dotnet runtime restore failed with exit code $LASTEXITCODE." }
 
 & dotnet publish $projectPath `
     --configuration $Configuration `
