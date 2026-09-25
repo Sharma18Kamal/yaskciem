@@ -22,10 +22,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         var composition = CreateComposition();
-        DataContext = new DashboardViewModel(composition.ScanService, composition.ResultStore, composition.InventoryStore);
+        DataContext = new DashboardViewModel(composition.ScanService, composition.ResultStore, composition.InventoryStore, composition.ReportService);
     }
 
-    private static (ScanService ScanService, IScanResultStore ResultStore, ICloudInventoryStore InventoryStore) CreateComposition()
+    private static (ScanService ScanService, IScanResultStore ResultStore, ICloudInventoryStore InventoryStore, IReportService ReportService) CreateComposition()
     {
         var dataDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -58,7 +58,8 @@ public partial class MainWindow : Window
         return (
             new ScanService(providers, new RiskEngine(rules)),
             new SqliteScanResultStore(options),
-            new SqliteCloudInventoryStore(options));
+            new SqliteCloudInventoryStore(options),
+            new SqliteReportService(options));
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -72,6 +73,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     private readonly ScanService _scanService;
     private readonly IScanResultStore _resultStore;
     private readonly ICloudInventoryStore _inventoryStore;
+    private readonly IReportService _reportService;
     private int _totalCloudAccounts;
     private int _highRiskFindings;
     private int _privilegedIdentities;
@@ -86,12 +88,15 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public ObservableCollection<CloudPermission> Permissions { get; } = new();
     public IReadOnlyList<string> ProviderFilters { get; } = new[] { "All Providers", "Azure", "Aws", "Gcp" };
 
-    public DashboardViewModel(ScanService scanService, IScanResultStore resultStore, ICloudInventoryStore inventoryStore)
+    public DashboardViewModel(ScanService scanService, IScanResultStore resultStore, ICloudInventoryStore inventoryStore, IReportService reportService)
     {
         _scanService = scanService;
         _resultStore = resultStore;
         _inventoryStore = inventoryStore;
+        _reportService = reportService;
         ScanCommand = new AsyncCommand(ScanAsync);
+        ExportReportCommand = new AsyncCommand(ExportReportAsync);
+        ExportCsvCommand = new AsyncCommand(ExportCsvAsync);
     }
 
     public int TotalCloudAccounts
@@ -139,6 +144,8 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     }
 
     public ICommand ScanCommand { get; }
+    public ICommand ExportReportCommand { get; }
+    public ICommand ExportCsvCommand { get; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -215,6 +222,18 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         StatusMessage = unavailableProviders.Count == 0
             ? $"Last scan completed at {DateTime.Now:g}. Found {findings.Count} risk finding(s)."
             : $"Scan completed with unavailable tools ({string.Join(", ", unavailableProviders)}). Found {findings.Count} risk finding(s).";
+    }
+
+    private async Task ExportReportAsync()
+    {
+        var path = await _reportService.GenerateReportAsync("json");
+        StatusMessage = $"Report exported to {path}.";
+    }
+
+    private async Task ExportCsvAsync()
+    {
+        var path = await _reportService.GenerateReportAsync("csv");
+        StatusMessage = $"Report exported to {path}.";
     }
 
     private async Task<IReadOnlyList<string>> GetUnavailableProvidersAsync()

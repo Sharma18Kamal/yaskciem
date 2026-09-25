@@ -1,0 +1,28 @@
+name: YASK-CIEM CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore
+        run: dotnet restore CloudEntitle.sln --configfile .nuget/NuGet.Config
+
+      - name: Build desktop client
+        run: dotnet build src/CloudEntitle.Desktop/CloudEntitle.Desktop.csproj --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test CloudEntitle.sln --configuration Release --no-restore --logger "console;verbosity=normal"
