@@ -26,6 +26,16 @@ If the Windows SDK is not installed, create a runnable ZIP package instead:
 
 The output is written to `artifacts/windows-zip/YASK-CIEM-win-x64.zip`. Extract it and run `CloudEntitle.Desktop.exe`. The target machine needs the matching .NET desktop runtime.
 
+## User-level Start Menu installer
+
+For local testing without MSIX certificate trust or administrator rights, run:
+
+```powershell
+.\scripts\install-windows-user.ps1
+```
+
+This publishes the latest desktop build to `%LocalAppData%\Programs\YASK-CIEM` and creates `YASK-CIEM.lnk` in the current user's Start Menu. It does not modify the application database or reports under `%LocalAppData%\YASK-CIEM`.
+
 To sign it:
 
 ```powershell
