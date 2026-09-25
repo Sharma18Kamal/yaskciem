@@ -86,8 +86,10 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
     }
 
     private static string BuildBatchCommand(string path, IReadOnlyList<string> arguments)
-        => string.Join(" ", new[] { QuoteCommandArgument(path) }.Concat(arguments.Select(QuoteCommandArgument)));
+        => string.Join(" ", new[] { QuoteBatchArgument(path) }.Concat(arguments.Select(QuoteBatchArgument)));
 
-    private static string QuoteCommandArgument(string argument)
-        => $"\"{argument.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
+    private static string QuoteBatchArgument(string argument)
+        => argument.Contains(' ') || argument.Contains('"')
+            ? $"\"{argument.Replace("\"", "\"\"")}\""
+            : argument;
 }

@@ -1,9 +1,9 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restricted"
          IgnorableNamespaces="uap rescap">
-  <Identity Name="Sharma18Kamal.YASKCIEM" Publisher="CN=YASK-CIEM" Version="1.0.0.1" />
+  <Identity Name="Sharma18Kamal.YASKCIEM" Publisher="CN=YASK-CIEM" Version="1.0.0.3" />
   <Properties>
     <DisplayName>YASK-CIEM</DisplayName>
     <PublisherDisplayName>Sharma18Kamal</PublisherDisplayName>
