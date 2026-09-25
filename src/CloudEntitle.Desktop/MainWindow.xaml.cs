@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using System.Windows.Controls;
 using CloudEntitle.Infrastructure.Persistence;
 using CloudEntitle.Infrastructure;
 using CloudEntitle.Application.Interfaces;
@@ -66,6 +67,36 @@ public partial class MainWindow : Window
     {
         await ((DashboardViewModel)DataContext).LoadAsync();
     }
+
+    private void NavigationButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string section)
+        {
+            return;
+        }
+
+        switch (section)
+        {
+            case "dashboard":
+            case "findings":
+                InventoryTabs.SelectedIndex = 0;
+                break;
+            case "accounts":
+            case "identities":
+                InventoryTabs.SelectedIndex = 1;
+                break;
+            case "permissions":
+                InventoryTabs.SelectedIndex = 3;
+                break;
+            case "reports":
+                ((DashboardViewModel)DataContext).ExportReportCommand.Execute(null);
+                break;
+            case "recommendations":
+            case "settings":
+                ((DashboardViewModel)DataContext).StatusMessage = $"{button.Content} is not available in this release.";
+                break;
+        }
+    }
 }
 
 public sealed class DashboardViewModel : INotifyPropertyChanged
@@ -126,7 +157,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public string StatusMessage
     {
         get => _statusMessage;
-        private set => SetField(ref _statusMessage, value);
+        set => SetField(ref _statusMessage, value);
     }
 
     public string SelectedProviderFilter
