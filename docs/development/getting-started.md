@@ -100,6 +100,8 @@ When the window opens:
 
 ## 7. Create a publishable Windows artifact
 
+For provider-specific Azure, AWS, and GCP execution steps, see [Provider Execution Guide](../cloud/provider-execution.md).
+
 Run PowerShell from the repository root:
 
 ```powershell
