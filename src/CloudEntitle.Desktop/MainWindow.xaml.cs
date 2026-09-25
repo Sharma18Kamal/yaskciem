@@ -21,10 +21,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         var composition = CreateComposition();
-        DataContext = new DashboardViewModel(composition.ScanService, composition.ResultStore);
+        DataContext = new DashboardViewModel(composition.ScanService, composition.ResultStore, composition.InventoryStore);
     }
 
-    private static (ScanService ScanService, IScanResultStore ResultStore) CreateComposition()
+    private static (ScanService ScanService, IScanResultStore ResultStore, ICloudInventoryStore InventoryStore) CreateComposition()
     {
         var dataDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -54,7 +54,10 @@ public partial class MainWindow : Window
             new GcpProvider()
         };
 
-        return (new ScanService(providers, new RiskEngine(rules)), new SqliteScanResultStore(options));
+        return (
+            new ScanService(providers, new RiskEngine(rules)),
+            new SqliteScanResultStore(options),
+            new SqliteCloudInventoryStore(options));
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -67,6 +70,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
 {
     private readonly ScanService _scanService;
     private readonly IScanResultStore _resultStore;
+    private readonly ICloudInventoryStore _inventoryStore;
     private int _totalCloudAccounts;
     private int _highRiskFindings;
     private int _privilegedIdentities;
@@ -74,10 +78,11 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     private string _statusMessage = "Ready to scan connected cloud providers.";
     public ObservableCollection<RiskFinding> Findings { get; } = new();
 
-    public DashboardViewModel(ScanService scanService, IScanResultStore resultStore)
+    public DashboardViewModel(ScanService scanService, IScanResultStore resultStore, ICloudInventoryStore inventoryStore)
     {
         _scanService = scanService;
         _resultStore = resultStore;
+        _inventoryStore = inventoryStore;
         ScanCommand = new AsyncCommand(ScanAsync);
     }
 
@@ -118,7 +123,10 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public async Task LoadAsync()
     {
         var findings = await _resultStore.GetRecentFindingsAsync();
+        var inventory = await _inventoryStore.GetSummaryAsync();
         ReplaceFindings(findings);
+        TotalCloudAccounts = inventory.AccountCount;
+        PrivilegedIdentities = inventory.PrincipalCount;
         StatusMessage = findings.Count == 0
             ? "Ready to scan connected cloud providers."
             : $"Loaded {findings.Count} finding(s) from the last scan.";
@@ -128,26 +136,31 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     {
         StatusMessage = "Scanning Azure, AWS, and GCP providers...";
         var findings = new List<RiskFinding>();
-        var accountCount = 0;
-        var identityCount = 0;
+        var accounts = new List<CloudAccount>();
+        var principals = new List<CloudPrincipal>();
+        var roles = new List<CloudRole>();
+        var permissions = new List<CloudPermission>();
 
         foreach (var provider in _scanService.Providers)
         {
-            var accounts = await provider.DiscoverAccountsAsync();
-            accountCount += accounts.Count;
+            var providerAccounts = await provider.DiscoverAccountsAsync();
+            accounts.AddRange(providerAccounts);
 
-            foreach (var account in accounts)
+            foreach (var account in providerAccounts)
             {
-                identityCount += (await provider.DiscoverIdentitiesAsync(account.Id)).Count;
+                principals.AddRange(await provider.DiscoverIdentitiesAsync(account.Id));
+                roles.AddRange(await provider.DiscoverRolesAsync(account.Id));
+                permissions.AddRange(await provider.DiscoverPermissionsAsync(account.Id));
                 findings.AddRange(await _scanService.RunProviderScanAsync(provider, account.Id));
             }
         }
 
-        TotalCloudAccounts = accountCount;
-        PrivilegedIdentities = identityCount;
+        TotalCloudAccounts = accounts.Count;
+        PrivilegedIdentities = principals.Count;
         HighRiskFindings = findings.Count(finding => finding.Severity is RiskSeverity.High or RiskSeverity.Critical);
         CriticalFindings = findings.Count(finding => finding.Severity == RiskSeverity.Critical);
         await _resultStore.ReplaceFindingsAsync(findings);
+        await _inventoryStore.ReplaceInventoryAsync(accounts, principals, roles, permissions);
         ReplaceFindings(findings);
         StatusMessage = $"Last scan completed at {DateTime.Now:g}. Found {findings.Count} risk finding(s).";
     }

@@ -61,6 +61,26 @@ public interface IScanResultStore
     Task<IReadOnlyList<RiskFinding>> GetRecentFindingsAsync(int limit = 100, CancellationToken cancellationToken = default);
 }
 
+public interface ICloudInventoryStore
+{
+    Task ReplaceInventoryAsync(
+        IEnumerable<CloudAccount> accounts,
+        IEnumerable<CloudPrincipal> principals,
+        IEnumerable<CloudRole> roles,
+        IEnumerable<CloudPermission> permissions,
+        CancellationToken cancellationToken = default);
+
+    Task<InventorySummary> GetSummaryAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed class InventorySummary
+{
+    public int AccountCount { get; init; }
+    public int PrincipalCount { get; init; }
+    public int RoleCount { get; init; }
+    public int PermissionCount { get; init; }
+}
+
 public class LicenseValidationResult
 {
     public bool IsValid { get; set; }
