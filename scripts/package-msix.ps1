@@ -23,11 +23,22 @@ function Find-MakeAppx {
     $command = Get-Command makeappx.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
 
-    $kits = Get-ChildItem "$env:ProgramFiles(x86)\Windows Kits\10\bin" -Filter makeappx.exe -Recurse -ErrorAction SilentlyContinue |
+    $kits = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter makeappx.exe -Recurse -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match '\\x64\\' } |
         Sort-Object FullName -Descending
     if ($kits) { return $kits[0].FullName }
     throw 'MakeAppx.exe was not found. Install the Windows 10/11 SDK.'
+}
+
+function Find-SignTool {
+    $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+
+    $kits = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '\\x64\\' } |
+        Sort-Object FullName -Descending
+    if ($kits) { return $kits[0].FullName }
+    throw 'SignTool.exe was not found. Install the Windows 10/11 SDK.'
 }
 
 if (Test-Path $outputDirectory) { Remove-Item $outputDirectory -Recurse -Force }
@@ -55,9 +66,8 @@ $makeAppx = Find-MakeAppx
 if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed with exit code $LASTEXITCODE." }
 
 if ($CertificatePath) {
-    $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
-    if (-not $signtool) { throw 'signtool.exe was not found. Install the Windows SDK.' }
-    & $signtool.Source sign /fd SHA256 /a /f $CertificatePath /p $CertificatePassword $packagePath
+    $signtool = Find-SignTool
+    & $signtool sign /fd SHA256 /a /f $CertificatePath /p $CertificatePassword $packagePath
     if ($LASTEXITCODE -ne 0) { throw "Signing failed with exit code $LASTEXITCODE." }
 }
 

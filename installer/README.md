@@ -16,6 +16,16 @@ To create an MSIX package:
 
 The output is written to `artifacts/msix/YASK-CIEM-1.0.0.0.msix`.
 
+## ZIP fallback
+
+If the Windows SDK is not installed, create a runnable ZIP package instead:
+
+```powershell
+.\scripts\package-windows-zip.ps1
+```
+
+The output is written to `artifacts/windows-zip/YASK-CIEM-win-x64.zip`. Extract it and run `CloudEntitle.Desktop.exe`. The target machine needs the matching .NET desktop runtime.
+
 To sign it:
 
 ```powershell
