@@ -32,12 +32,14 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel>
                         <TextBlock Text="Cloud entitlement visibility" Foreground="#94A3B8" FontSize="12"/>
                         <TextBlock Text="Security overview" Foreground="#F8FAFC" FontSize="28" FontWeight="SemiBold"/>
                     </StackPanel>
-                    <Button Grid.Column="1" Content="Scan Now" Command="{Binding ScanCommand}" Width="120" Height="36" Background="#2563EB" Foreground="White" FontWeight="SemiBold"/>
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding ProviderFilters}" SelectedItem="{Binding SelectedProviderFilter, UpdateSourceTrigger=PropertyChanged}" Width="140" Height="36" Margin="0,0,12,0"/>
+                    <Button Grid.Column="2" Content="Scan Now" Command="{Binding ScanCommand}" Width="120" Height="36" Background="#2563EB" Foreground="White" FontWeight="SemiBold"/>
                 </Grid>
             </Border>
 

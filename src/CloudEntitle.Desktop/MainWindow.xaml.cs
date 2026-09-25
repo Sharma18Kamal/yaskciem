@@ -76,10 +76,14 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     private int _privilegedIdentities;
     private int _criticalFindings;
     private string _statusMessage = "Ready to scan connected cloud providers.";
+    private string _selectedProviderFilter = "All Providers";
+    private IReadOnlyList<RiskFinding> _allFindings = Array.Empty<RiskFinding>();
+    private IReadOnlyList<CloudPrincipal> _allPrincipals = Array.Empty<CloudPrincipal>();
     public ObservableCollection<RiskFinding> Findings { get; } = new();
     public ObservableCollection<CloudPrincipal> Principals { get; } = new();
     public ObservableCollection<CloudRole> Roles { get; } = new();
     public ObservableCollection<CloudPermission> Permissions { get; } = new();
+    public IReadOnlyList<string> ProviderFilters { get; } = new[] { "All Providers", "Azure", "Aws", "Gcp" };
 
     public DashboardViewModel(ScanService scanService, IScanResultStore resultStore, ICloudInventoryStore inventoryStore)
     {
@@ -119,6 +123,20 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         private set => SetField(ref _statusMessage, value);
     }
 
+    public string SelectedProviderFilter
+    {
+        get => _selectedProviderFilter;
+        set
+        {
+            if (!SetField(ref _selectedProviderFilter, value))
+            {
+                return;
+            }
+
+            ApplyProviderFilter();
+        }
+    }
+
     public ICommand ScanCommand { get; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -127,8 +145,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     {
         var findings = await _resultStore.GetRecentFindingsAsync();
         var inventory = await _inventoryStore.GetSummaryAsync();
-        ReplaceFindings(findings);
-        ReplaceCollection(Principals, await _inventoryStore.GetPrincipalsAsync());
+        _allFindings = findings;
+        _allPrincipals = await _inventoryStore.GetPrincipalsAsync();
+        ApplyProviderFilter();
         ReplaceCollection(Roles, await _inventoryStore.GetRolesAsync());
         ReplaceCollection(Permissions, await _inventoryStore.GetPermissionsAsync());
         TotalCloudAccounts = inventory.AccountCount;
@@ -167,20 +186,23 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         CriticalFindings = findings.Count(finding => finding.Severity == RiskSeverity.Critical);
         await _resultStore.ReplaceFindingsAsync(findings);
         await _inventoryStore.ReplaceInventoryAsync(accounts, principals, roles, permissions);
-        ReplaceFindings(findings);
-        ReplaceCollection(Principals, principals);
+        _allFindings = findings;
+        _allPrincipals = principals;
+        ApplyProviderFilter();
         ReplaceCollection(Roles, roles);
         ReplaceCollection(Permissions, permissions);
         StatusMessage = $"Last scan completed at {DateTime.Now:g}. Found {findings.Count} risk finding(s).";
     }
 
-    private void ReplaceFindings(IEnumerable<RiskFinding> findings)
+    private void ApplyProviderFilter()
     {
-        Findings.Clear();
-        foreach (var finding in findings)
-        {
-            Findings.Add(finding);
-        }
+        var hasProviderFilter = Enum.TryParse<CloudProviderType>(SelectedProviderFilter, true, out var provider);
+        ReplaceCollection(Findings, hasProviderFilter
+            ? _allFindings.Where(finding => finding.CloudProvider == provider)
+            : _allFindings);
+        ReplaceCollection(Principals, hasProviderFilter
+            ? _allPrincipals.Where(principal => principal.CloudProvider == provider)
+            : _allPrincipals);
     }
 
     private static void ReplaceCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)
@@ -192,15 +214,16 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         }
     }
 
-    private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
         {
-            return;
+            return false;
         }
 
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
     }
 }
 
