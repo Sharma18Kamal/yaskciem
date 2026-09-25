@@ -41,6 +41,8 @@ Provider adapters default to deterministic mock data in tests. The desktop compo
 
 ## Running locally
 
+For the complete download, installation, testing, and first-run procedure, see [Getting Started](docs/development/getting-started.md).
+
 1. Install the .NET 9 SDK for the current local scaffold, or update the target framework when .NET 10 is available.
 2. Install and authenticate the required read-only tools: `az`, `aws`, and `gcloud`.
 3. Restore with `dotnet restore CloudEntitle.sln --configfile .nuget/NuGet.Config`.
