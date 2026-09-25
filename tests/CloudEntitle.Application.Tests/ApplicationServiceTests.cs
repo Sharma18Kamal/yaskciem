@@ -39,6 +39,15 @@ public class ApplicationServiceTests
             => Task.FromResult<IReadOnlyList<CloudRole>>(new List<CloudRole>());
 
         public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<CloudPermission>>(new List<CloudPermission>());
+            => Task.FromResult<IReadOnlyList<CloudPermission>>(new[]
+            {
+                new CloudPermission
+                {
+                    AccountId = accountId,
+                    Name = "Owner",
+                    Resource = "/subscriptions/test",
+                    Source = "Azure RBAC"
+                }
+            });
     }
 }

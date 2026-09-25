@@ -36,6 +36,20 @@ public class DatabaseContextTests
 
             var count = await context.CloudAccounts.CountAsync();
             Assert.Equal(1, count);
+
+            context.RiskRules.Add(new RiskRule
+            {
+                Id = Guid.NewGuid(),
+                CloudProvider = CloudProviderType.Azure,
+                Name = "Azure Owner permission",
+                Description = "Detects full Azure ownership.",
+                Severity = RiskSeverity.High,
+                RuleExpression = "permission-name:Owner"
+            });
+
+            await context.SaveChangesAsync();
+
+            Assert.Equal(1, await context.RiskRules.CountAsync());
         }
     }
 }

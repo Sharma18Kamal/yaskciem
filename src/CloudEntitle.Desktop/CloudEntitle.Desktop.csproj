@@ -8,4 +8,17 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\CloudEntitle.Application\CloudEntitle.Application.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Domain\CloudEntitle.Domain.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Infrastructure\CloudEntitle.Infrastructure.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Cloud.Azure\CloudEntitle.Cloud.Azure.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Cloud.Aws\CloudEntitle.Cloud.Aws.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Cloud.Gcp\CloudEntitle.Cloud.Gcp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+  </ItemGroup>
+
 </Project>

@@ -6,11 +6,15 @@ using CloudEntitle.Domain;
 public class ScanService
 {
     private readonly IEnumerable<ICloudProvider> _providers;
+    private readonly RiskEngine _riskEngine;
 
-    public ScanService(IEnumerable<ICloudProvider> providers)
+    public ScanService(IEnumerable<ICloudProvider> providers, RiskEngine? riskEngine = null)
     {
         _providers = providers;
+        _riskEngine = riskEngine ?? new RiskEngine();
     }
+
+    public IReadOnlyList<ICloudProvider> Providers => _providers.ToArray();
 
     public async Task<IReadOnlyList<RiskFinding>> RunScanAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
@@ -18,25 +22,20 @@ public class ScanService
 
         foreach (var provider in _providers)
         {
-            if (provider.ProviderType == CloudProviderType.Azure)
-            {
-                findings.Add(new RiskFinding
-                {
-                    Id = Guid.NewGuid(),
-                    CloudProvider = CloudProviderType.Azure,
-                    Severity = RiskSeverity.High,
-                    Title = "Subscription Owner",
-                    Description = "High-privilege Azure role detected.",
-                    Principal = "example-user",
-                    Resource = "subscription-root",
-                    Permission = "Owner",
-                    Recommendation = "Replace with least-privilege role at resource group or resource scope.",
-                    Evidence = "Role assignment found at subscription scope."
-                });
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            findings.AddRange(await RunProviderScanAsync(provider, accountId, cancellationToken));
         }
 
-        await Task.CompletedTask;
         return findings;
+    }
+
+    public async Task<IReadOnlyList<RiskFinding>> RunProviderScanAsync(
+        ICloudProvider provider,
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        var permissions = await provider.DiscoverPermissionsAsync(accountId, cancellationToken);
+        return await _riskEngine.EvaluateAsync(permissions, provider.ProviderType, cancellationToken);
     }
 }

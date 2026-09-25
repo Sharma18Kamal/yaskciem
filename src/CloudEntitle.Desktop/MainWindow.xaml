@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:CloudEntitle.Desktop"
         mc:Ignorable="d"
-        Title="YASK-CIEM" Height="760" Width="1280" WindowStartupLocation="CenterScreen" Background="#0F172A">
+        Title="YASK-CIEM" Height="760" Width="1280" WindowStartupLocation="CenterScreen" Background="#0F172A" Loaded="Window_Loaded">
     <DockPanel>
         <Border DockPanel.Dock="Left" Width="220" Background="#111827" BorderBrush="#1F2937" BorderThickness="0,0,1,0">
             <StackPanel Margin="20,24,20,20">
@@ -37,7 +37,7 @@
                         <TextBlock Text="Cloud entitlement visibility" Foreground="#94A3B8" FontSize="12"/>
                         <TextBlock Text="Security overview" Foreground="#F8FAFC" FontSize="28" FontWeight="SemiBold"/>
                     </StackPanel>
-                    <Button Grid.Column="1" Content="Scan Now" Width="120" Height="36" Background="#2563EB" Foreground="White" FontWeight="SemiBold"/>
+                    <Button Grid.Column="1" Content="Scan Now" Command="{Binding ScanCommand}" Width="120" Height="36" Background="#2563EB" Foreground="White" FontWeight="SemiBold"/>
                 </Grid>
             </Border>
 
@@ -56,32 +56,40 @@
                 <Border Grid.Column="0" Background="#0B1220" CornerRadius="12" Margin="0,0,12,12" Padding="18">
                     <StackPanel>
                         <TextBlock Text="Total Cloud Accounts" Foreground="#94A3B8"/>
-                        <TextBlock Text="0" Foreground="#F8FAFC" FontSize="30" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <TextBlock Text="{Binding TotalCloudAccounts}" Foreground="#F8FAFC" FontSize="30" FontWeight="Bold" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="1" Background="#0B1220" CornerRadius="12" Margin="0,0,12,12" Padding="18">
                     <StackPanel>
                         <TextBlock Text="High Risk Findings" Foreground="#94A3B8"/>
-                        <TextBlock Text="0" Foreground="#F87171" FontSize="30" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <TextBlock Text="{Binding HighRiskFindings}" Foreground="#F87171" FontSize="30" FontWeight="Bold" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="2" Background="#0B1220" CornerRadius="12" Margin="0,0,12,12" Padding="18">
                     <StackPanel>
                         <TextBlock Text="Privileged Identities" Foreground="#94A3B8"/>
-                        <TextBlock Text="0" Foreground="#FBBF24" FontSize="30" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <TextBlock Text="{Binding PrivilegedIdentities}" Foreground="#FBBF24" FontSize="30" FontWeight="Bold" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="3" Background="#0B1220" CornerRadius="12" Margin="0,0,0,12" Padding="18">
                     <StackPanel>
                         <TextBlock Text="Critical Findings" Foreground="#94A3B8"/>
-                        <TextBlock Text="0" Foreground="#F87171" FontSize="30" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <TextBlock Text="{Binding CriticalFindings}" Foreground="#F87171" FontSize="30" FontWeight="Bold" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
 
                 <Border Grid.Row="1" Grid.ColumnSpan="4" Background="#111827" CornerRadius="12" Padding="20">
                     <StackPanel>
-                        <TextBlock Text="Provider overview" Foreground="#F8FAFC" FontSize="18" FontWeight="SemiBold"/>
-                        <TextBlock Text="Dashboard and risk overview will be populated by the scan engine and normalized cloud findings." Foreground="#CBD5E1" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding StatusMessage}" Foreground="#CBD5E1" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                        <DataGrid ItemsSource="{Binding Findings}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column" Background="#0B1220" Foreground="#F8FAFC" BorderThickness="0" Margin="0,16,0,0">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="110"/>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding CloudProvider}" Width="110"/>
+                                <DataGridTextColumn Header="Finding" Binding="{Binding Title}" Width="220"/>
+                                <DataGridTextColumn Header="Permission" Binding="{Binding Permission}" Width="180"/>
+                                <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
                     </StackPanel>
                 </Border>
             </Grid>

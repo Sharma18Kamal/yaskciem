@@ -55,6 +55,12 @@ public interface IReportService
     Task<string> GenerateReportAsync(string reportType, CancellationToken cancellationToken = default);
 }
 
+public interface IScanResultStore
+{
+    Task ReplaceFindingsAsync(IEnumerable<RiskFinding> findings, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RiskFinding>> GetRecentFindingsAsync(int limit = 100, CancellationToken cancellationToken = default);
+}
+
 public class LicenseValidationResult
 {
     public bool IsValid { get; set; }
