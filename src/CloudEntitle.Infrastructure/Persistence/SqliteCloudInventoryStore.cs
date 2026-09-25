@@ -43,4 +43,22 @@ public sealed class SqliteCloudInventoryStore : ICloudInventoryStore
             PermissionCount = await context.CloudPermissions.CountAsync(cancellationToken)
         };
     }
+
+    public async Task<IReadOnlyList<CloudPrincipal>> GetPrincipalsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var context = new CloudEntitleDbContext(_options);
+        return await context.CloudPrincipals.AsNoTracking().OrderBy(principal => principal.Name).ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CloudRole>> GetRolesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var context = new CloudEntitleDbContext(_options);
+        return await context.CloudRoles.AsNoTracking().OrderBy(role => role.Name).ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CloudPermission>> GetPermissionsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var context = new CloudEntitleDbContext(_options);
+        return await context.CloudPermissions.AsNoTracking().OrderBy(permission => permission.Name).ToListAsync(cancellationToken);
+    }
 }

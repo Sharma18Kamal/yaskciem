@@ -81,15 +81,49 @@
                 <Border Grid.Row="1" Grid.ColumnSpan="4" Background="#111827" CornerRadius="12" Padding="20">
                     <StackPanel>
                         <TextBlock Text="{Binding StatusMessage}" Foreground="#CBD5E1" Margin="0,12,0,0" TextWrapping="Wrap"/>
-                        <DataGrid ItemsSource="{Binding Findings}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column" Background="#0B1220" Foreground="#F8FAFC" BorderThickness="0" Margin="0,16,0,0">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="110"/>
-                                <DataGridTextColumn Header="Provider" Binding="{Binding CloudProvider}" Width="110"/>
-                                <DataGridTextColumn Header="Finding" Binding="{Binding Title}" Width="220"/>
-                                <DataGridTextColumn Header="Permission" Binding="{Binding Permission}" Width="180"/>
-                                <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
+                        <TabControl Margin="0,16,0,0" Background="#0B1220">
+                            <TabItem Header="Risk Findings">
+                                <DataGrid ItemsSource="{Binding Findings}" AutoGenerateColumns="False" IsReadOnly="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="110"/>
+                                        <DataGridTextColumn Header="Provider" Binding="{Binding CloudProvider}" Width="110"/>
+                                        <DataGridTextColumn Header="Finding" Binding="{Binding Title}" Width="220"/>
+                                        <DataGridTextColumn Header="Permission" Binding="{Binding Permission}" Width="180"/>
+                                        <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </TabItem>
+                            <TabItem Header="Identities">
+                                <DataGrid ItemsSource="{Binding Principals}" AutoGenerateColumns="False" IsReadOnly="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Provider" Binding="{Binding CloudProvider}" Width="110"/>
+                                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="220"/>
+                                        <DataGridTextColumn Header="Type" Binding="{Binding IdentityType}" Width="150"/>
+                                        <DataGridCheckBoxColumn Header="Privileged" Binding="{Binding IsPrivileged}" Width="100"/>
+                                        <DataGridTextColumn Header="Email" Binding="{Binding Email}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </TabItem>
+                            <TabItem Header="Roles">
+                                <DataGrid ItemsSource="{Binding Roles}" AutoGenerateColumns="False" IsReadOnly="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="220"/>
+                                        <DataGridTextColumn Header="Role ID" Binding="{Binding RoleId}" Width="220"/>
+                                        <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </TabItem>
+                            <TabItem Header="Permissions">
+                                <DataGrid ItemsSource="{Binding Permissions}" AutoGenerateColumns="False" IsReadOnly="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="220"/>
+                                        <DataGridTextColumn Header="Action" Binding="{Binding Action}" Width="180"/>
+                                        <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </TabItem>
+                        </TabControl>
                     </StackPanel>
                 </Border>
             </Grid>

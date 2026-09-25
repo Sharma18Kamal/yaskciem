@@ -71,6 +71,9 @@ public interface ICloudInventoryStore
         CancellationToken cancellationToken = default);
 
     Task<InventorySummary> GetSummaryAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<CloudPrincipal>> GetPrincipalsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<CloudRole>> GetRolesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<CloudPermission>> GetPermissionsAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class InventorySummary

@@ -77,6 +77,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     private int _criticalFindings;
     private string _statusMessage = "Ready to scan connected cloud providers.";
     public ObservableCollection<RiskFinding> Findings { get; } = new();
+    public ObservableCollection<CloudPrincipal> Principals { get; } = new();
+    public ObservableCollection<CloudRole> Roles { get; } = new();
+    public ObservableCollection<CloudPermission> Permissions { get; } = new();
 
     public DashboardViewModel(ScanService scanService, IScanResultStore resultStore, ICloudInventoryStore inventoryStore)
     {
@@ -125,6 +128,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         var findings = await _resultStore.GetRecentFindingsAsync();
         var inventory = await _inventoryStore.GetSummaryAsync();
         ReplaceFindings(findings);
+        ReplaceCollection(Principals, await _inventoryStore.GetPrincipalsAsync());
+        ReplaceCollection(Roles, await _inventoryStore.GetRolesAsync());
+        ReplaceCollection(Permissions, await _inventoryStore.GetPermissionsAsync());
         TotalCloudAccounts = inventory.AccountCount;
         PrivilegedIdentities = inventory.PrincipalCount;
         StatusMessage = findings.Count == 0
@@ -162,6 +168,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         await _resultStore.ReplaceFindingsAsync(findings);
         await _inventoryStore.ReplaceInventoryAsync(accounts, principals, roles, permissions);
         ReplaceFindings(findings);
+        ReplaceCollection(Principals, principals);
+        ReplaceCollection(Roles, roles);
+        ReplaceCollection(Permissions, permissions);
         StatusMessage = $"Last scan completed at {DateTime.Now:g}. Found {findings.Count} risk finding(s).";
     }
 
@@ -171,6 +180,15 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         foreach (var finding in findings)
         {
             Findings.Add(finding);
+        }
+    }
+
+    private static void ReplaceCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)
+    {
+        target.Clear();
+        foreach (var item in source)
+        {
+            target.Add(item);
         }
     }
 
