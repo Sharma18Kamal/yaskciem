@@ -36,7 +36,29 @@ Install the following tools:
 
 The cloud CLIs are required for live discovery. The automated tests use deterministic fake command responses and do not require cloud credentials.
 
-## 3. Authenticate cloud providers
+## 3. Install YASK-CIEM
+
+For the easiest local Windows installation, run PowerShell from the repository root:
+
+```powershell
+.\scripts\install-windows-user.ps1
+```
+
+This installs the latest build under:
+
+```text
+%LocalAppData%\Programs\YASK-CIEM
+```
+
+It also creates a `YASK-CIEM` shortcut in the current user's Start Menu. This installation does not require administrator rights or MSIX certificate trust. It preserves application data under `%LocalAppData%\YASK-CIEM`.
+
+Open **Start**, search for **YASK-CIEM**, and launch it after completing the provider setup below.
+
+For a signed MSIX installation, see [Windows installer instructions](../../installer/README.md). A development-signed MSIX requires certificate trust and normally needs an administrator PowerShell window.
+
+## 4. Authenticate cloud providers
+
+YASK-CIEM does not display cloud username/password login forms in the dashboard. It securely uses the official cloud CLI sessions already configured on Windows. Authenticate each provider before opening the app or before clicking **Scan now**.
 
 Authenticate only against accounts that the application is allowed to inspect. The application uses read-only discovery commands.
 
@@ -66,7 +88,7 @@ gcloud projects list
 
 If a CLI is missing or not authenticated, YASK-CIEM reports that provider as unavailable instead of terminating the scan.
 
-## 4. Restore dependencies
+## 5. Restore dependencies
 
 From the repository root:
 
@@ -76,7 +98,7 @@ dotnet restore .\CloudEntitle.sln --configfile .\.nuget\NuGet.Config
 
 The repository NuGet configuration is required because it defines the package source used by the solution.
 
-## 5. Run the automated tests
+## 6. Run the automated tests
 
 ```powershell
 dotnet test .\CloudEntitle.sln --configuration Release --no-restore
@@ -84,7 +106,7 @@ dotnet test .\CloudEntitle.sln --configuration Release --no-restore
 
 A successful run reports zero failed tests.
 
-## 6. Run the desktop application from source
+## 7. Run the desktop application from source
 
 ```powershell
 dotnet run --project .\src\CloudEntitle.Desktop\CloudEntitle.Desktop.csproj --configuration Release --no-restore
@@ -98,7 +120,7 @@ When the window opens:
 4. Review risk findings, identities, roles, and permissions in the tabs.
 5. Use `Export JSON` or `Export CSV` to save the current findings.
 
-## 7. Create a publishable Windows artifact
+## 8. Create a publishable Windows artifact
 
 For provider-specific Azure, AWS, and GCP execution steps, see [Provider Execution Guide](../cloud/provider-execution.md).
 
@@ -124,7 +146,7 @@ Custom options are supported:
 
 MSI/MSIX packaging and code signing are not included yet. Follow [the installer handoff](../../installer/README.md) for those release steps.
 
-## 8. Data and report locations
+## 9. Data and report locations
 
 The application stores local data under:
 
@@ -140,7 +162,7 @@ This includes:
 
 Do not manually edit these files while the application is running.
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 ### Restore fails
 
@@ -159,6 +181,20 @@ az account show
 aws sts get-caller-identity
 gcloud projects list
 ```
+
+If these commands work in the same Windows user account that launches YASK-CIEM, close and reopen the application, then click **Scan now**. The dashboard status message will identify any provider whose CLI is missing or not authenticated.
+
+### I cannot find a Login button
+
+There is no separate Login button in the current release. Use the provider commands in section 4:
+
+```powershell
+az login
+aws configure
+gcloud auth login
+```
+
+These commands open the provider's official browser or credential flow. YASK-CIEM never asks for or stores cloud passwords in its own UI.
 
 ### The application opens but shows no findings
 
