@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using CloudEntitle.Infrastructure.Persistence;
+using CloudEntitle.Infrastructure;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Application.Services;
 using CloudEntitle.Cloud.Aws;
@@ -49,7 +50,7 @@ public partial class MainWindow : Window
 
         var providers = new ICloudProvider[]
         {
-            new AzureProvider(),
+            new AzureProvider(new ProcessCloudCommandRunner(), useLiveDiscovery: true),
             new AwsProvider(),
             new GcpProvider()
         };

@@ -12,6 +12,19 @@ public interface ICloudProvider
     Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default);
 }
 
+public interface ICloudCommandRunner
+{
+    Task<CloudCommandResult> RunAsync(
+        string command,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record CloudCommandResult(int ExitCode, string StandardOutput, string StandardError)
+{
+    public bool IsSuccess => ExitCode == 0;
+}
+
 public interface IIdentityProvider
 {
     Task<IReadOnlyList<CloudPrincipal>> GetPrincipalsAsync(Guid accountId, CancellationToken cancellationToken = default);
