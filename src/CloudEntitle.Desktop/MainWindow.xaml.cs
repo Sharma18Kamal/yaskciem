@@ -51,8 +51,8 @@ public partial class MainWindow : Window
         var providers = new ICloudProvider[]
         {
             new AzureProvider(new ProcessCloudCommandRunner(), useLiveDiscovery: true),
-            new AwsProvider(),
-            new GcpProvider()
+            new AwsProvider(new ProcessCloudCommandRunner(), useLiveDiscovery: true),
+            new GcpProvider(new ProcessCloudCommandRunner(), useLiveDiscovery: true)
         };
 
         return (
@@ -146,6 +146,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     {
         var findings = await _resultStore.GetRecentFindingsAsync();
         var inventory = await _inventoryStore.GetSummaryAsync();
+        var unavailableProviders = await GetUnavailableProvidersAsync();
         _allFindings = findings;
         _allPrincipals = await _inventoryStore.GetPrincipalsAsync();
         ApplyProviderFilter();
@@ -153,9 +154,11 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         ReplaceCollection(Permissions, await _inventoryStore.GetPermissionsAsync());
         TotalCloudAccounts = inventory.AccountCount;
         PrivilegedIdentities = inventory.PrincipalCount;
-        StatusMessage = findings.Count == 0
-            ? "Ready to scan connected cloud providers."
-            : $"Loaded {findings.Count} finding(s) from the last scan.";
+        StatusMessage = unavailableProviders.Count == 0
+            ? findings.Count == 0
+                ? "Azure, AWS, and GCP tools are ready."
+                : $"Loaded {findings.Count} finding(s) from the last scan."
+            : $"Unavailable tools: {string.Join(", ", unavailableProviders)}. Install and authenticate them before scanning.";
     }
 
     private async Task ScanAsync()
@@ -166,10 +169,27 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         var principals = new List<CloudPrincipal>();
         var roles = new List<CloudRole>();
         var permissions = new List<CloudPermission>();
+        var unavailableProviders = new List<string>();
 
         foreach (var provider in _scanService.Providers)
         {
-            var providerAccounts = await provider.DiscoverAccountsAsync();
+            if (!await IsProviderReadyAsync(provider))
+            {
+                unavailableProviders.Add(provider.ProviderType.ToString());
+                continue;
+            }
+
+            IReadOnlyList<CloudAccount> providerAccounts;
+            try
+            {
+                providerAccounts = await provider.DiscoverAccountsAsync();
+            }
+            catch (Exception)
+            {
+                unavailableProviders.Add(provider.ProviderType.ToString());
+                continue;
+            }
+
             accounts.AddRange(providerAccounts);
 
             foreach (var account in providerAccounts)
@@ -192,7 +212,35 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         ApplyProviderFilter();
         ReplaceCollection(Roles, roles);
         ReplaceCollection(Permissions, permissions);
-        StatusMessage = $"Last scan completed at {DateTime.Now:g}. Found {findings.Count} risk finding(s).";
+        StatusMessage = unavailableProviders.Count == 0
+            ? $"Last scan completed at {DateTime.Now:g}. Found {findings.Count} risk finding(s)."
+            : $"Scan completed with unavailable tools ({string.Join(", ", unavailableProviders)}). Found {findings.Count} risk finding(s).";
+    }
+
+    private async Task<IReadOnlyList<string>> GetUnavailableProvidersAsync()
+    {
+        var unavailable = new List<string>();
+        foreach (var provider in _scanService.Providers)
+        {
+            if (!await IsProviderReadyAsync(provider))
+            {
+                unavailable.Add(provider.ProviderType.ToString());
+            }
+        }
+
+        return unavailable;
+    }
+
+    private static async Task<bool> IsProviderReadyAsync(ICloudProvider provider)
+    {
+        try
+        {
+            return await provider.TestConnectionAsync();
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private void ApplyProviderFilter()

@@ -1,5 +1,6 @@
 namespace CloudEntitle.Infrastructure;
 
+using System.ComponentModel;
 using System.Diagnostics;
 using CloudEntitle.Application.Interfaces;
 
@@ -25,7 +26,14 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
         }
 
         using var process = new Process { StartInfo = startInfo };
-        process.Start();
+        try
+        {
+            process.Start();
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        {
+            return new CloudCommandResult(-1, string.Empty, exception.Message);
+        }
 
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
