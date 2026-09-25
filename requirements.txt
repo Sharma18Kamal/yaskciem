@@ -1,0 +1,51 @@
+# YASK-CIEM project prerequisites
+# This project is defined as a Windows .NET 10 desktop application and is not a Python project.
+# The file keeps the agreed build and runtime prerequisites in one place for setup and CI.
+
+# Core toolchain
+# Install these in the Windows build environment before starting development.
+dotnet-sdk>=10.0.0
+git>=2.45.0
+powershell>=7.4.0
+
+# Cloud authentication and tooling
+azure-cli>=2.63.0
+aws-cli>=2.15.0
+gcloud>=500.0.0
+
+# .NET package families managed through NuGet in the .csproj files
+# Microsoft.EntityFrameworkCore
+# Microsoft.EntityFrameworkCore.Sqlite
+# Microsoft.EntityFrameworkCore.Design
+# Microsoft.Extensions.DependencyInjection
+# Microsoft.Extensions.Hosting
+# Microsoft.Extensions.Configuration
+# Microsoft.Extensions.Http
+# Serilog
+# Serilog.Extensions.Hosting
+# Serilog.Sinks.File
+# Serilog.Sinks.Console
+# Azure.Identity
+# Azure.ResourceManager
+# Azure.ResourceManager.Resources
+# Azure.ResourceManager.Authorization
+# AWSSDK.IdentityManagement
+# AWSSDK.SecurityToken
+# AWSSDK.S3
+# Google.Cloud.Iam.V1
+# Google.Cloud.ResourceManager.V3
+# Microsoft.AspNetCore.App
+# Microsoft.AspNetCore.Authentication.JwtBearer
+# System.Security.Cryptography.ProtectedData
+# CommunityToolkit.Mvvm
+
+# Security and reporting dependencies
+# WPF / UI stack
+# Microsoft.WindowsDesktop.App
+# Xceed.Wpf.Toolkit (optional for richer controls)
+
+# Validation notes
+# - No cloud secrets are stored in plaintext.
+# - Use Windows DPAPI / Credential Manager for credential storage.
+# - License validation must be remote and HTTPS-only.
+# - Read-only cloud APIs are required in v1.
