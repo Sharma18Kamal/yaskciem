@@ -4,6 +4,7 @@ using System.IO;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Application.Interfaces;
+using CloudEntitle.Analytics.Services;
 using CloudEntitle.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +35,7 @@ public partial class App : System.Windows.Application
 		new DbInitializer(databaseConfiguration).InitializeAsync().GetAwaiter().GetResult();
 		services.AddDbContextFactory<CloudEntitleDbContext>(options => options.UseSqlite(databaseConfiguration.ConnectionString));
 		services.AddSingleton<IDemoDataService, DemoDataService>();
+		services.AddSingleton<IAnalyticsService, AnalyticsService>();
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<IDialogService, DialogService>();

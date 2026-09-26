@@ -1,6 +1,8 @@
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.Analytics.Models;
+using CloudEntitle.Analytics.Services;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
@@ -116,19 +118,26 @@ public abstract class WorkspaceViewModel : ObservableObject
 public sealed class DashboardViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;
-    private DemoStatistics _statistics = new(0, 0, 0, 0, 0, 0, 0, null);
-    public DashboardViewModel(IDemoDataService demoData) { _demoData = demoData; _demoData.DataChanged += async (_, _) => await RefreshAsync(); }
+    private readonly IAnalyticsService _analytics;
+    private AnalyticsSnapshot _analyticsSnapshot = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
+    public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics) { _demoData = demoData; _analytics = analytics; _demoData.DataChanged += async (_, _) => await RefreshAsync(); _ = RefreshAsync(); }
     public override string Title => "Dashboard";
     public override string Subtitle => "A clear view of your cloud entitlement posture.";
-    public int CloudAccounts => _statistics.CloudAccounts;
-    public int Identities => _statistics.Identities;
-    public int Resources => _statistics.Resources;
-    public int Entitlements => _statistics.Entitlements;
-    public int PrivilegedIdentities => _statistics.PrivilegedIdentities;
-    public int RiskFindings => _statistics.RiskFindings;
-    public int CriticalFindings => _statistics.CriticalFindings;
-    public string LastScan => _statistics.LastScan?.ToLocalTime().ToString("g") ?? "No scans yet";
-    private async Task RefreshAsync() { _statistics = (await _demoData.GetSnapshotAsync()).Statistics; OnPropertyChanged(nameof(CloudAccounts)); OnPropertyChanged(nameof(Identities)); OnPropertyChanged(nameof(Resources)); OnPropertyChanged(nameof(Entitlements)); OnPropertyChanged(nameof(PrivilegedIdentities)); OnPropertyChanged(nameof(RiskFindings)); OnPropertyChanged(nameof(CriticalFindings)); OnPropertyChanged(nameof(LastScan)); }
+    public int CloudAccounts => _analyticsSnapshot.CloudAccounts;
+    public int Identities => _analyticsSnapshot.Identities;
+    public int Resources => _analyticsSnapshot.Resources;
+    public int Entitlements => _analyticsSnapshot.Entitlements;
+    public int PrivilegedIdentities => _analyticsSnapshot.PrivilegedIdentities;
+    public int RiskFindings => _analyticsSnapshot.RiskFindings;
+    public int CriticalFindings => _analyticsSnapshot.CriticalFindings;
+    public int HighFindings => _analyticsSnapshot.HighFindings;
+    public int DormantIdentities => _analyticsSnapshot.DormantIdentities;
+    public int ExternalIdentities => _analyticsSnapshot.ExternalIdentities;
+    public string LastScan => _analyticsSnapshot.LastScan?.ToLocalTime().ToString("g") ?? "No scans yet";
+    public IReadOnlyList<AnalyticsMetric> FindingsByProvider => _analyticsSnapshot.FindingsByProvider;
+    public IReadOnlyList<AnalyticsMetric> FindingsBySeverity => _analyticsSnapshot.FindingsBySeverity;
+    public IReadOnlyList<AnalyticsMetric> AccessByDecision => _analyticsSnapshot.AccessByDecision;
+    private async Task RefreshAsync() { _analyticsSnapshot = _analytics.Calculate(await _demoData.GetSnapshotAsync()); foreach (var property in new[] { nameof(CloudAccounts), nameof(Identities), nameof(Resources), nameof(Entitlements), nameof(PrivilegedIdentities), nameof(RiskFindings), nameof(CriticalFindings), nameof(HighFindings), nameof(DormantIdentities), nameof(ExternalIdentities), nameof(LastScan), nameof(FindingsByProvider), nameof(FindingsBySeverity), nameof(AccessByDecision) }) OnPropertyChanged(property); }
 }
 public sealed class CloudAccountsViewModel : WorkspaceViewModel { public CloudAccountsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Cloud Accounts"; public override string Subtitle => "Connect read-only cloud inventory sources when ready."; }
 public sealed class IdentitiesViewModel : WorkspaceViewModel { public IdentitiesViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Identities"; public override string Subtitle => "Review users, groups, service identities, and privilege signals."; }

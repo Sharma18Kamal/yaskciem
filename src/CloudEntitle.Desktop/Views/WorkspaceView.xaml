@@ -4,6 +4,7 @@
              xmlns:vm="clr-namespace:CloudEntitle.Desktop.ViewModels">
     <UserControl.Resources>
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
+            <StackPanel>
             <UniformGrid Columns="2" Rows="4">
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CLOUD ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CloudAccounts}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="IDENTITIES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding Identities}" Style="{StaticResource CardValue}"/></StackPanel></Border>
@@ -14,6 +15,13 @@
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL FINDINGS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CriticalFindings}" Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="LAST SCAN" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding LastScan}" Foreground="{StaticResource PrimaryBrush}" FontSize="18" FontWeight="SemiBold" Margin="0,12,0,0"/></StackPanel></Border>
             </UniformGrid>
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="RISK BY PROVIDER" Style="{StaticResource CardLabel}"/><ItemsControl ItemsSource="{Binding FindingsByProvider}" Margin="0,10,0,0"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,3"><TextBlock Text="{Binding Label}" Foreground="{StaticResource PrimaryBrush}"/><TextBlock Text="{Binding Value}" DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}"/></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+                <Border Grid.Column="1" Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="RISK BY SEVERITY" Style="{StaticResource CardLabel}"/><ItemsControl ItemsSource="{Binding FindingsBySeverity}" Margin="0,10,0,0"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,3"><TextBlock Text="{Binding Label}" Foreground="{StaticResource PrimaryBrush}"/><TextBlock Text="{Binding Value}" DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}"/></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+                <Border Grid.Column="2" Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="ACCESS DECISIONS" Style="{StaticResource CardLabel}"/><ItemsControl ItemsSource="{Binding AccessByDecision}" Margin="0,10,0,0"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,3"><TextBlock Text="{Binding Label}" Foreground="{StaticResource PrimaryBrush}"/><TextBlock Text="{Binding Value}" DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}"/></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+            </Grid>
+            </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ResourcesViewModel}">
             <StackPanel><TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search resources"/><ContentControl Content="{Binding}"/></StackPanel>

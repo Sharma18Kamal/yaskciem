@@ -3,6 +3,8 @@ using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.Analytics.Models;
+using CloudEntitle.Analytics.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -15,6 +17,7 @@ public sealed class NavigationTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<IDemoDataService, NoopDemoDataService>();
+        services.AddSingleton<IAnalyticsService, NoopAnalyticsService>();
         services.AddTransient<DashboardViewModel>();
         services.AddTransient<CloudAccountsViewModel>();
         services.AddTransient<IdentitiesViewModel>();
@@ -43,6 +46,7 @@ public sealed class NavigationTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<IDemoDataService, NoopDemoDataService>();
+        services.AddSingleton<IAnalyticsService, NoopAnalyticsService>();
         services.AddTransient<DashboardViewModel>();
         services.AddSingleton<INavigationService, NavigationService>();
         using var provider = services.BuildServiceProvider();
@@ -62,5 +66,10 @@ public sealed class NavigationTests
         public Task<DemoStatistics> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DemoStatistics(0, 0, 0, 0, 0, 0, 0, null));
         public Task ResetAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<DemoSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DemoSnapshot(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(), Array.Empty<Entitlement>(), Array.Empty<EffectiveAccess>(), Array.Empty<RiskFindingModel>(), Array.Empty<RecommendationModel>(), Array.Empty<Scan>()));
+    }
+
+    private sealed class NoopAnalyticsService : IAnalyticsService
+    {
+        public AnalyticsSnapshot Calculate(DemoSnapshot snapshot, DateTime? asOf = null) => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
     }
 }
