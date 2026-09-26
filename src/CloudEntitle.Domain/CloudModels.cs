@@ -165,6 +165,28 @@ public enum RiskSeverity
     Informational
 }
 
+public enum RiskEvaluationState
+{
+    Confirmed,
+    Potential,
+    Unknown,
+    Unsupported
+}
+
+public enum RiskCategory
+{
+    Privilege,
+    ExcessiveAccess,
+    Scope,
+    Identity,
+    Dormancy,
+    ExternalAccess,
+    ServiceIdentity,
+    Policy,
+    AccessPathComplexity,
+    Configuration
+}
+
 public enum LicenseStatus
 {
     Trial,

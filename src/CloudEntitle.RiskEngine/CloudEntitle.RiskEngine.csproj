@@ -8,6 +8,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CloudEntitle.Domain\CloudEntitle.Domain.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Normalization\CloudEntitle.Normalization.csproj" />
+    <ProjectReference Include="..\CloudEntitle.EffectiveAccess\CloudEntitle.EffectiveAccess.csproj" />
+    <ProjectReference Include="..\CloudEntitle.AccessPath\CloudEntitle.AccessPath.csproj" />
+    <PackageReference Include="Serilog" Version="4.2.0" />
   </ItemGroup>
 
 </Project>

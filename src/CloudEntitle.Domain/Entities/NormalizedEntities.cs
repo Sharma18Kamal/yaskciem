@@ -145,6 +145,14 @@ public class RiskFindingModel
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? ResolvedAt { get; set; }
+    public Guid? PermissionId { get; set; }
+    public Guid? AccessPathId { get; set; }
+    public RiskEvaluationState EvaluationState { get; set; } = RiskEvaluationState.Unknown;
+    public RiskCategory Category { get; set; } = RiskCategory.Configuration;
+    public string RuleVersion { get; set; } = "1.0";
+    public string Fingerprint { get; set; } = string.Empty;
+    public DateTime DetectedAt { get; set; } = DateTime.UtcNow;
+    public DateTime LastEvaluatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public class RiskRuleModel

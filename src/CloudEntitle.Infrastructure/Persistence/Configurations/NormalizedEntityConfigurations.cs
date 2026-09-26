@@ -215,6 +215,10 @@ public sealed class NormalizedRiskFindingConfiguration : IEntityTypeConfiguratio
             value => JsonSerializer.Deserialize<CloudEntitle.Domain.ValueObjects.RiskEvidence>(value, (JsonSerializerOptions?)null)
                 ?? new CloudEntitle.Domain.ValueObjects.RiskEvidence("Evidence unavailable.", new Dictionary<string, string>()));
         builder.HasIndex(entity => new { entity.RuleId, entity.CloudAccountId, entity.Severity, entity.Status });
+        builder.HasIndex(entity => entity.Fingerprint);
+        builder.HasIndex(entity => new { entity.PrincipalId, entity.ResourceId, entity.EffectiveAccessId });
+        builder.Property(entity => entity.Title).IsRequired().HasMaxLength(250);
+        builder.Property(entity => entity.RuleVersion).HasMaxLength(20);
     }
 }
 

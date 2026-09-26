@@ -982,6 +982,12 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AccessPathId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("CloudAccountId")
                         .HasColumnType("TEXT");
 
@@ -995,11 +1001,27 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime>("DetectedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("EffectiveAccessId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("EvaluationState")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Evidence")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastEvaluatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PermissionId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("PrincipalId")
@@ -1017,6 +1039,11 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("RuleId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RuleVersion")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Severity")
                         .HasColumnType("INTEGER");
 
@@ -1025,12 +1052,17 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Title")
                         .IsRequired()
+                        .HasMaxLength(250)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Fingerprint");
+
+                    b.HasIndex("PrincipalId", "ResourceId", "EffectiveAccessId");
 
                     b.HasIndex("RuleId", "CloudAccountId", "Severity", "Status");
 
