@@ -7,6 +7,13 @@ public enum CloudProviderType
     Gcp
 }
 
+public enum CloudProvider
+{
+    Azure,
+    Aws,
+    Gcp
+}
+
 public enum ConnectionStatus
 {
     Disconnected,
@@ -19,10 +26,95 @@ public enum IdentityType
 {
     User,
     Group,
+    ServicePrincipal,
     ServiceAccount,
     ManagedIdentity,
     Role,
+    Application,
     Unknown
+}
+
+public enum AccountType
+{
+    Tenant,
+    ManagementGroup,
+    Subscription,
+    AwsOrganization,
+    AwsAccount,
+    GcpOrganization,
+    Folder,
+    Project
+}
+
+public enum AssignmentType
+{
+    Direct,
+    Group,
+    Inherited,
+    Policy,
+    Role,
+    Application
+}
+
+public enum AccessType
+{
+    Allow,
+    Deny
+}
+
+public enum FindingStatus
+{
+    Open,
+    Resolved,
+    Accepted,
+    Ignored
+}
+
+public enum ResourceType
+{
+    Organization,
+    Account,
+    Subscription,
+    ResourceGroup,
+    Project,
+    Folder,
+    Resource,
+    Unknown
+}
+
+public enum IdentityStatus
+{
+    Active,
+    Inactive,
+    Disabled,
+    Unknown
+}
+
+public enum MembershipType
+{
+    Direct,
+    Inherited,
+    Dynamic,
+    Unknown
+}
+
+public enum AccessPathType
+{
+    Direct,
+    GroupBased,
+    Inherited,
+    RoleBased,
+    PolicyBased,
+    ApplicationBased
+}
+
+public enum ScanStatus
+{
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled
 }
 
 public enum RiskSeverity
@@ -55,6 +147,31 @@ public class CloudAccount
     public DateTime? LastScanAt { get; set; }
     public bool IsReadOnly { get; set; }
     public bool IsConnected => ConnectionStatus == ConnectionStatus.Connected;
+    public AccountType AccountType { get; set; } = AccountType.Subscription;
+    public string? ParentAccountId { get; set; }
+    public string? Description { get; set; }
+    public IdentityStatus Status { get; set; } = IdentityStatus.Unknown;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastScannedAt { get; set; }
+    public string? ExternalId
+    {
+        get => ExternalAccountId ?? SubscriptionId ?? ProjectId;
+        set => ExternalAccountId = value;
+    }
+    public CloudProvider Provider => this.CloudProvider switch
+    {
+        CloudProviderType.Azure => global::CloudEntitle.Domain.CloudProvider.Azure,
+        CloudProviderType.Aws => global::CloudEntitle.Domain.CloudProvider.Aws,
+        _ => global::CloudEntitle.Domain.CloudProvider.Gcp
+    };
+
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ExternalId))
+        {
+            throw new ArgumentException("CloudAccount requires an ExternalId.", nameof(ExternalId));
+        }
+    }
 }
 
 public class CloudSubscription
@@ -85,6 +202,16 @@ public class CloudResource
     public string? ResourceId { get; set; }
     public string? Scope { get; set; }
     public string? CloudRegion { get; set; }
+    public Guid CloudAccountId { get => AccountId; set => AccountId = value; }
+    public string ExternalId { get => ResourceId ?? string.Empty; set => ResourceId = value; }
+    public ResourceType ResourceType { get; set; } = ResourceType.Unknown;
+    public string? ParentResourceId { get; set; }
+    public string? ResourceUri { get; set; }
+    public string? Region { get => CloudRegion; set => CloudRegion = value; }
+    public string? Location { get; set; }
+    public Dictionary<string, string> Tags { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
 }
 
 public class CloudPrincipal
@@ -99,6 +226,22 @@ public class CloudPrincipal
     public bool IsActive { get; set; }
     public string? LastActivity { get; set; }
     public string? PrincipalId { get; set; }
+    public Guid CloudAccountId { get => AccountId; set => AccountId = value; }
+    public string ExternalId { get => PrincipalId ?? string.Empty; set => PrincipalId = value; }
+    public string DisplayName { get => Name; set => Name = value; }
+    public IdentityStatus Status { get => IsActive ? IdentityStatus.Active : IdentityStatus.Inactive; set => IsActive = value == IdentityStatus.Active; }
+    public bool IsExternal { get; set; }
+    public DateTime? LastActivityAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
+
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(DisplayName))
+        {
+            throw new ArgumentException("CloudPrincipal requires a DisplayName.", nameof(DisplayName));
+        }
+    }
 }
 
 public class CloudGroup
@@ -108,6 +251,10 @@ public class CloudGroup
     public string Name { get; set; } = string.Empty;
     public string? GroupId { get; set; }
     public string? ProviderPath { get; set; }
+    public string? DisplayName { get => Name; set => Name = value ?? string.Empty; }
+    public string? Description { get; set; }
+    public IdentityStatus Status { get; set; } = IdentityStatus.Unknown;
+    public List<Guid> MemberPrincipalIds { get; set; } = new();
 }
 
 public class CloudServiceAccount
@@ -128,6 +275,10 @@ public class CloudRole
     public string RoleId { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? Scope { get; set; }
+    public string ExternalId { get => RoleId; set => RoleId = value; }
+    public bool IsPrivileged { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
 }
 
 public class CloudPermission
@@ -139,6 +290,20 @@ public class CloudPermission
     public string? Resource { get; set; }
     public string? Scope { get; set; }
     public string? Source { get; set; }
+    public string? Provider { get; set; }
+    public string? Service { get; set; }
+    public string? ActionName { get => Action; set => Action = value; }
+    public string? ResourcePattern { get => Resource; set => Resource = value; }
+    public AccessType AccessType { get; set; } = AccessType.Allow;
+    public string? Description { get; set; }
+
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ActionName))
+        {
+            throw new ArgumentException("CloudPermission requires an Action.", nameof(ActionName));
+        }
+    }
 }
 
 public class CloudPolicy
@@ -149,6 +314,10 @@ public class CloudPolicy
     public string? PolicyType { get; set; }
     public string? Document { get; set; }
     public bool IsManaged { get; set; }
+    public string? ExternalId { get; set; }
+    public string? DocumentVersion { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
 }
 
 public class RoleAssignment
@@ -184,6 +353,27 @@ public class RiskFinding
     public string Evidence { get; set; } = string.Empty;
     public string Recommendation { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid RuleId { get; set; }
+    public Guid CloudAccountId { get; set; }
+    public Guid PrincipalId { get; set; }
+    public Guid? ResourceId { get; set; }
+    public Guid? EffectiveAccessId { get; set; }
+    public FindingStatus Status { get; set; } = FindingStatus.Open;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ResolvedAt { get; set; }
+
+    public void Validate()
+    {
+        if (RuleId == Guid.Empty)
+        {
+            throw new ArgumentException("RiskFinding requires a RuleId.", nameof(RuleId));
+        }
+
+        if (!Enum.IsDefined(Severity))
+        {
+            throw new ArgumentException("RiskFinding requires a valid Severity.", nameof(Severity));
+        }
+    }
 }
 
 public class RiskRule
@@ -195,6 +385,10 @@ public class RiskRule
     public RiskSeverity Severity { get; set; }
     public bool IsEnabled { get; set; } = true;
     public string RuleExpression { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public bool Enabled { get => IsEnabled; set => IsEnabled = value; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
 }
 
 public class Recommendation
@@ -204,4 +398,10 @@ public class Recommendation
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string Remediation { get; set; } = string.Empty;
+    public Guid RiskFindingId { get => FindingId; set => FindingId = value; }
+    public string CurrentState { get; set; } = string.Empty;
+    public string SuggestedState { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public int Priority { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

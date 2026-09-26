@@ -49,6 +49,17 @@ public class CloudEntitleDbContext : DbContext
             entity.Property(x => x.LastActivity).HasMaxLength(200);
         });
 
+        modelBuilder.Entity<CloudResource>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            entity.Property(x => x.Type).HasMaxLength(200);
+            entity.Property(x => x.ResourceId).HasMaxLength(500);
+            entity.Property(x => x.Scope).HasMaxLength(500);
+            entity.Property(x => x.CloudRegion).HasMaxLength(100);
+            entity.Ignore(x => x.Tags);
+        });
+
         modelBuilder.Entity<CloudRole>(entity =>
         {
             entity.HasKey(x => x.Id);
