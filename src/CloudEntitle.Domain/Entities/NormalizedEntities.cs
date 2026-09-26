@@ -178,6 +178,22 @@ public class RecommendationModel
     public string Reason { get; set; } = string.Empty;
     public int Priority { get; set; }
     public DateTime CreatedAt { get; set; }
+    public RecommendationType RecommendationType { get; set; }
+    public CloudProvider Provider { get; set; }
+    public Guid CloudAccountId { get; set; }
+    public Guid? PrincipalId { get; set; }
+    public Guid? ResourceId { get; set; }
+    public Guid? EffectiveAccessId { get; set; }
+    public Guid? AccessPathId { get; set; }
+    public Guid? EntitlementId { get; set; }
+    public string Changes { get; set; } = string.Empty;
+    public string Impact { get; set; } = string.Empty;
+    public string? Evidence { get; set; }
+    public RiskEvaluationState EvaluationState { get; set; } = RiskEvaluationState.Unknown;
+    public RecommendationImpactState ImpactState { get; set; } = RecommendationImpactState.UnknownImpact;
+    public RecommendationStatus Status { get; set; } = RecommendationStatus.New;
+    public string Fingerprint { get; set; } = string.Empty;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public class Scan

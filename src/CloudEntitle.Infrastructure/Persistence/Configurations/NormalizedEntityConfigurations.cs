@@ -237,6 +237,12 @@ public sealed class NormalizedRecommendationConfiguration : IEntityTypeConfigura
     {
         builder.HasKey(entity => entity.Id);
         builder.HasIndex(entity => new { entity.RiskFindingId, entity.Priority });
+        builder.HasIndex(entity => new { entity.RecommendationType, entity.Provider, entity.Status, entity.EvaluationState });
+        builder.HasIndex(entity => new { entity.RiskFindingId, entity.EffectiveAccessId, entity.AccessPathId });
+        builder.HasIndex(entity => entity.Fingerprint);
+        builder.Property(entity => entity.Changes).HasColumnType("TEXT");
+        builder.Property(entity => entity.Impact).HasColumnType("TEXT");
+        builder.Property(entity => entity.Evidence).HasColumnType("TEXT");
         builder.HasOne<RiskFindingModel>().WithMany().HasForeignKey(entity => entity.RiskFindingId).OnDelete(DeleteBehavior.Restrict);
     }
 }

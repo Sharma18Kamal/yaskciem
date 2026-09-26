@@ -21,6 +21,27 @@
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
             <StackPanel><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="APPLICATION" Style="{StaticResource CardLabel}"/><TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="0.1.0" Foreground="{StaticResource PrimaryBrush}" Margin="0,3,0,0"/><TextBlock Text="Data location" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="{Binding DataLocation}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="DEMO MODE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding DemoModeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,12,0,0" TextWrapping="Wrap"/><TextBlock Text="Synthetic Azure, AWS, and GCP data is stored through the normal SQLite pipeline. No cloud APIs or credentials are used." Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal"><Button Content="Load Demo Data" Command="{Binding LoadDemoDataCommand}" Style="{StaticResource PrimaryButton}"/><Button Content="Reset Demo Data" Command="{Binding ResetDemoDataCommand}" Style="{StaticResource QuietButton}" Margin="10,0,0,0"/></StackPanel></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="CLOUD CONNECTIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="Azure, AWS, and GCP connectors will be configured in later milestones." Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0" TextWrapping="Wrap"/></StackPanel></Border></StackPanel>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:RecommendationsViewModel}">
+            <StackPanel>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search recommendations"/>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="EVIDENCE-BACKED PROPOSALS" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="Recommendations are review-only. Approved does not mean implemented." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,12" TextWrapping="Wrap"/>
+                        <DataGrid ItemsSource="{Binding Recommendations}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Type" Binding="{Binding RecommendationType}" Width="180"/>
+                                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220"/>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="100"/>
+                                <DataGridTextColumn Header="State" Binding="{Binding EvaluationState}" Width="110"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
+                                <DataGridTextColumn Header="Current" Binding="{Binding CurrentState}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:WorkspaceViewModel}">
             <Border Style="{StaticResource EmptyStateCard}"><StackPanel><TextBlock Text="○" Foreground="{StaticResource AccentBrush}" FontSize="28" HorizontalAlignment="Center"/><TextBlock Text="{Binding DemoRecords}" Foreground="{StaticResource PrimaryBrush}" FontSize="30" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,12,0,0"/><TextBlock Text="{Binding DemoStatus}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Center" Margin="0,6,0,0"/><TextBlock Text="Demo Mode data uses the normalized CIEM model and SQLite persistence." Foreground="{StaticResource MutedBrush}" FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,0" TextWrapping="Wrap"/></StackPanel></Border>
         </DataTemplate>

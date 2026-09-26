@@ -940,6 +940,16 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AccessPathId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Changes")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -951,15 +961,53 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("EffectiveAccessId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("EntitlementId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EvaluationState")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Evidence")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Impact")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ImpactState")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("PrincipalId")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Priority")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Provider")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("RecommendationType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("RiskFindingId")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SuggestedState")
                         .IsRequired()
@@ -969,9 +1017,18 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
+                    b.HasIndex("Fingerprint");
+
                     b.HasIndex("RiskFindingId", "Priority");
+
+                    b.HasIndex("RiskFindingId", "EffectiveAccessId", "AccessPathId");
+
+                    b.HasIndex("RecommendationType", "Provider", "Status", "EvaluationState");
 
                     b.ToTable("NormalizedRecommendations");
                 });
@@ -1179,6 +1236,16 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AccessPathId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Changes")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -1190,22 +1257,60 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("EffectiveAccessId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("EntitlementId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EvaluationState")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Evidence")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("FindingId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Impact")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ImpactState")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("PrincipalId")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Priority")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Provider")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("RecommendationType")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Remediation")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("RiskFindingId")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SuggestedState")
                         .IsRequired()
@@ -1213,6 +1318,9 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Title")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

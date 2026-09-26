@@ -34,6 +34,7 @@ public partial class App : System.Windows.Application
 		new DbInitializer(databaseConfiguration).InitializeAsync().GetAwaiter().GetResult();
 		services.AddDbContextFactory<CloudEntitleDbContext>(options => options.UseSqlite(databaseConfiguration.ConnectionString));
 		services.AddSingleton<IDemoDataService, DemoDataService>();
+		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<IDialogService, DialogService>();
 		services.AddSingleton<MainWindowViewModel>();

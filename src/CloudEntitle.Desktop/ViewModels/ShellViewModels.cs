@@ -1,5 +1,6 @@
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Application.Interfaces;
+using CloudEntitle.Domain.Entities;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
@@ -135,7 +136,18 @@ public sealed class ResourcesViewModel : WorkspaceViewModel { public ResourcesVi
 public sealed class EntitlementsViewModel : WorkspaceViewModel { public EntitlementsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Entitlements"; public override string Subtitle => "Understand which roles, policies, and permissions are granted."; }
 public sealed class EffectiveAccessViewModel : WorkspaceViewModel { public EffectiveAccessViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Effective Access"; public override string Subtitle => "Trace direct and inherited access paths."; }
 public sealed class RiskFindingsViewModel : WorkspaceViewModel { public RiskFindingsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Risk Findings"; public override string Subtitle => "Evidence-backed findings will appear here after analysis is enabled."; }
-public sealed class RecommendationsViewModel : WorkspaceViewModel { public RecommendationsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Recommendations"; public override string Subtitle => "Least-privilege recommendations will appear here."; }
+public sealed class RecommendationsViewModel : WorkspaceViewModel
+{
+    private readonly IRecommendationStore _store;
+    private string _searchText = string.Empty;
+    public RecommendationsViewModel(IDemoDataService demoData, IRecommendationStore store) : base(demoData) { _store = store; RefreshRecommendationsCommand = new AsyncRelayCommand(LoadAsync); _ = LoadAsync(); }
+    public override string Title => "Recommendations";
+    public override string Subtitle => "Review evidence-backed least-privilege proposals before any future remediation.";
+    public IReadOnlyList<RecommendationModel> Recommendations { get; private set; } = Array.Empty<RecommendationModel>();
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) RefreshRecommendationsCommand.Execute(null); } }
+    public AsyncRelayCommand RefreshRecommendationsCommand { get; }
+    private async Task LoadAsync() { IsLoading = true; ErrorMessage = null; try { Recommendations = await _store.GetAsync(SearchText); OnPropertyChanged(nameof(Recommendations)); } catch { ErrorMessage = "Unable to load recommendations."; } finally { IsLoading = false; } }
+}
 public sealed class ScanHistoryViewModel : WorkspaceViewModel { public ScanHistoryViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Scan History"; public override string Subtitle => "Review the history of completed and interrupted scans."; }
 public sealed class SettingsViewModel : WorkspaceViewModel
 {
