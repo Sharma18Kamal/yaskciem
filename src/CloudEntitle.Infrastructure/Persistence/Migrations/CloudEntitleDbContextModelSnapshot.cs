@@ -518,10 +518,32 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("EffectiveAccessId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EngineVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Evidence")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PathStatus")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("PathType")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("PermissionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("PrincipalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ResourceId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("TargetResourceId")
@@ -529,7 +551,49 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("EffectiveAccessId");
+
+                    b.HasIndex("Provider", "PrincipalId", "ResourceId", "PermissionId", "PathStatus");
+
                     b.ToTable("AccessPaths");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.AccessPathEdge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccessPathId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EvidenceReference")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FromNodeId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Metadata")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RelationshipType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ToNodeId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccessPathId", "FromNodeId", "ToNodeId")
+                        .IsUnique();
+
+                    b.ToTable("AccessPathEdges");
                 });
 
             modelBuilder.Entity("CloudEntitle.Domain.Entities.AccessPathNode", b =>
@@ -539,6 +603,16 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("AccessPathId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("EntityId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EvidenceReference")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Metadata")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
@@ -553,6 +627,9 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("Sequence")
                         .HasColumnType("INTEGER");
@@ -1263,6 +1340,15 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.ToTable("RoleAssignments");
                 });
 
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.AccessPathEdge", b =>
+                {
+                    b.HasOne("CloudEntitle.Domain.Entities.AccessPath", null)
+                        .WithMany("Edges")
+                        .HasForeignKey("AccessPathId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("CloudEntitle.Domain.Entities.AccessPathNode", b =>
                 {
                     b.HasOne("CloudEntitle.Domain.Entities.AccessPath", null)
@@ -1392,6 +1478,8 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CloudEntitle.Domain.Entities.AccessPath", b =>
                 {
+                    b.Navigation("Edges");
+
                     b.Navigation("Nodes");
                 });
 #pragma warning restore 612, 618

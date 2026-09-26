@@ -74,10 +74,18 @@ public class AccessPath
     public Guid PrincipalId { get; set; }
     public Guid CloudAccountId { get; set; }
     public Guid? TargetResourceId { get; set; }
+    public Guid? ResourceId { get; set; }
+    public Guid? PermissionId { get; set; }
     public AccessPathType PathType { get; set; }
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<AccessPathNode> Nodes { get; set; } = new();
+    public CloudProvider Provider { get; set; }
+    public Guid? EffectiveAccessId { get; set; }
+    public AccessPathStatus PathStatus { get; set; } = AccessPathStatus.Unknown;
+    public string? Evidence { get; set; }
+    public string? EngineVersion { get; set; }
+    public List<AccessPathEdge> Edges { get; set; } = new();
 }
 
 public class AccessPathNode
@@ -88,6 +96,22 @@ public class AccessPathNode
     public Guid NodeId { get; set; }
     public string Name { get; set; } = string.Empty;
     public int Sequence { get; set; }
+    public CloudProvider Provider { get; set; }
+    public Guid? EntityId { get; set; }
+    public string? EvidenceReference { get; set; }
+    public string? Metadata { get; set; }
+}
+
+public class AccessPathEdge
+{
+    public Guid Id { get; set; }
+    public Guid AccessPathId { get; set; }
+    public Guid FromNodeId { get; set; }
+    public Guid ToNodeId { get; set; }
+    public string RelationshipType { get; set; } = string.Empty;
+    public CloudProvider Provider { get; set; }
+    public string? EvidenceReference { get; set; }
+    public string? Metadata { get; set; }
 }
 
 public class ActivityRecord

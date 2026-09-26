@@ -107,10 +107,25 @@ public enum AccessPathType
 {
     Direct,
     GroupBased,
+    NestedGroup,
     Inherited,
     RoleBased,
     PolicyBased,
-    ApplicationBased
+    AssumedRole,
+    ServiceIdentity,
+    Conditional,
+    Mixed,
+    ApplicationBased,
+    Unknown
+}
+
+public enum AccessPathStatus
+{
+    Complete,
+    Partial,
+    Unknown,
+    Unsupported,
+    Invalid
 }
 
 public enum ScanStatus

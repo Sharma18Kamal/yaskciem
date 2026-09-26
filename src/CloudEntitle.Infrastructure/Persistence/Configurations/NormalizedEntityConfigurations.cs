@@ -161,6 +161,11 @@ public sealed class AccessPathConfiguration : IEntityTypeConfiguration<AccessPat
     {
         builder.HasKey(entity => entity.Id);
         builder.HasMany(entity => entity.Nodes).WithOne().HasForeignKey(entity => entity.AccessPathId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasMany(entity => entity.Edges).WithOne().HasForeignKey(entity => entity.AccessPathId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(entity => new { entity.Provider, entity.PrincipalId, entity.ResourceId, entity.PermissionId, entity.PathStatus });
+        builder.HasIndex(entity => entity.EffectiveAccessId);
+        builder.Property(entity => entity.Evidence).HasColumnType("TEXT");
+        builder.Property(entity => entity.EngineVersion).HasMaxLength(50);
     }
 }
 
@@ -172,6 +177,20 @@ public sealed class AccessPathNodeConfiguration : IEntityTypeConfiguration<Acces
         builder.HasIndex(entity => new { entity.AccessPathId, entity.Sequence }).IsUnique();
         builder.Property(entity => entity.NodeType).IsRequired().HasMaxLength(100);
         builder.Property(entity => entity.Name).IsRequired().HasMaxLength(300);
+        builder.Property(entity => entity.EvidenceReference).HasMaxLength(500);
+        builder.Property(entity => entity.Metadata).HasColumnType("TEXT");
+    }
+}
+
+public sealed class AccessPathEdgeConfiguration : IEntityTypeConfiguration<AccessPathEdge>
+{
+    public void Configure(EntityTypeBuilder<AccessPathEdge> builder)
+    {
+        builder.HasKey(entity => entity.Id);
+        builder.HasIndex(entity => new { entity.AccessPathId, entity.FromNodeId, entity.ToNodeId }).IsUnique();
+        builder.Property(entity => entity.RelationshipType).IsRequired().HasMaxLength(100);
+        builder.Property(entity => entity.EvidenceReference).HasMaxLength(500);
+        builder.Property(entity => entity.Metadata).HasColumnType("TEXT");
     }
 }
 

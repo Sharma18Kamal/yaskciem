@@ -32,6 +32,7 @@ public class CloudEntitleDbContext : DbContext
     public DbSet<EffectiveAccess> EffectiveAccesses => Set<EffectiveAccess>();
     public DbSet<AccessPath> AccessPaths => Set<AccessPath>();
     public DbSet<AccessPathNode> AccessPathNodes => Set<AccessPathNode>();
+    public DbSet<AccessPathEdge> AccessPathEdges => Set<AccessPathEdge>();
     public DbSet<ActivityRecord> ActivityRecords => Set<ActivityRecord>();
     public DbSet<RiskFindingModel> NormalizedRiskFindings => Set<RiskFindingModel>();
     public DbSet<RiskRuleModel> NormalizedRiskRules => Set<RiskRuleModel>();
