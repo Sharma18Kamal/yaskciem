@@ -53,7 +53,12 @@ public enum AssignmentType
     Inherited,
     Policy,
     Role,
-    Application
+    Application,
+    AssumedRole,
+    ServiceIdentity,
+    Dynamic,
+    Conditional,
+    Unknown
 }
 
 public enum AccessType
