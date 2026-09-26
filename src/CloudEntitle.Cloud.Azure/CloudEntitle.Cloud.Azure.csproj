@@ -9,6 +9,8 @@
   <ItemGroup>
     <ProjectReference Include="..\CloudEntitle.Application\CloudEntitle.Application.csproj" />
     <ProjectReference Include="..\CloudEntitle.Domain\CloudEntitle.Domain.csproj" />
+    <PackageReference Include="Azure.Identity" Version="1.13.2" />
+    <PackageReference Include="Azure.ResourceManager" Version="1.13.2" />
   </ItemGroup>
 
 </Project>

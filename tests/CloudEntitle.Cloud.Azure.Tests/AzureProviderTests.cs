@@ -44,6 +44,33 @@ public class AzureProviderTests
         Assert.Equal("/subscriptions/subscription-001", permissions[0].Scope);
     }
 
+    [Fact]
+    public async Task AzureProvider_ShouldReturnNormalizedCompletedScan()
+    {
+        var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);
+
+        var result = await provider.ScanAsync();
+
+        Assert.Equal(ScanStatus.Completed, result.Scan.Status);
+        Assert.NotEmpty(result.Accounts);
+        Assert.NotEmpty(result.Resources);
+        Assert.NotEmpty(result.Principals);
+        Assert.NotEmpty(result.RoleAssignments);
+        Assert.NotEmpty(result.Entitlements);
+    }
+
+    [Fact]
+    public async Task AzureProvider_ShouldHonorCancellation()
+    {
+        var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var result = await provider.ScanAsync(cancellationToken: cancellation.Token);
+
+        Assert.Equal(ScanStatus.Cancelled, result.Scan.Status);
+    }
+
     private sealed class FakeCommandRunner : ICloudCommandRunner
     {
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
