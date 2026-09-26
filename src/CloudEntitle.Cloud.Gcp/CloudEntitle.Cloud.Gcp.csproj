@@ -9,6 +9,9 @@
   <ItemGroup>
     <ProjectReference Include="..\CloudEntitle.Application\CloudEntitle.Application.csproj" />
     <ProjectReference Include="..\CloudEntitle.Domain\CloudEntitle.Domain.csproj" />
+    <PackageReference Include="Google.Apis.Auth" Version="1.72.0" />
+    <PackageReference Include="Google.Cloud.ResourceManager.V3" Version="2.6.0" />
+    <PackageReference Include="Google.Cloud.Iam.V1" Version="3.5.0" />
   </ItemGroup>
 
 </Project>

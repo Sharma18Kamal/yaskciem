@@ -3,6 +3,9 @@ namespace CloudEntitle.Cloud.Aws;
 using System.Text.Json;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain;
+using CloudEntitle.Domain.Entities;
+using CloudEntitle.Cloud.Aws.Mappers;
+using CloudEntitle.Cloud.Aws.Services;
 
 public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider
 {
@@ -86,6 +89,26 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     public Task<IReadOnlyList<CloudRole>> GetRolesAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverRolesAsync(accountId, cancellationToken);
     public Task<IReadOnlyList<CloudResource>> GetResourcesAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudResource>>(Array.Empty<CloudResource>());
 
+    public async Task<IReadOnlyList<CloudGroup>> DiscoverGroupsAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery) return new[] { new CloudGroup { Id = Guid.NewGuid(), AccountId = accountId, Name = "AWS Demo Security Group", GroupId = "demo-group" } };
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-groups", "--output", "json" }, cancellationToken));
+        return document.RootElement.GetProperty("Groups").EnumerateArray().Select(group => new CloudGroup
+        {
+            Id = Guid.NewGuid(), AccountId = accountId, Name = group.TryGetProperty("GroupName", out var name) ? name.GetString() ?? "AWS group" : "AWS group", GroupId = group.TryGetProperty("GroupId", out var id) ? id.GetString() : null, ProviderPath = group.TryGetProperty("Path", out var path) ? path.GetString() : null
+        }).ToArray();
+    }
+
+    public async Task<IReadOnlyList<CloudPolicy>> DiscoverPoliciesAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery) return new[] { new CloudPolicy { Id = Guid.NewGuid(), AccountId = accountId, Name = "AWS Demo Policy", ExternalId = "demo-policy", PolicyType = "CustomerManaged", Document = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}" } };
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-policies", "--scope", "Local", "--output", "json" }, cancellationToken));
+        return document.RootElement.GetProperty("Policies").EnumerateArray().Select(policy => new CloudPolicy
+        {
+            Id = Guid.NewGuid(), AccountId = accountId, Name = policy.TryGetProperty("PolicyName", out var name) ? name.GetString() ?? "AWS policy" : "AWS policy", ExternalId = policy.TryGetProperty("Arn", out var arn) ? arn.GetString() : null, PolicyType = policy.TryGetProperty("PolicyType", out var type) ? type.GetString() : "CustomerManaged", Document = policy.TryGetProperty("Document", out var document) ? document.GetString() : null, DocumentVersion = policy.TryGetProperty("DefaultVersionId", out var version) ? version.GetString() : null, IsManaged = true
+        }).ToArray();
+    }
+
     private async Task<string> GetAwsOutputAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         var result = await RunAwsAsync(arguments, cancellationToken);
@@ -94,7 +117,75 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     }
 
     private Task<CloudCommandResult> RunAwsAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
-        => _commandRunner!.RunAsync("aws", arguments, cancellationToken);
+        => RunAwsWithRetryAsync(arguments, cancellationToken);
+
+    public async Task<AwsScanResult> ScanAsync(Guid? accountId = null, CancellationToken cancellationToken = default)
+    {
+        var startedAt = DateTime.UtcNow;
+        var accounts = new List<CloudAccount>();
+        var principals = new List<CloudPrincipal>();
+        var groups = new List<CloudGroup>();
+        var roles = new List<CloudRole>();
+        var policies = new List<CloudPolicy>();
+        var permissions = new List<CloudPermission>();
+        var entitlements = new List<Entitlement>();
+        var trusts = new List<AwsTrustRelationship>();
+        var errors = new List<string>();
+        try
+        {
+            accounts.AddRange(await DiscoverAccountsAsync(cancellationToken));
+            if (accountId.HasValue) accounts = accounts.Where(account => account.Id == accountId.Value).ToList();
+            foreach (var account in accounts)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    principals.AddRange(await DiscoverIdentitiesAsync(account.Id, cancellationToken));
+                    groups.AddRange(await DiscoverGroupsAsync(account.Id, cancellationToken));
+                    roles.AddRange(await DiscoverRolesAsync(account.Id, cancellationToken));
+                    policies.AddRange(await DiscoverPoliciesAsync(account.Id, cancellationToken));
+                    foreach (var policy in policies.Where(policy => policy.AccountId == account.Id && !string.IsNullOrWhiteSpace(policy.Document) && policy.Document!.TrimStart().StartsWith("{"))) permissions.AddRange(AwsPolicyMapper.MapPolicy(account.Id, policy.Name, policy.ExternalId, policy.Document!));
+                    foreach (var role in roles.Where(role => role.AccountId == account.Id))
+                    {
+                        var trust = await GetRoleTrustPolicyAsync(account, role, cancellationToken);
+                        trusts.AddRange(AwsPolicyMapper.MapTrustPrincipals(trust).Select(principal => new AwsTrustRelationship(principals.FirstOrDefault(item => item.PrincipalId == principal)?.Id ?? Guid.Empty, role.Id, principal, "AWS IAM AssumeRole trust policy")));
+                    }
+                    entitlements.AddRange(permissions.Where(permission => permission.AccountId == account.Id).Select(permission => new Entitlement { Id = Guid.NewGuid(), PermissionId = permission.Id, CloudAccountId = account.Id, AssignmentType = AssignmentType.Policy, GrantedAt = startedAt, Source = "AWS IAM policy" }));
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    errors.Add($"{account.Name}: {exception.Message}");
+                }
+            }
+
+            var scan = new Scan { Id = Guid.NewGuid(), CloudAccountId = accounts.FirstOrDefault()?.Id ?? Guid.Empty, StartedAt = startedAt, CompletedAt = DateTime.UtcNow, Status = errors.Count == accounts.Count && accounts.Count > 0 ? ScanStatus.Failed : ScanStatus.Completed, ItemsDiscovered = policies.Count + groups.Count, IdentitiesDiscovered = principals.Count, PermissionsDiscovered = permissions.Count, ErrorMessage = errors.Count == 0 ? null : string.Join(" | ", errors) };
+            return new AwsScanResult(scan, accounts, principals, groups, roles, policies, permissions, entitlements, trusts, errors);
+        }
+        catch (OperationCanceledException)
+        {
+            return new AwsScanResult(new Scan { Id = Guid.NewGuid(), CloudAccountId = accounts.FirstOrDefault()?.Id ?? Guid.Empty, StartedAt = startedAt, CompletedAt = DateTime.UtcNow, Status = ScanStatus.Cancelled, ErrorMessage = "AWS scan cancelled." }, accounts, principals, groups, roles, policies, permissions, entitlements, trusts, errors);
+        }
+    }
+
+    private async Task<string> GetRoleTrustPolicyAsync(CloudAccount account, CloudRole role, CancellationToken cancellationToken)
+    {
+        var result = await GetAwsOutputAsync(new[] { "iam", "get-role", "--role-name", role.Name, "--output", "json" }, cancellationToken);
+        using var document = JsonDocument.Parse(result);
+        return document.RootElement.TryGetProperty("Role", out var roleElement) && roleElement.TryGetProperty("AssumeRolePolicyDocument", out var policy) ? policy.GetString() ?? "{}" : "{}";
+    }
+
+    private async Task<CloudCommandResult> RunAwsWithRetryAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    {
+        CloudCommandResult? result = null;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            result = await _commandRunner!.RunAsync("aws", arguments, cancellationToken);
+            if (result.IsSuccess || attempt == 2) return result;
+            await Task.Delay(TimeSpan.FromMilliseconds(100 * Math.Pow(2, attempt)), cancellationToken);
+        }
+        return result!;
+    }
 
     private static IReadOnlyList<CloudAccount> MockAccounts() => new[] { new CloudAccount { Id = Guid.NewGuid(), Name = "AWS Demo Account", CloudProvider = CloudProviderType.Aws, ExternalAccountId = "123456789012", ConnectionStatus = ConnectionStatus.Connected, IsReadOnly = true } };
     private static IReadOnlyList<CloudPrincipal> MockIdentities(Guid accountId) => new[] { new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Aws, Name = "admin-user", IdentityType = IdentityType.User, IsPrivileged = true, IsActive = true } };
