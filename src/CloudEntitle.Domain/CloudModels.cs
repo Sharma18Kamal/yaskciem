@@ -122,6 +122,25 @@ public enum ScanStatus
     Cancelled
 }
 
+public enum AccessDecision
+{
+    Allow,
+    Deny,
+    Conditional,
+    NotApplicable,
+    Unknown,
+    Unsupported
+}
+
+public enum EvaluationStatus
+{
+    FullyEvaluated,
+    PartiallyEvaluated,
+    ConditionRequired,
+    Unsupported,
+    Invalid
+}
+
 public enum RiskSeverity
 {
     Critical,

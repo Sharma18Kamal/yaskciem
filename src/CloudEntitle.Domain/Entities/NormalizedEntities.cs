@@ -57,8 +57,15 @@ public class EffectiveAccess
     public Guid? AccessPathId { get; set; }
     public bool IsDirect { get; set; }
     public bool IsInherited { get; set; }
+    public bool IsConditional { get; set; }
     public bool IsPrivileged { get; set; }
     public DateTime CalculatedAt { get; set; }
+    public CloudProvider Provider { get; set; }
+    public AccessDecision Decision { get; set; } = AccessDecision.Unknown;
+    public EvaluationStatus EvaluationStatus { get; set; } = EvaluationStatus.Invalid;
+    public string? AccessSource { get; set; }
+    public string? Evidence { get; set; }
+    public string? EvaluationDetails { get; set; }
 }
 
 public class AccessPath

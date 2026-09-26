@@ -142,7 +142,11 @@ public sealed class EffectiveAccessConfiguration : IEntityTypeConfiguration<Effe
     {
         builder.HasKey(entity => entity.Id);
         builder.HasIndex(entity => new { entity.PrincipalId, entity.CloudAccountId, entity.ResourceId });
-        builder.HasIndex(entity => new { entity.PermissionId, entity.IsPrivileged });
+        builder.HasIndex(entity => new { entity.PermissionId, entity.IsPrivileged, entity.Decision });
+        builder.HasIndex(entity => new { entity.CloudAccountId, entity.EvaluationStatus, entity.CalculatedAt });
+        builder.Property(entity => entity.AccessSource).HasMaxLength(200);
+        builder.Property(entity => entity.Evidence).HasColumnType("TEXT");
+        builder.Property(entity => entity.EvaluationDetails).HasColumnType("TEXT");
         builder.HasOne<CloudPrincipal>().WithMany().HasForeignKey(entity => entity.PrincipalId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<CloudPermission>().WithMany().HasForeignKey(entity => entity.PermissionId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<CloudResource>().WithMany().HasForeignKey(entity => entity.ResourceId).OnDelete(DeleteBehavior.Restrict);

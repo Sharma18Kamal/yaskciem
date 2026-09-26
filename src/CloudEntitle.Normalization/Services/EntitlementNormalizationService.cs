@@ -72,7 +72,7 @@ public abstract class ProviderEntitlementNormalizer : IEntitlementNormalizer
             var condition = conditional ? new NormalizedCondition(record.ConditionTitle, record.ConditionExpression, "Unknown", record.ConditionExpression) : null;
             var key = string.Join('|', Provider, record.CloudAccountId, record.PrincipalId, record.RoleId, record.PolicyId, record.PermissionId, record.Scope, record.ResourcePattern, normalizedAccess, record.AssignmentType, record.ConditionExpression);
             if (entitlements.ContainsKey(key)) continue;
-            entitlements[key] = new NormalizedEntitlement(GuidUtility.Create(GuidUtility.Namespace, key), Provider, record.CloudAccountId, record.PrincipalId, null, record.RoleId, record.PolicyId, record.PermissionId, scope, record.AssignmentType, normalizedAccess, !record.IsInherited && record.AssignmentType is AssignmentType.Direct or AssignmentType.Role or AssignmentType.Policy, record.IsInherited, conditional, condition, status, evidence, source.CollectedAt, null);
+            entitlements[key] = new NormalizedEntitlement(GuidUtility.Create(GuidUtility.Namespace, key), Provider, record.CloudAccountId, record.PrincipalId, null, record.RoleId, record.PolicyId, record.PermissionId, scope, record.AssignmentType, normalizedAccess, !record.IsInherited && record.AssignmentType is AssignmentType.Direct or AssignmentType.Role or AssignmentType.Policy, record.IsInherited, conditional, condition, status, evidence, source.CollectedAt, null, record.ResourcePattern);
         }
 
         return Task.FromResult(new NormalizationResult(source.Principals, source.Roles, source.Policies, source.Permissions, entitlements.Values.ToArray(), warnings, errors, new(processed, entitlements.Count, partial, 0, failed)));

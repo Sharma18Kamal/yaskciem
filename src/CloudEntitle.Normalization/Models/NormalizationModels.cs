@@ -64,7 +64,8 @@ public sealed record NormalizedEntitlement(
     NormalizationStatus Status,
     ProviderEvidence Evidence,
     DateTime CreatedAt,
-    DateTime? ExpiresAt);
+    DateTime? ExpiresAt,
+    string? ResourcePattern = null);
 
 public sealed record ProviderAuthorizationRecord(
     string SourceId,

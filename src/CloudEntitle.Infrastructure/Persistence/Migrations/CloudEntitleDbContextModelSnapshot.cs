@@ -653,6 +653,10 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("AccessPathId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AccessSource")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("AccessType")
                         .HasColumnType("INTEGER");
 
@@ -664,6 +668,21 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("CloudAccountId")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("Decision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EvaluationDetails")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EvaluationStatus")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Evidence")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsConditional")
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsDirect")
                         .HasColumnType("INTEGER");
@@ -683,6 +702,9 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("PrincipalId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid?>("ResourceId")
                         .HasColumnType("TEXT");
 
@@ -700,7 +722,9 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("RoleId");
 
-                    b.HasIndex("PermissionId", "IsPrivileged");
+                    b.HasIndex("CloudAccountId", "EvaluationStatus", "CalculatedAt");
+
+                    b.HasIndex("PermissionId", "IsPrivileged", "Decision");
 
                     b.HasIndex("PrincipalId", "CloudAccountId", "ResourceId");
 
