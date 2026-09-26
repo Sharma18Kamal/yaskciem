@@ -1,0 +1,29 @@
+<UserControl x:Class="CloudEntitle.Desktop.Views.WorkspaceView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:CloudEntitle.Desktop.ViewModels">
+    <UserControl.Resources>
+        <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
+            <UniformGrid Columns="2" Rows="4">
+                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CLOUD ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CloudAccounts}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="IDENTITIES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding Identities}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="RESOURCES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding Resources}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="ENTITLEMENTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding Entitlements}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="PRIVILEGED IDENTITIES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding PrivilegedIdentities}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="RISK FINDINGS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding RiskFindings}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL FINDINGS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CriticalFindings}" Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="LAST SCAN" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding LastScan}" Foreground="{StaticResource PrimaryBrush}" FontSize="18" FontWeight="SemiBold" Margin="0,12,0,0"/></StackPanel></Border>
+            </UniformGrid>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ResourcesViewModel}">
+            <StackPanel><TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search resources"/><ContentControl Content="{Binding}"/></StackPanel>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+            <StackPanel><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="APPLICATION" Style="{StaticResource CardLabel}"/><TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="0.1.0" Foreground="{StaticResource PrimaryBrush}" Margin="0,3,0,0"/><TextBlock Text="Data location" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="{Binding DataLocation}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="CLOUD CONNECTIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="Azure, AWS, and GCP connectors will be configured in later milestones." Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0" TextWrapping="Wrap"/></StackPanel></Border></StackPanel>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:WorkspaceViewModel}">
+            <Border Style="{StaticResource EmptyStateCard}"><StackPanel><TextBlock Text="○" Foreground="{StaticResource AccentBrush}" FontSize="28" HorizontalAlignment="Center"/><TextBlock Text="No data available yet" Foreground="{StaticResource PrimaryBrush}" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,0"/><TextBlock Text="This screen is ready for the next CIEM milestone." Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Center" Margin="0,6,0,0"/></StackPanel></Border>
+        </DataTemplate>
+    </UserControl.Resources>
+    <ContentControl Content="{Binding}" />
+</UserControl>
