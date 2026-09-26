@@ -28,18 +28,13 @@ public partial class MainWindow : Window
 
     private static (ScanService ScanService, IScanResultStore ResultStore, ICloudInventoryStore InventoryStore, IReportService ReportService) CreateComposition()
     {
-        var dataDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "YASK-CIEM");
-        Directory.CreateDirectory(dataDirectory);
-
-        var databasePath = Path.Combine(dataDirectory, "yask-ciem.db");
+        var databaseConfiguration = new DatabaseConfiguration();
         var options = new DbContextOptionsBuilder<CloudEntitleDbContext>()
-            .UseSqlite($"Data Source={databasePath}")
+            .UseSqlite(databaseConfiguration.ConnectionString)
             .Options;
 
+        new DbInitializer(databaseConfiguration).InitializeAsync().GetAwaiter().GetResult();
         using var context = new CloudEntitleDbContext(options);
-        context.Database.EnsureCreated();
 
         var rules = context.RiskRules.ToList();
         if (rules.Count == 0)

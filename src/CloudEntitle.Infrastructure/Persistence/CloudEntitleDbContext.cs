@@ -1,6 +1,7 @@
 namespace CloudEntitle.Infrastructure.Persistence;
 
 using CloudEntitle.Domain;
+using CloudEntitle.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 public class CloudEntitleDbContext : DbContext
@@ -25,6 +26,18 @@ public class CloudEntitleDbContext : DbContext
     public DbSet<RiskFinding> RiskFindings => Set<RiskFinding>();
     public DbSet<RiskRule> RiskRules => Set<RiskRule>();
     public DbSet<Recommendation> Recommendations => Set<Recommendation>();
+    public DbSet<Entitlement> Entitlements => Set<Entitlement>();
+    public DbSet<PolicyAssignment> PolicyAssignments => Set<PolicyAssignment>();
+    public DbSet<GroupMembership> GroupMemberships => Set<GroupMembership>();
+    public DbSet<EffectiveAccess> EffectiveAccesses => Set<EffectiveAccess>();
+    public DbSet<AccessPath> AccessPaths => Set<AccessPath>();
+    public DbSet<AccessPathNode> AccessPathNodes => Set<AccessPathNode>();
+    public DbSet<ActivityRecord> ActivityRecords => Set<ActivityRecord>();
+    public DbSet<RiskFindingModel> NormalizedRiskFindings => Set<RiskFindingModel>();
+    public DbSet<RiskRuleModel> NormalizedRiskRules => Set<RiskRuleModel>();
+    public DbSet<RecommendationModel> NormalizedRecommendations => Set<RecommendationModel>();
+    public DbSet<Scan> Scans => Set<Scan>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -47,17 +60,6 @@ public class CloudEntitleDbContext : DbContext
             entity.Property(x => x.Email).HasMaxLength(300);
             entity.Property(x => x.PrincipalId).HasMaxLength(200);
             entity.Property(x => x.LastActivity).HasMaxLength(200);
-        });
-
-        modelBuilder.Entity<CloudResource>(entity =>
-        {
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Name).IsRequired().HasMaxLength(200);
-            entity.Property(x => x.Type).HasMaxLength(200);
-            entity.Property(x => x.ResourceId).HasMaxLength(500);
-            entity.Property(x => x.Scope).HasMaxLength(500);
-            entity.Property(x => x.CloudRegion).HasMaxLength(100);
-            entity.Ignore(x => x.Tags);
         });
 
         modelBuilder.Entity<CloudRole>(entity =>
@@ -97,5 +99,7 @@ public class CloudEntitleDbContext : DbContext
             entity.Property(x => x.Description).HasMaxLength(1000);
             entity.Property(x => x.RuleExpression).IsRequired().HasMaxLength(500);
         });
+
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(CloudEntitleDbContext).Assembly);
     }
 }
