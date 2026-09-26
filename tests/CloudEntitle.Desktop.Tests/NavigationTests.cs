@@ -1,5 +1,8 @@
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
+using CloudEntitle.Application.Interfaces;
+using CloudEntitle.Domain;
+using CloudEntitle.Domain.Entities;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -11,6 +14,7 @@ public sealed class NavigationTests
     public void NavigationService_ShouldReuseViewModelsAndNavigateToEveryScreen()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<IDemoDataService, NoopDemoDataService>();
         services.AddTransient<DashboardViewModel>();
         services.AddTransient<CloudAccountsViewModel>();
         services.AddTransient<IdentitiesViewModel>();
@@ -38,6 +42,7 @@ public sealed class NavigationTests
     public void MainWindowViewModel_ShouldExposeCompleteNavigationSurface()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<IDemoDataService, NoopDemoDataService>();
         services.AddTransient<DashboardViewModel>();
         services.AddSingleton<INavigationService, NavigationService>();
         using var provider = services.BuildServiceProvider();
@@ -48,5 +53,14 @@ public sealed class NavigationTests
         Assert.Equal("Dashboard", viewModel.CurrentNavigationItem.Title);
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Effective Access");
         Assert.Equal("0.1.0", viewModel.ApplicationVersion);
+    }
+
+    private sealed class NoopDemoDataService : IDemoDataService
+    {
+        public event EventHandler? DataChanged { add { } remove { } }
+        public bool IsDemoMode => false;
+        public Task<DemoStatistics> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DemoStatistics(0, 0, 0, 0, 0, 0, 0, null));
+        public Task ResetAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<DemoSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DemoSnapshot(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(), Array.Empty<Entitlement>(), Array.Empty<EffectiveAccess>(), Array.Empty<RiskFindingModel>(), Array.Empty<RecommendationModel>(), Array.Empty<Scan>()));
     }
 }
