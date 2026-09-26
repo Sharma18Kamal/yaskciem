@@ -1,0 +1,50 @@
+There is no in-app Login button in the current release. YASK-CIEM uses the official cloud CLI login sessions.
+
+Windows installation
+
+Install prerequisites:
+winget install Microsoft.DotNet.SDK.9
+winget install Microsoft.AzureCLI
+winget install Amazon.AWSCLI
+winget install Google.CloudSDK
+
+
+Open PowerShell in YASK-CIEM
+
+Install the application and create the Start Menu shortcut:
+.\scripts\install-windows-user.ps1
+
+Open Start, search for YASK-CIEM, and launch it.
+
+Cloud login
+
+Azure:
+az login
+az account show
+
+AWS:
+
+aws configure
+aws sts get-caller-identity
+
+GCP:
+gcloud auth login
+gcloud auth application-default login
+gcloud projects list
+
+Close and reopen YASK-CIEM.
+
+Click Scan now. The dashboard status message will show which providers are available or unavailable.
+
+The application does not store cloud passwords. The CLI account must have read/list permissions for the cloud resources and IAM/RBAC data.
+
+
+The target PC also needs:
+
+.NET 9 Desktop Runtime
+Azure CLI, AWS CLI, and/or Google Cloud CLI
+Cloud CLI authentication configured
+
+
+
+
