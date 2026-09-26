@@ -1,5 +1,6 @@
 using CloudEntitle.Cloud.Aws;
 using CloudEntitle.Domain;
+using Xunit;
 
 namespace CloudEntitle.Cloud.Aws.Tests;
 
