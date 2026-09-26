@@ -12,16 +12,28 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
         CancellationToken cancellationToken = default)
     {
         var executable = ResolveExecutable(command);
+        var isAzureBatchLauncher = command == "az" && executable.IsBatchFile;
         var startInfo = new ProcessStartInfo
         {
-            FileName = executable.IsBatchFile ? "cmd.exe" : executable.Path,
+            FileName = isAzureBatchLauncher
+                ? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(executable.Path)!, "..", "python.exe"))
+                : executable.IsBatchFile ? "cmd.exe" : executable.Path,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
 
-        if (executable.IsBatchFile)
+        if (isAzureBatchLauncher)
+        {
+            startInfo.ArgumentList.Add("-IBm");
+            startInfo.ArgumentList.Add("azure.cli");
+            foreach (var argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+        }
+        else if (executable.IsBatchFile)
         {
             startInfo.ArgumentList.Add("/d");
             startInfo.ArgumentList.Add("/c");
