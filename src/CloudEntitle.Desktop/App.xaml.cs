@@ -28,7 +28,7 @@ public partial class App : System.Windows.Application
 		DispatcherUnhandledException += OnDispatcherUnhandledException;
 		AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
 		TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
-		Log.Information("CloudEntitle CIEM application started");
+		Log.Information("YASK-CIEM application started");
 
 		var services = new ServiceCollection();
 		var databaseConfiguration = new DatabaseConfiguration();
@@ -39,6 +39,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<IDialogService, DialogService>();
+		services.AddSingleton<ICloudAuthenticationLauncher, CloudAuthenticationLauncher>();
 		services.AddSingleton<MainWindowViewModel>();
 		services.AddTransient<DashboardViewModel>();
 		services.AddTransient<CloudAccountsViewModel>();
@@ -57,7 +58,7 @@ public partial class App : System.Windows.Application
 
 	protected override void OnExit(ExitEventArgs e)
 	{
-		Log.Information("CloudEntitle CIEM application stopped");
+		Log.Information("YASK-CIEM application stopped");
 		Log.CloseAndFlush();
 		_services?.Dispose();
 		base.OnExit(e);
@@ -66,7 +67,7 @@ public partial class App : System.Windows.Application
 	private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
 	{
 		Log.Error(e.Exception, "Unhandled UI exception");
-		MessageBox.Show("The application encountered an unexpected error. Details were written to the application log.", "CloudEntitle CIEM", MessageBoxButton.OK, MessageBoxImage.Error);
+		MessageBox.Show("The application encountered an unexpected error. Details were written to the application log.", "YASK-CIEM", MessageBoxButton.OK, MessageBoxImage.Error);
 		e.Handled = true;
 	}
 

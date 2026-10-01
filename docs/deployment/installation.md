@@ -24,16 +24,16 @@ Updates are checked on launch and in the background according to the feed settin
 
 Use this method if your organization supplied a signed `.msix` package but no App Installer feed.
 
-1. Confirm the publisher and signature are trusted by your organization. Do not bypass Windows publisher warnings.
+1. Confirm the publisher and signature are trusted by your organization. Do not bypass Windows publisher warnings. The locally generated `artifacts/msix/YASK-CIEM-1.0.0.5.msix` was signed with the local development certificate; it is suitable only on machines that trust that certificate, not as a production-distributed package.
 2. Double-click the `.msix` package and follow the App Installer prompts. Alternatively, open PowerShell in the download folder and run:
 
    ```powershell
-   Add-AppxPackage -Path .\YASK-CIEM-1.0.0.4.msix
+   Add-AppxPackage -Path .\YASK-CIEM-1.0.0.5.msix
    ```
 
 3. Launch YASK-CIEM from **Start**.
 
-If the release package has a different versioned filename, replace the example path with the exact `.msix` filename you downloaded.
+If a later release has a different versioned filename, replace the example path with the exact `.msix` filename you downloaded.
 
 A standalone MSIX does not provide automatic updates unless it is installed through an App Installer feed. Install newer releases using the organization’s published update instructions.
 

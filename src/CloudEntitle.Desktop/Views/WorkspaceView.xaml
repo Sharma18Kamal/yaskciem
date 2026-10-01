@@ -26,8 +26,34 @@
         <DataTemplate DataType="{x:Type vm:ResourcesViewModel}">
             <StackPanel><TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search resources"/><ContentControl Content="{Binding}"/></StackPanel>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:CloudAccountsViewModel}">
+            <StackPanel>
+                <TextBlock Text="CONNECT A CLOUD PROVIDER" Style="{StaticResource CardLabel}"/>
+                <TextBlock Text="Sign-in opens in the provider's CLI. Use organization-approved identities with read-only permissions; credentials stay with the CLI and are never entered into YASK-CIEM. Disconnect signs out of the shared CLI session and may affect other tools." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
+                <ItemsControl ItemsSource="{Binding Providers}">
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource SectionCard}" Margin="0,0,12,12">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" Foreground="{StaticResource PrimaryBrush}" FontSize="19" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding CliName}" Foreground="{StaticResource AccentBrush}" FontSize="11" Margin="0,6,0,0"/>
+                                    <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" MinHeight="38" Margin="0,10,0,12"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Connect" Command="{Binding ConnectCommand}" Style="{StaticResource PrimaryButton}" ToolTip="Run the provider's interactive sign-in command"/>
+                                        <Button Content="Disconnect" Command="{Binding DisconnectCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Sign out of this provider's shared CLI session"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="{Binding ConnectionGuidance}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
-            <StackPanel><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="APPLICATION" Style="{StaticResource CardLabel}"/><TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="0.1.0" Foreground="{StaticResource PrimaryBrush}" Margin="0,3,0,0"/><TextBlock Text="Data location" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="{Binding DataLocation}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="DEMO MODE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding DemoModeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,12,0,0" TextWrapping="Wrap"/><TextBlock Text="Synthetic Azure, AWS, and GCP data is stored through the normal SQLite pipeline. No cloud APIs or credentials are used." Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal"><Button Content="Load Demo Data" Command="{Binding LoadDemoDataCommand}" Style="{StaticResource PrimaryButton}"/><Button Content="Reset Demo Data" Command="{Binding ResetDemoDataCommand}" Style="{StaticResource QuietButton}" Margin="10,0,0,0"/></StackPanel></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="CLOUD CONNECTIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="Azure, AWS, and GCP connectors will be configured in later milestones." Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0" TextWrapping="Wrap"/></StackPanel></Border></StackPanel>
+            <StackPanel><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="APPLICATION" Style="{StaticResource CardLabel}"/><TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="0.1.0" Foreground="{StaticResource PrimaryBrush}" Margin="0,3,0,0"/><TextBlock Text="Data location" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="{Binding DataLocation}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="DEMO MODE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding DemoModeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,12,0,0" TextWrapping="Wrap"/><TextBlock Text="Synthetic Azure, AWS, and GCP data is stored through the normal SQLite pipeline. No cloud APIs or credentials are used." Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal"><Button Content="Load Demo Data" Command="{Binding LoadDemoDataCommand}" Style="{StaticResource PrimaryButton}"/><Button Content="Reset Demo Data" Command="{Binding ResetDemoDataCommand}" Style="{StaticResource QuietButton}" Margin="10,0,0,0"/></StackPanel></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="CLOUD CONNECTIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="Use Connect Cloud in the application header to authenticate with Azure, AWS, or Google Cloud." Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0" TextWrapping="Wrap"/></StackPanel></Border></StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RecommendationsViewModel}">
             <StackPanel>

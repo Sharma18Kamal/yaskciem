@@ -3,6 +3,7 @@ using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.Analytics.Models;
 using CloudEntitle.Analytics.Services;
+using CloudEntitle.Domain;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
@@ -49,11 +50,12 @@ public sealed class MainWindowViewModel : ObservableObject
         });
     }
 
-    public string ApplicationName => "CloudEntitle CIEM";
+    public string ApplicationName => "YASK-CIEM";
     public string ApplicationVersion => typeof(MainWindowViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";
     public string DatabaseStatus => "Connected";
-    public string CloudConnectionStatus => "Not connected";
+    public string CloudConnectionStatus => "Use Connect Cloud";
     public IReadOnlyList<NavigationItem> NavigationItems { get; }
+    public NavigationItem CloudAccountsNavigationItem => NavigationItems[1];
     public NavigationItem SettingsNavigationItem => NavigationItems[^1];
     public object CurrentViewModel { get => _currentViewModel; private set => SetProperty(ref _currentViewModel, value); }
     public NavigationItem CurrentNavigationItem { get => _currentNavigationItem; private set => SetProperty(ref _currentNavigationItem, value); }
@@ -139,7 +141,68 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public IReadOnlyList<AnalyticsMetric> AccessByDecision => _analyticsSnapshot.AccessByDecision;
     private async Task RefreshAsync() { _analyticsSnapshot = _analytics.Calculate(await _demoData.GetSnapshotAsync()); foreach (var property in new[] { nameof(CloudAccounts), nameof(Identities), nameof(Resources), nameof(Entitlements), nameof(PrivilegedIdentities), nameof(RiskFindings), nameof(CriticalFindings), nameof(HighFindings), nameof(DormantIdentities), nameof(ExternalIdentities), nameof(LastScan), nameof(FindingsByProvider), nameof(FindingsBySeverity), nameof(AccessByDecision) }) OnPropertyChanged(property); }
 }
-public sealed class CloudAccountsViewModel : WorkspaceViewModel { public CloudAccountsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Cloud Accounts"; public override string Subtitle => "Connect read-only cloud inventory sources when ready."; }
+public sealed class CloudAccountsViewModel : WorkspaceViewModel
+{
+    private readonly ICloudAuthenticationLauncher _authenticationLauncher;
+    private readonly IDialogService? _dialogService;
+
+    public CloudAccountsViewModel(IDemoDataService demoData, ICloudAuthenticationLauncher? authenticationLauncher = null, IDialogService? dialogService = null) : base(demoData)
+    {
+        _authenticationLauncher = authenticationLauncher ?? new CloudAuthenticationLauncher();
+        _dialogService = dialogService;
+        Providers =
+        [
+            new("Azure", "Azure CLI", "az login", "Sign in to an Azure account in your browser.", new RelayCommand(() => Connect(CloudProviderType.Azure)), new RelayCommand(() => Disconnect(CloudProviderType.Azure, "Azure"))),
+            new("AWS", "AWS CLI", "aws configure sso", "Set up an AWS IAM Identity Center profile.", new RelayCommand(() => Connect(CloudProviderType.Aws)), new RelayCommand(() => Disconnect(CloudProviderType.Aws, "AWS"))),
+            new("Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new RelayCommand(() => Connect(CloudProviderType.Gcp)), new RelayCommand(() => Disconnect(CloudProviderType.Gcp, "Google Cloud")))
+        ];
+    }
+
+    public override string Title => "Cloud Accounts";
+    public override string Subtitle => "Connect Azure, AWS, or Google Cloud with your existing CLI identity.";
+    public IReadOnlyList<CloudProviderConnectionOption> Providers { get; }
+    public string ConnectionGuidance { get; private set; } = "Choose a provider to start its official sign-in flow in a separate terminal.";
+
+    private void Connect(CloudProviderType provider)
+    {
+        try
+        {
+            _authenticationLauncher.LaunchAuthentication(provider);
+            ConnectionGuidance = "Complete sign-in in the terminal window. YASK-CIEM does not receive or store your cloud credentials.";
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to start the provider sign-in command: {exception.Message}";
+        }
+
+        OnPropertyChanged(nameof(ConnectionGuidance));
+    }
+
+    private void Disconnect(CloudProviderType provider, string providerName)
+    {
+        var confirmation = $"This signs out {providerName} in its shared CLI session/cache and may affect other tools using those credentials. Continue?";
+        if (_dialogService?.Confirm(confirmation, $"Disconnect {providerName}") != true)
+        {
+            return;
+        }
+
+        try
+        {
+            _authenticationLauncher.LaunchDisconnection(provider);
+            ConnectionGuidance = $"The {providerName} sign-out command was opened in a terminal. Review its output to confirm completion.";
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to start the provider sign-out command: {exception.Message}";
+        }
+
+        OnPropertyChanged(nameof(ConnectionGuidance));
+    }
+}
+
+public sealed record CloudProviderConnectionOption(string Name, string CliName, string Command, string Description, RelayCommand ConnectCommand, RelayCommand DisconnectCommand);
 public sealed class IdentitiesViewModel : WorkspaceViewModel { public IdentitiesViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Identities"; public override string Subtitle => "Review users, groups, service identities, and privilege signals."; }
 public sealed class ResourcesViewModel : WorkspaceViewModel { public ResourcesViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Resources"; public override string Subtitle => "Search normalized cloud resources by provider and scope."; public string SearchText { get; set; } = string.Empty; }
 public sealed class EntitlementsViewModel : WorkspaceViewModel { public EntitlementsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Entitlements"; public override string Subtitle => "Understand which roles, policies, and permissions are granted."; }
