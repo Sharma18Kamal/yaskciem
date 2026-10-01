@@ -11,12 +11,14 @@ public sealed class RiskRuleRegistry : IRiskRuleRegistry
 {
     private readonly IReadOnlyDictionary<string, IRiskRule> _rules;
 
-    public RiskRuleRegistry(IEnumerable<IRiskRule>? rules = null)
+    public RiskRuleRegistry(IEnumerable<IRiskRule>? rules = null, IEnumerable<CustomRiskRuleDefinition>? customRules = null)
     {
-        _rules = (rules ?? new IRiskRule[]
+        var builtInRules = (rules ?? new IRiskRule[]
         {
             new PrivilegedIdentityRule(), new ExcessivePermissionRule(), new WildcardPermissionRule(), new BroadScopeRule(), new DormantPrivilegedIdentityRule(), new ExternalPrivilegedIdentityRule(), new PrivilegedServiceAccountRule(), new UnusedEntitlementRule(), new ProductionAdministrativeAccessRule(), new ExcessiveServicePermissionRule(), new RedundantAccessPathRule(), new PrivilegedGroupMembershipRule(), new NestedPrivilegedAccessRule(), new BroadResourceWildcardRule(), new LongPrivilegeChainRule()
-        }).ToDictionary(rule => rule.RuleId, StringComparer.OrdinalIgnoreCase);
+        });
+        var loadedCustomRules = (customRules ?? Array.Empty<CustomRiskRuleDefinition>()).Where(rule => rule.Enabled).Select(rule => (IRiskRule)new CustomRiskRule(rule));
+        _rules = builtInRules.Concat(loadedCustomRules).GroupBy(rule => rule.RuleId, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
     }
 
     public IReadOnlyList<IRiskRule> ActiveRules(RiskRuleOptions options) => _rules.Values.Where(rule => options.IsEnabled(rule.RuleId)).OrderBy(rule => rule.RuleId).ToArray();

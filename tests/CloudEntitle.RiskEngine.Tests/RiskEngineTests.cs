@@ -1,8 +1,8 @@
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.Normalization.Models;
-using CloudEntitle.RiskEngine.Models;
 using CloudEntitle.RiskEngine.Services;
+using CloudEntitle.RiskEngine.Models;
 using Xunit;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
@@ -11,6 +11,33 @@ namespace CloudEntitle.RiskEngine.Tests;
 
 public sealed class RiskEngineTests
 {
+    [Fact]
+    public void PolicyLoader_ShouldValidateCustomRuleDocument()
+    {
+        var json = "[{\"ruleId\":\"CUSTOM-001\",\"name\":\"Production wildcard\",\"description\":\"Detect wildcard access in production.\",\"severity\":\"High\",\"category\":\"ExcessiveAccess\",\"actionContains\":\"*\",\"enabled\":true}]";
+
+        var definitions = new PolicyAsCodeRuleLoader().Load(json);
+
+        Assert.Single(definitions);
+        Assert.Equal("CUSTOM-001", definitions[0].RuleId);
+    }
+
+    [Fact]
+    public void PolicyLoader_ShouldRejectInvalidRuleIds()
+    {
+        Assert.Throws<InvalidDataException>(() => new PolicyAsCodeRuleLoader().Load("[{\"ruleId\":\"CIEM-001\",\"name\":\"Invalid\",\"description\":\"Invalid\",\"severity\":\"Low\",\"category\":\"Privilege\",\"actionContains\":\"read\"}]"));
+    }
+
+    [Fact]
+    public async Task CustomRule_ShouldGenerateEvidenceBackedFinding()
+    {
+        var fixture = FixtureData.Create(action: "storage.admin", resource: "production-resource", privileged: true);
+        var custom = new CustomRiskRuleDefinition("CUSTOM-001", "Privileged storage action", "Detect privileged storage actions.", RiskSeverity.High, RiskCategory.ExcessiveAccess, ActionContains: "storage", RequiresPrivilegedAccess: true);
+        var registry = new RiskRuleRegistry(customRules: new[] { custom });
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine(registry).EvaluateAsync(fixture.Request);
+
+        Assert.Contains(result.Findings, finding => finding.RuleId == GuidUtility.Create(GuidUtility.Namespace, "CUSTOM-001") && finding.Title == "Privileged storage action");
+    }
     [Fact]
     public async Task WildcardAndBroadScope_ShouldProduceEvidenceBackedFindings()
     {
