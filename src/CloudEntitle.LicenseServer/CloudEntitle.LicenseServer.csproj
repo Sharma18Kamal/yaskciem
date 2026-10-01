@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CloudEntitle.Licensing\CloudEntitle.Licensing.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Integration\CloudEntitle.Integration.csproj" />
   </ItemGroup>
 
 </Project>
