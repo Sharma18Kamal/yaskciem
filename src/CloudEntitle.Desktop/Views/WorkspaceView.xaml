@@ -63,10 +63,72 @@
                 </TextBlock>
             </StackPanel>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:EntitlementsViewModel}">
+            <StackPanel>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search entitlements"/>
+                <DataGrid ItemsSource="{Binding Entitlements}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" CanUserSortColumns="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="90"/>
+                        <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="180"/>
+                        <DataGridTextColumn Header="Grant" Binding="{Binding Grant}" Width="220"/>
+                        <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="*"/>
+                        <DataGridTextColumn Header="Assignment" Binding="{Binding Assignment}" Width="110"/>
+                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="100"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Text="No entitlement assignments or live roles and permissions are available." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:EffectiveAccessViewModel}">
+            <StackPanel>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search effective access"/>
+                <TextBlock Text="{Binding DataCoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                <DataGrid ItemsSource="{Binding AccessRecords}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" CanUserSortColumns="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="90"/>
+                        <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="170"/>
+                        <DataGridTextColumn Header="Role" Binding="{Binding Role}" Width="160"/>
+                        <DataGridTextColumn Header="Permission" Binding="{Binding Permission}" Width="170"/>
+                        <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
+                        <DataGridTextColumn Header="Decision" Binding="{Binding Decision}" Width="90"/>
+                        <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="90"/>
+                        <DataGridCheckBoxColumn Header="Privileged" Binding="{Binding Privileged}" Width="90"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Text="No modeled effective-access records match this search." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:RiskFindingsViewModel}">
+            <StackPanel>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search risk findings"/>
+                <DataGrid ItemsSource="{Binding Findings}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" CanUserSortColumns="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="90"/>
+                        <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="90"/>
+                        <DataGridTextColumn Header="Finding" Binding="{Binding Title}" Width="200"/>
+                        <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="150"/>
+                        <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="150"/>
+                        <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" Width="*"/>
+                        <DataGridTextColumn Header="Recommendation" Binding="{Binding Recommendation}" Width="220"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Text="No risk findings match this search." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:CloudAccountsViewModel}">
             <StackPanel>
                 <TextBlock Text="CONNECT A CLOUD PROVIDER" Style="{StaticResource CardLabel}"/>
                 <TextBlock Text="Sign-in opens in the provider's CLI. Use organization-approved identities with read-only permissions; credentials stay with the CLI and are never entered into YASK-CIEM. Disconnect signs out of the shared CLI session and may affect other tools." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                    <Button Content="Refresh sign-in status" Command="{Binding RefreshConnectionsCommand}" Style="{StaticResource QuietButton}"/>
+                    <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
                 <ItemsControl ItemsSource="{Binding Providers}">
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
@@ -75,10 +137,11 @@
                                 <StackPanel>
                                     <TextBlock Text="{Binding Name}" Foreground="{StaticResource PrimaryBrush}" FontSize="19" FontWeight="SemiBold"/>
                                     <TextBlock Text="{Binding CliName}" Foreground="{StaticResource AccentBrush}" FontSize="11" Margin="0,6,0,0"/>
+                                    <TextBlock Text="{Binding StateText}" Foreground="{StaticResource SuccessBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,6,0,0"/>
                                     <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" MinHeight="38" Margin="0,10,0,12"/>
                                     <StackPanel Orientation="Horizontal">
-                                        <Button Content="Connect" Command="{Binding ConnectCommand}" Style="{StaticResource PrimaryButton}" ToolTip="Run the provider's interactive sign-in command"/>
-                                        <Button Content="Disconnect" Command="{Binding DisconnectCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Sign out of this provider's shared CLI session"/>
+                                        <Button Content="Connect" Command="{Binding ConnectCommand}" IsEnabled="{Binding CanConnect}" Style="{StaticResource PrimaryButton}" ToolTip="Run the provider's interactive sign-in command"/>
+                                        <Button Content="Disconnect" Command="{Binding DisconnectCommand}" IsEnabled="{Binding IsConnected}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Sign out of this provider's shared CLI session"/>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
@@ -101,16 +164,41 @@
                         <TextBlock Text="Recommendations are review-only. Approved does not mean implemented." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,12" TextWrapping="Wrap"/>
                         <DataGrid ItemsSource="{Binding Recommendations}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="Type" Binding="{Binding RecommendationType}" Width="180"/>
-                                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220"/>
-                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="100"/>
-                                <DataGridTextColumn Header="State" Binding="{Binding EvaluationState}" Width="110"/>
+                                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="150"/>
+                                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="200"/>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="90"/>
+                                <DataGridTextColumn Header="State" Binding="{Binding State}" Width="110"/>
                                 <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
-                                <DataGridTextColumn Header="Current" Binding="{Binding CurrentState}" Width="*"/>
+                                <DataGridTextColumn Header="Current" Binding="{Binding Current}" Width="160"/>
+                                <DataGridTextColumn Header="Suggested" Binding="{Binding Suggested}" Width="220"/>
+                                <DataGridTextColumn Header="Priority" Binding="{Binding Priority}" Width="90"/>
                             </DataGrid.Columns>
                         </DataGrid>
+                        <TextBlock Text="No recommendations are stored or generated from the latest scan." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
                     </StackPanel>
                 </Border>
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ScanHistoryViewModel}">
+            <StackPanel>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search scan history"/>
+                <DataGrid ItemsSource="{Binding Scans}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" CanUserSortColumns="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="140"/>
+                        <DataGridTextColumn Header="Started" Binding="{Binding StartedAt, StringFormat=g}" Width="160"/>
+                        <DataGridTextColumn Header="Completed" Binding="{Binding CompletedAt, StringFormat=g}" Width="160"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="120"/>
+                        <DataGridTextColumn Header="Identities" Binding="{Binding Identities}" Width="90"/>
+                        <DataGridTextColumn Header="Items" Binding="{Binding Items}" Width="80"/>
+                        <DataGridTextColumn Header="Permissions" Binding="{Binding Permissions}" Width="100"/>
+                        <DataGridTextColumn Header="Findings" Binding="{Binding Findings}" Width="80"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Text="No completed scans are available." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:WorkspaceViewModel}">

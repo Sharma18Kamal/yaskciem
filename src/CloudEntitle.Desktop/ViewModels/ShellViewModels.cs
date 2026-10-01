@@ -9,16 +9,46 @@ namespace CloudEntitle.Desktop.ViewModels;
 
 public sealed record NavigationItem(string Title, string Icon, Type ViewModelType);
 
+public sealed class CloudConnectionState : ObservableObject
+{
+    private string _status = "Checking cloud sign-ins";
+    private bool _hasConnections;
+
+    public string Status { get => _status; private set => SetProperty(ref _status, value); }
+    public bool HasConnections { get => _hasConnections; private set => SetProperty(ref _hasConnections, value); }
+
+    public void Update(IEnumerable<CloudProviderType> connectedProviders, CloudProviderType? pendingProvider = null)
+    {
+        var connected = connectedProviders.Distinct().ToArray();
+        HasConnections = connected.Length > 0 || pendingProvider.HasValue;
+        Status = pendingProvider.HasValue
+            ? $"Connecting to {pendingProvider.Value}"
+            : connected.Length switch
+            {
+                0 => "No active CLI sign-in",
+                1 => $"{connected[0]} connected",
+                _ => $"{connected.Length} cloud CLIs signed in"
+            };
+    }
+}
+
 public sealed class MainWindowViewModel : ObservableObject
 {
     private readonly INavigationService _navigation;
+    private readonly CloudConnectionState _cloudConnectionState;
     private object _currentViewModel;
     private NavigationItem _currentNavigationItem;
     private string _statusMessage = "Ready";
 
-    public MainWindowViewModel(INavigationService navigation)
+    public MainWindowViewModel(INavigationService navigation, CloudConnectionState? cloudConnectionState = null)
     {
         _navigation = navigation;
+        _cloudConnectionState = cloudConnectionState ?? new CloudConnectionState();
+        _cloudConnectionState.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(CloudConnectionState.Status)) OnPropertyChanged(nameof(CloudConnectionStatus));
+            if (args.PropertyName == nameof(CloudConnectionState.HasConnections)) OnPropertyChanged(nameof(CanDisconnectCloud));
+        };
         _navigation.CurrentViewModelChanged += (_, _) =>
         {
             CurrentViewModel = _navigation.CurrentViewModel;
@@ -48,17 +78,14 @@ public sealed class MainWindowViewModel : ObservableObject
                 Navigate(item);
             }
         });
-        OpenCloudDisconnectCommand = new RelayCommand(() =>
-        {
-            Navigate(CloudAccountsNavigationItem);
-            StatusMessage = "Choose a provider to disconnect its CLI session";
-        });
+        OpenCloudDisconnectCommand = new AsyncRelayCommand(DisconnectActiveCloudAsync);
     }
 
     public string ApplicationName => "YASK-CIEM";
     public string ApplicationVersion => typeof(MainWindowViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";
     public string DatabaseStatus => "Connected";
-    public string CloudConnectionStatus => "Use Connect Cloud";
+    public string CloudConnectionStatus => _cloudConnectionState.Status;
+    public bool CanDisconnectCloud => _cloudConnectionState.HasConnections;
     public IReadOnlyList<NavigationItem> NavigationItems { get; }
     public NavigationItem CloudAccountsNavigationItem => NavigationItems[1];
     public NavigationItem SettingsNavigationItem => NavigationItems[^1];
@@ -66,7 +93,17 @@ public sealed class MainWindowViewModel : ObservableObject
     public NavigationItem CurrentNavigationItem { get => _currentNavigationItem; private set => SetProperty(ref _currentNavigationItem, value); }
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public ParameterizedRelayCommand NavigateCommand { get; }
-    public RelayCommand OpenCloudDisconnectCommand { get; }
+    public AsyncRelayCommand OpenCloudDisconnectCommand { get; }
+
+    private async Task DisconnectActiveCloudAsync()
+    {
+        Navigate(CloudAccountsNavigationItem);
+        if (_navigation.CurrentViewModel is CloudAccountsViewModel cloudAccounts)
+        {
+            var disconnected = await cloudAccounts.DisconnectActiveCloudAsync();
+            StatusMessage = disconnected ? "Cloud CLI session disconnected" : cloudAccounts.ConnectionGuidance;
+        }
+    }
 
     public void Navigate(NavigationItem item)
     {
@@ -217,64 +254,206 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
 {
     private readonly ICloudAuthenticationLauncher _authenticationLauncher;
     private readonly IDialogService? _dialogService;
+    private readonly CloudConnectionState _cloudConnectionState;
+    private CloudProviderType? _pendingProvider;
 
-    public CloudAccountsViewModel(IDemoDataService demoData, ICloudAuthenticationLauncher? authenticationLauncher = null, IDialogService? dialogService = null) : base(demoData)
+    public CloudAccountsViewModel(IDemoDataService demoData, ICloudAuthenticationLauncher? authenticationLauncher = null, IDialogService? dialogService = null, CloudConnectionState? cloudConnectionState = null) : base(demoData)
     {
         _authenticationLauncher = authenticationLauncher ?? new CloudAuthenticationLauncher();
         _dialogService = dialogService;
+        _cloudConnectionState = cloudConnectionState ?? new CloudConnectionState();
+        _cloudConnectionState.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(CloudConnectionState.Status)) OnPropertyChanged(nameof(CloudConnectionStatus));
+        };
         Providers =
         [
-            new("Azure", "Azure CLI", "az login", "Sign in to an Azure account in your browser.", new RelayCommand(() => Connect(CloudProviderType.Azure)), new RelayCommand(() => Disconnect(CloudProviderType.Azure, "Azure"))),
-            new("AWS", "AWS CLI", "aws configure sso", "Set up an AWS IAM Identity Center profile.", new RelayCommand(() => Connect(CloudProviderType.Aws)), new RelayCommand(() => Disconnect(CloudProviderType.Aws, "AWS"))),
-            new("Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new RelayCommand(() => Connect(CloudProviderType.Gcp)), new RelayCommand(() => Disconnect(CloudProviderType.Gcp, "Google Cloud")))
+            new(CloudProviderType.Azure, "Azure", "Azure CLI", "az login", "Sign in to an Azure account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Azure)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Azure))),
+            new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure sso", "Set up an AWS IAM Identity Center profile.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
+            new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
         ];
+        RefreshConnectionsCommand = new AsyncRelayCommand(RefreshConnectionsAsync);
+        _ = RefreshConnectionsAsync();
     }
 
     public override string Title => "Cloud Accounts";
     public override string Subtitle => "Connect Azure, AWS, or Google Cloud with your existing CLI identity.";
     public IReadOnlyList<CloudProviderConnectionOption> Providers { get; }
     public string ConnectionGuidance { get; private set; } = "Choose a provider to start its official sign-in flow in a separate terminal.";
+    public string CloudConnectionStatus => _cloudConnectionState.Status;
+    public AsyncRelayCommand RefreshConnectionsCommand { get; }
 
-    private void Connect(CloudProviderType provider)
+    public async Task<bool> DisconnectActiveCloudAsync()
     {
+        await RefreshConnectionsAsync();
+        var connected = Providers.Where(provider => provider.IsConnected).ToArray();
+        if (connected.Length == 0)
+        {
+            ConnectionGuidance = "No active cloud CLI sign-in was found.";
+            OnPropertyChanged(nameof(ConnectionGuidance));
+            return false;
+        }
+
+        if (connected.Length > 1)
+        {
+            ConnectionGuidance = "More than one provider is signed in. Disconnect the provider you want to remove from its card.";
+            OnPropertyChanged(nameof(ConnectionGuidance));
+            return false;
+        }
+
+        await DisconnectProviderAsync(connected[0].Provider);
+        return !connected[0].IsConnected;
+    }
+
+    public async Task ConnectAsync(CloudProviderType provider)
+    {
+        if (_pendingProvider.HasValue && _pendingProvider != provider)
+        {
+            ConnectionGuidance = $"Finish or cancel the {_pendingProvider} sign-in before choosing another provider.";
+            OnPropertyChanged(nameof(ConnectionGuidance));
+            return;
+        }
+
+        _pendingProvider = provider;
+        UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
+        await RefreshConnectionsAsync();
+        if (Providers.Any(option => option.Provider != provider && option.IsConnected))
+        {
+            _pendingProvider = null;
+            await RefreshConnectionsAsync();
+            ConnectionGuidance = "Disconnect the active provider before signing in to another cloud.";
+            OnPropertyChanged(nameof(ConnectionGuidance));
+            return;
+        }
+
+        UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
         try
         {
             _authenticationLauncher.LaunchAuthentication(provider);
-            ConnectionGuidance = "Complete sign-in in the terminal window. YASK-CIEM does not receive or store your cloud credentials.";
+            ConnectionGuidance = $"Complete {provider} sign-in in the terminal. Other providers stay disabled until sign-in is verified.";
             ErrorMessage = null;
+            OnPropertyChanged(nameof(ConnectionGuidance));
+
+            for (var attempt = 0; attempt < 90; attempt++)
+            {
+                if (await _authenticationLauncher.IsConnectedAsync(provider))
+                {
+                    _pendingProvider = null;
+                    await RefreshConnectionsAsync();
+                    ConnectionGuidance = $"{provider} is connected. Disconnect it before selecting another provider. YASK-CIEM does not receive or store cloud credentials.";
+                    OnPropertyChanged(nameof(ConnectionGuidance));
+                    return;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2));
+            }
+
+            _pendingProvider = null;
+            await RefreshConnectionsAsync();
+            ConnectionGuidance = "Sign-in was not detected. Check the provider terminal and try again.";
+            OnPropertyChanged(nameof(ConnectionGuidance));
         }
         catch (Exception exception)
         {
-            ErrorMessage = $"Unable to start the provider sign-in command: {exception.Message}";
+            _pendingProvider = null;
+            await RefreshConnectionsAsync();
+            ErrorMessage = $"Unable to connect to {provider}: {exception.Message}";
+            ConnectionGuidance = "The provider sign-in could not be verified.";
+            OnPropertyChanged(nameof(ConnectionGuidance));
         }
-
-        OnPropertyChanged(nameof(ConnectionGuidance));
     }
 
-    private void Disconnect(CloudProviderType provider, string providerName)
+    public async Task DisconnectProviderAsync(CloudProviderType provider)
     {
-        var confirmation = $"This signs out {providerName} in its shared CLI session/cache and may affect other tools using those credentials. Continue?";
-        if (_dialogService?.Confirm(confirmation, $"Disconnect {providerName}") != true)
+        var providerOption = Providers.Single(item => item.Provider == provider);
+        var confirmation = $"Sign out of {providerOption.Name} in its shared CLI session/cache? This can affect other tools using those credentials.";
+        if (_dialogService?.Confirm(confirmation, $"Disconnect {providerOption.Name}") != true)
         {
             return;
         }
 
         try
         {
-            _authenticationLauncher.LaunchDisconnection(provider);
-            ConnectionGuidance = $"The {providerName} sign-out command was opened in a terminal. Review its output to confirm completion.";
+            await _authenticationLauncher.DisconnectAsync(provider);
+            await RefreshConnectionsAsync();
+            ConnectionGuidance = $"{providerOption.Name} is disconnected. You can now connect to another provider.";
             ErrorMessage = null;
         }
         catch (Exception exception)
         {
-            ErrorMessage = $"Unable to start the provider sign-out command: {exception.Message}";
+            ErrorMessage = $"Unable to disconnect {providerOption.Name}: {exception.Message}";
         }
 
         OnPropertyChanged(nameof(ConnectionGuidance));
     }
+
+    private async Task RefreshConnectionsAsync()
+    {
+        var states = await Task.WhenAll(Providers.Select(async option =>
+        {
+            try
+            {
+                return (option.Provider, IsConnected: await _authenticationLauncher.IsConnectedAsync(option.Provider));
+            }
+            catch
+            {
+                return (option.Provider, IsConnected: false);
+            }
+        }));
+
+        UpdateProviderStates(states.Where(state => state.IsConnected).Select(state => state.Provider).ToHashSet());
+    }
+
+    private void UpdateProviderStates(IReadOnlySet<CloudProviderType> connectedProviders)
+    {
+        foreach (var option in Providers)
+        {
+            var isConnected = connectedProviders.Contains(option.Provider);
+            var anotherProviderConnected = connectedProviders.Any(provider => provider != option.Provider);
+            option.UpdateState(isConnected, !isConnected && !anotherProviderConnected && (_pendingProvider is null || _pendingProvider == option.Provider), _pendingProvider == option.Provider);
+        }
+
+        _cloudConnectionState.Update(connectedProviders, _pendingProvider);
+    }
 }
 
-public sealed record CloudProviderConnectionOption(string Name, string CliName, string Command, string Description, RelayCommand ConnectCommand, RelayCommand DisconnectCommand);
+public sealed class CloudProviderConnectionOption : ObservableObject
+{
+    private bool _isConnected;
+    private bool _canConnect;
+    private bool _isConnecting;
+
+    public CloudProviderConnectionOption(CloudProviderType provider, string name, string cliName, string command, string description, AsyncRelayCommand connectCommand, AsyncRelayCommand disconnectCommand)
+    {
+        Provider = provider;
+        Name = name;
+        CliName = cliName;
+        Command = command;
+        Description = description;
+        ConnectCommand = connectCommand;
+        DisconnectCommand = disconnectCommand;
+    }
+
+    public CloudProviderType Provider { get; }
+    public string Name { get; }
+    public string CliName { get; }
+    public string Command { get; }
+    public string Description { get; }
+    public AsyncRelayCommand ConnectCommand { get; }
+    public AsyncRelayCommand DisconnectCommand { get; }
+    public bool IsConnected { get => _isConnected; private set => SetProperty(ref _isConnected, value); }
+    public bool CanConnect { get => _canConnect; private set => SetProperty(ref _canConnect, value); }
+    public bool IsConnecting { get => _isConnecting; private set => SetProperty(ref _isConnecting, value); }
+    public string StateText => IsConnecting ? "Connecting" : IsConnected ? "Connected" : "Available";
+
+    internal void UpdateState(bool isConnected, bool canConnect, bool isConnecting)
+    {
+        IsConnected = isConnected;
+        CanConnect = canConnect;
+        IsConnecting = isConnecting;
+        OnPropertyChanged(nameof(StateText));
+    }
+}
 public sealed class IdentitiesViewModel : WorkspaceViewModel
 {
     private readonly ILiveCloudScanService? _liveCloudScanService;
@@ -335,22 +514,311 @@ public sealed class ResourcesViewModel : WorkspaceViewModel
         .ToArray();
     public bool HasResults => Resources.Count > 0;
 }
-public sealed class EntitlementsViewModel : WorkspaceViewModel { public EntitlementsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Entitlements"; public override string Subtitle => "Understand which roles, policies, and permissions are granted."; }
-public sealed class EffectiveAccessViewModel : WorkspaceViewModel { public EffectiveAccessViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Effective Access"; public override string Subtitle => "Trace direct and inherited access paths."; }
-public sealed class RiskFindingsViewModel : WorkspaceViewModel { public RiskFindingsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Risk Findings"; public override string Subtitle => "Evidence-backed findings will appear here after analysis is enabled."; }
+public sealed record EntitlementGridRow(string Provider, string Subject, string Grant, string Scope, string Assignment, string Source);
+public sealed record EffectiveAccessGridRow(string Provider, string Principal, string Role, string Permission, string Resource, string Decision, string Path, bool Privileged);
+public sealed record RiskFindingGridRow(string Provider, string Severity, string Title, string Principal, string Resource, string Evidence, string Recommendation);
+public sealed record RecommendationGridRow(string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority);
+public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings);
+
+public sealed class EntitlementsViewModel : WorkspaceViewModel
+{
+    private readonly IDemoDataService _demoData;
+    private readonly ILiveCloudScanService? _liveCloudScanService;
+    private DemoSnapshot? _snapshot;
+    private string _searchText = string.Empty;
+
+    public EntitlementsViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
+    {
+        _demoData = demoData;
+        _liveCloudScanService = liveCloudScanService;
+        _demoData.DataChanged += async (_, _) => await RefreshAsync();
+        if (_liveCloudScanService is not null)
+        {
+            _liveCloudScanService.ScanCompleted += async (_, _) => await RefreshAsync();
+        }
+        _ = RefreshAsync();
+    }
+
+    public override string Title => "Entitlements";
+    public override string Subtitle => "Review role and permission assignments, plus discovered provider inventory.";
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Entitlements)); OnPropertyChanged(nameof(HasResults)); } } }
+    public IReadOnlyList<EntitlementGridRow> Entitlements
+    {
+        get
+        {
+            var snapshot = _snapshot;
+            var accounts = snapshot?.Accounts.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudAccount>();
+            var principals = snapshot?.Principals.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudPrincipal>();
+            var roles = snapshot?.Roles.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudRole>();
+            var permissions = snapshot?.Permissions.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudPermission>();
+            var resources = snapshot?.Resources.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudResource>();
+            var rows = (snapshot?.Entitlements ?? Array.Empty<Entitlement>()).Select(item => new EntitlementGridRow(
+                accounts.GetValueOrDefault(item.CloudAccountId)?.CloudProvider.ToString() ?? "Demo",
+                principals.GetValueOrDefault(item.PrincipalId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PrincipalId),
+                string.Join(" / ", new[]
+                {
+                    item.RoleId is Guid roleId ? roles.GetValueOrDefault(roleId)?.Name : null,
+                    permissions.GetValueOrDefault(item.PermissionId)?.Name
+                }.Where(value => !string.IsNullOrWhiteSpace(value))),
+                resources.GetValueOrDefault(item.ResourceId ?? Guid.Empty)?.Name ?? item.Scope ?? "Account scope",
+                item.AssignmentType.ToString(),
+                "Demo Mode"));
+            var live = _liveCloudScanService?.CurrentResult;
+            rows = rows.Concat((live?.RoleRecords ?? Array.Empty<DiscoveredCloudRole>()).Select(item => new EntitlementGridRow(
+                item.Provider.ToString(), "Not mapped by provider scan", $"Role: {item.Role.Name}", item.Role.Scope ?? "Provider scope", "Inventory only", "Live scan")));
+            rows = rows.Concat((live?.PermissionRecords ?? Array.Empty<DiscoveredCloudPermission>()).Select(item => new EntitlementGridRow(
+                item.Provider.ToString(), "Not mapped by provider scan", $"Permission: {item.Permission.Name} ({item.Permission.Action ?? "action not supplied"})", item.Permission.Scope ?? "Provider scope", "Inventory only", "Live scan")));
+            return rows.Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Subject, row.Grant, row.Scope, row.Assignment, row.Source)).ToArray();
+        }
+    }
+    public bool HasResults => Entitlements.Count > 0;
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            _snapshot = await _demoData.GetSnapshotAsync();
+            OnPropertyChanged(nameof(Entitlements));
+            OnPropertyChanged(nameof(HasResults));
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to load entitlements: {exception.Message}";
+        }
+    }
+}
+
+public sealed class EffectiveAccessViewModel : WorkspaceViewModel
+{
+    private readonly IDemoDataService _demoData;
+    private DemoSnapshot? _snapshot;
+    private string _searchText = string.Empty;
+
+    public EffectiveAccessViewModel(IDemoDataService demoData) : base(demoData)
+    {
+        _demoData = demoData;
+        _demoData.DataChanged += async (_, _) => await RefreshAsync();
+        _ = RefreshAsync();
+    }
+
+    public override string Title => "Effective Access";
+    public override string Subtitle => "Trace modeled direct and inherited access paths.";
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(AccessRecords)); OnPropertyChanged(nameof(HasResults)); } } }
+    public string DataCoverageMessage => "Effective access is shown for modeled Demo Mode data. Live provider scans do not yet collect principal-to-role assignments, so access is not inferred from inventory alone.";
+    public IReadOnlyList<EffectiveAccessGridRow> AccessRecords
+    {
+        get
+        {
+            var snapshot = _snapshot;
+            var principals = snapshot?.Principals.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudPrincipal>();
+            var roles = snapshot?.Roles.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudRole>();
+            var permissions = snapshot?.Permissions.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudPermission>();
+            var resources = snapshot?.Resources.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudResource>();
+            return (snapshot?.EffectiveAccess ?? Array.Empty<EffectiveAccess>()).Select(item => new EffectiveAccessGridRow(
+                item.Provider.ToString(),
+                principals.GetValueOrDefault(item.PrincipalId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PrincipalId),
+                item.RoleId is Guid roleId ? roles.GetValueOrDefault(roleId)?.Name ?? WorkspaceDataFormatting.ShortId(roleId) : "Direct permission",
+                permissions.GetValueOrDefault(item.PermissionId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PermissionId),
+                resources.GetValueOrDefault(item.ResourceId ?? Guid.Empty)?.Name ?? item.Scope ?? "Account scope",
+                item.Decision.ToString(),
+                item.IsInherited ? "Inherited" : item.IsDirect ? "Direct" : "Other",
+                item.IsPrivileged))
+                .Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Principal, row.Role, row.Permission, row.Resource, row.Decision, row.Path))
+                .ToArray();
+        }
+    }
+    public bool HasResults => AccessRecords.Count > 0;
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            _snapshot = await _demoData.GetSnapshotAsync();
+            OnPropertyChanged(nameof(AccessRecords));
+            OnPropertyChanged(nameof(HasResults));
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to load effective access: {exception.Message}";
+        }
+    }
+}
+
+public sealed class RiskFindingsViewModel : WorkspaceViewModel
+{
+    private readonly IDemoDataService _demoData;
+    private readonly ILiveCloudScanService? _liveCloudScanService;
+    private DemoSnapshot? _snapshot;
+    private string _searchText = string.Empty;
+
+    public RiskFindingsViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
+    {
+        _demoData = demoData;
+        _liveCloudScanService = liveCloudScanService;
+        _demoData.DataChanged += async (_, _) => await RefreshAsync();
+        if (_liveCloudScanService is not null)
+        {
+            _liveCloudScanService.ScanCompleted += async (_, _) => await RefreshAsync();
+        }
+        _ = RefreshAsync();
+    }
+
+    public override string Title => "Risk Findings";
+    public override string Subtitle => "Review findings with provider evidence and recommended actions.";
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Findings)); OnPropertyChanged(nameof(HasResults)); } } }
+    public IReadOnlyList<RiskFindingGridRow> Findings
+    {
+        get
+        {
+            var snapshot = _snapshot;
+            var principals = snapshot?.Principals.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudPrincipal>();
+            var resources = snapshot?.Resources.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudResource>();
+            var rows = (snapshot?.RiskFindings ?? Array.Empty<RiskFindingModel>()).Select(item => new RiskFindingGridRow(
+                item.CloudProvider.ToString(), item.Severity.ToString(), item.Title,
+                principals.GetValueOrDefault(item.PrincipalId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PrincipalId),
+                resources.GetValueOrDefault(item.ResourceId ?? Guid.Empty)?.Name ?? "Not specified",
+                item.Evidence.Summary, item.Recommendation ?? "Review finding"));
+            rows = rows.Concat((_liveCloudScanService?.CurrentResult?.Findings ?? Array.Empty<CloudEntitle.Domain.RiskFinding>()).Select(item => new RiskFindingGridRow(
+                item.CloudProvider.ToString(), item.Severity.ToString(), item.Title,
+                item.Principal, item.Resource, item.Evidence, item.Recommendation)));
+            return rows.Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Severity, row.Title, row.Principal, row.Resource, row.Evidence, row.Recommendation)).ToArray();
+        }
+    }
+    public bool HasResults => Findings.Count > 0;
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            _snapshot = await _demoData.GetSnapshotAsync();
+            OnPropertyChanged(nameof(Findings));
+            OnPropertyChanged(nameof(HasResults));
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to load risk findings: {exception.Message}";
+        }
+    }
+}
 public sealed class RecommendationsViewModel : WorkspaceViewModel
 {
     private readonly IRecommendationStore _store;
+    private readonly ILiveCloudScanService? _liveCloudScanService;
     private string _searchText = string.Empty;
-    public RecommendationsViewModel(IDemoDataService demoData, IRecommendationStore store) : base(demoData) { _store = store; RefreshRecommendationsCommand = new AsyncRelayCommand(LoadAsync); _ = LoadAsync(); }
+    public RecommendationsViewModel(IDemoDataService demoData, IRecommendationStore store, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
+    {
+        _store = store;
+        _liveCloudScanService = liveCloudScanService;
+        RefreshRecommendationsCommand = new AsyncRelayCommand(LoadAsync);
+        demoData.DataChanged += async (_, _) => await LoadAsync();
+        if (_liveCloudScanService is not null)
+        {
+            _liveCloudScanService.ScanCompleted += async (_, _) => await LoadAsync();
+        }
+        _ = LoadAsync();
+    }
     public override string Title => "Recommendations";
     public override string Subtitle => "Review evidence-backed least-privilege proposals before any future remediation.";
-    public IReadOnlyList<RecommendationModel> Recommendations { get; private set; } = Array.Empty<RecommendationModel>();
+    public IReadOnlyList<RecommendationGridRow> Recommendations { get; private set; } = Array.Empty<RecommendationGridRow>();
+    public bool HasResults => Recommendations.Count > 0;
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) RefreshRecommendationsCommand.Execute(null); } }
     public AsyncRelayCommand RefreshRecommendationsCommand { get; }
-    private async Task LoadAsync() { IsLoading = true; ErrorMessage = null; try { Recommendations = await _store.GetAsync(SearchText); OnPropertyChanged(nameof(Recommendations)); } catch { ErrorMessage = "Unable to load recommendations."; } finally { IsLoading = false; } }
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        ErrorMessage = null;
+        try
+        {
+            var stored = await _store.GetAsync(SearchText);
+            var rows = stored.Select(item => new RecommendationGridRow(
+                item.RecommendationType.ToString(), item.Title, item.Provider.ToString(), item.EvaluationState.ToString(),
+                item.Status.ToString(), item.CurrentState, item.SuggestedState, item.Priority.ToString()));
+            var live = (_liveCloudScanService?.CurrentResult?.Findings ?? Array.Empty<CloudEntitle.Domain.RiskFinding>())
+                .Where(item => WorkspaceDataFormatting.Matches(SearchText, item.Title, item.Permission, item.Recommendation, item.Evidence))
+                .Select(item => new RecommendationGridRow(
+                    "Risk remediation", item.Title, item.CloudProvider.ToString(), "Review required", "New",
+                    item.Permission, item.Recommendation, item.Severity.ToString()));
+            Recommendations = rows.Concat(live).ToArray();
+            OnPropertyChanged(nameof(Recommendations));
+            OnPropertyChanged(nameof(HasResults));
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to load recommendations: {exception.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
 }
-public sealed class ScanHistoryViewModel : WorkspaceViewModel { public ScanHistoryViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Scan History"; public override string Subtitle => "Review the history of completed and interrupted scans."; }
+
+public sealed class ScanHistoryViewModel : WorkspaceViewModel
+{
+    private readonly IDemoDataService _demoData;
+    private readonly ILiveCloudScanService? _liveCloudScanService;
+    private DemoSnapshot? _snapshot;
+    private string _searchText = string.Empty;
+
+    public ScanHistoryViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
+    {
+        _demoData = demoData;
+        _liveCloudScanService = liveCloudScanService;
+        _demoData.DataChanged += async (_, _) => await RefreshAsync();
+        if (_liveCloudScanService is not null)
+        {
+            _liveCloudScanService.ScanCompleted += async (_, _) => await RefreshAsync();
+        }
+        _ = RefreshAsync();
+    }
+
+    public override string Title => "Scan History";
+    public override string Subtitle => "Review completed provider scans and discovered-record totals.";
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Scans)); OnPropertyChanged(nameof(HasResults)); } } }
+    public IReadOnlyList<ScanHistoryGridRow> Scans
+    {
+        get
+        {
+            var accounts = _snapshot?.Accounts.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudAccount>();
+            var rows = (_snapshot?.Scans ?? Array.Empty<Scan>()).Select(item => new ScanHistoryGridRow(
+                accounts.GetValueOrDefault(item.CloudAccountId)?.CloudProvider.ToString() ?? "Demo",
+                item.StartedAt, item.CompletedAt, item.Status.ToString(), item.IdentitiesDiscovered,
+                item.ItemsDiscovered, item.PermissionsDiscovered, item.FindingsGenerated));
+            var live = _liveCloudScanService?.CurrentResult;
+            if (live is not null)
+            {
+                var providers = string.Join(", ", live.ProviderMessages.Select(message => message.Split(':')[0]).Distinct());
+                rows = rows.Append(new ScanHistoryGridRow(providers, live.StartedAt, live.CompletedAt, "Completed",
+                    live.IdentityCount, live.AccountCount + live.IdentityCount + live.ResourceCount + live.RoleCount + live.PermissionCount,
+                    live.PermissionCount, live.Findings.Count));
+            }
+            return rows.Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Status)).OrderByDescending(row => row.StartedAt).ToArray();
+        }
+    }
+    public bool HasResults => Scans.Count > 0;
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            _snapshot = await _demoData.GetSnapshotAsync();
+            OnPropertyChanged(nameof(Scans));
+            OnPropertyChanged(nameof(HasResults));
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to load scan history: {exception.Message}";
+        }
+    }
+}
+
+internal static class WorkspaceDataFormatting
+{
+    public static bool Matches(string search, params string?[] values) =>
+        string.IsNullOrWhiteSpace(search) || values.Any(value => value?.Contains(search, StringComparison.OrdinalIgnoreCase) == true);
+
+    public static string ShortId(Guid id) => id.ToString("N")[..8];
+}
 public sealed class SettingsViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;

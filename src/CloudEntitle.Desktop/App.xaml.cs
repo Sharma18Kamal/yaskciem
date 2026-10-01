@@ -47,6 +47,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<ICloudProvider>(provider => new GcpProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ILiveCloudScanService, LiveCloudScanService>();
 		services.AddSingleton<INavigationService, NavigationService>();
+		services.AddSingleton<CloudConnectionState>();
 		services.AddSingleton<IDialogService, DialogService>();
 		services.AddSingleton<ICloudAuthenticationLauncher, CloudAuthenticationLauncher>();
 		services.AddSingleton<MainWindowViewModel>();

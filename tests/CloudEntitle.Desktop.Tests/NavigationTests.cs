@@ -3,6 +3,7 @@ using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.Domain.ValueObjects;
 using CloudEntitle.Analytics.Models;
 using CloudEntitle.Analytics.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,46 +63,65 @@ public sealed class NavigationTests
     }
 
     [Fact]
-    public void CloudAccountsViewModel_ShouldExposeConnectActionsForAllProviders()
+    public async Task CloudAccountsViewModel_ShouldDisableOtherProvidersAfterSignIn()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
 
         Assert.Equal(new[] { "Azure", "AWS", "Google Cloud" }, viewModel.Providers.Select(provider => provider.Name));
 
-        foreach (var provider in viewModel.Providers)
-        {
-            provider.ConnectCommand.Execute(null);
-        }
+        await viewModel.ConnectAsync(CloudProviderType.Azure);
 
-        Assert.Equal(new[] { CloudProviderType.Azure, CloudProviderType.Aws, CloudProviderType.Gcp }, launcher.LaunchedProviders);
+        Assert.Equal(new[] { CloudProviderType.Azure }, launcher.LaunchedProviders);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure).IsConnected);
+        Assert.False(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).CanConnect);
+        Assert.False(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Gcp).CanConnect);
         Assert.Contains("YASK-CIEM does not receive or store", viewModel.ConnectionGuidance);
     }
 
     [Fact]
-    public void CloudAccountsViewModel_ShouldRequireConfirmationBeforeDisconnecting()
+    public async Task CloudAccountsViewModel_ShouldRequireConfirmationBeforeDisconnecting()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
         var dialogs = new RecordingDialogService(confirmationResult: false);
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, dialogs);
 
-        viewModel.Providers.Single(provider => provider.Name == "AWS").DisconnectCommand.Execute(null);
+        await viewModel.DisconnectProviderAsync(CloudProviderType.Aws);
 
         Assert.Empty(launcher.DisconnectedProviders);
         Assert.Contains(dialogs.Confirmations, message => message.Contains("shared CLI session/cache"));
     }
 
     [Fact]
-    public void CloudAccountsViewModel_ShouldLaunchDisconnectAfterConfirmation()
+    public async Task CloudAccountsViewModel_ShouldDisconnectAfterConfirmation()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
         var dialogs = new RecordingDialogService(confirmationResult: true);
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, dialogs);
 
-        viewModel.Providers.Single(provider => provider.Name == "Google Cloud").DisconnectCommand.Execute(null);
+        await viewModel.DisconnectProviderAsync(CloudProviderType.Gcp);
 
         Assert.Equal(new[] { CloudProviderType.Gcp }, launcher.DisconnectedProviders);
-        Assert.Contains("sign-out command was opened", viewModel.ConnectionGuidance);
+        Assert.Contains("is disconnected", viewModel.ConnectionGuidance);
+    }
+
+    [Fact]
+    public void HeaderDisconnectCommand_ShouldSignOutActiveProviderAndUpdateStatus()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        launcher.LaunchedProviders.Add(CloudProviderType.Azure);
+        var dialogs = new RecordingDialogService(confirmationResult: true);
+        var connectionState = new CloudConnectionState();
+        var cloudAccounts = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, dialogs, connectionState);
+        var navigation = new TestNavigationService(cloudAccounts);
+        var viewModel = new MainWindowViewModel(navigation, connectionState);
+
+        viewModel.OpenCloudDisconnectCommand.Execute(null);
+
+        Assert.Equal(new[] { CloudProviderType.Azure }, launcher.DisconnectedProviders);
+        Assert.Equal("No active CLI sign-in", viewModel.CloudConnectionStatus);
+        Assert.False(viewModel.CanDisconnectCloud);
+        Assert.True(cloudAccounts.Providers.All(provider => provider.CanConnect));
     }
 
     [Fact]
@@ -148,6 +168,51 @@ public sealed class NavigationTests
         Assert.False(resources.HasResults);
     }
 
+    [Fact]
+    public async Task DataScreens_ShouldShowDemoRecordsAndLiveScanResults()
+    {
+        var accountId = Guid.NewGuid();
+        var principal = new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Azure, Name = "Demo owner", PrincipalId = "demo-owner" };
+        var role = new CloudRole { Id = Guid.NewGuid(), AccountId = accountId, Name = "Reader", RoleId = "reader" };
+        var permission = new CloudPermission { Id = Guid.NewGuid(), AccountId = accountId, Name = "Read resources", Action = "resource/read" };
+        var resource = new CloudResource { Id = Guid.NewGuid(), AccountId = accountId, Name = "Demo vault", Type = "Vault" };
+        var entitlement = new Entitlement { Id = Guid.NewGuid(), PrincipalId = principal.Id, RoleId = role.Id, PermissionId = permission.Id, CloudAccountId = accountId, ResourceId = resource.Id, AssignmentType = AssignmentType.Direct };
+        var access = new EffectiveAccess { Id = Guid.NewGuid(), PrincipalId = principal.Id, CloudAccountId = accountId, ResourceId = resource.Id, PermissionId = permission.Id, RoleId = role.Id, Provider = CloudProvider.Azure, IsDirect = true };
+        var finding = new RiskFindingModel { Id = Guid.NewGuid(), RuleId = Guid.NewGuid(), CloudProvider = CloudProvider.Azure, CloudAccountId = accountId, PrincipalId = principal.Id, Severity = RiskSeverity.High, Title = "Demo finding", Evidence = new RiskEvidence("Demo evidence") };
+        var recommendation = new RecommendationModel { Id = Guid.NewGuid(), RiskFindingId = finding.Id, Title = "Review demo role", CurrentState = "Reader at account scope", SuggestedState = "Narrow resource access", Provider = CloudProvider.Azure };
+        var scan = new Scan { Id = Guid.NewGuid(), CloudAccountId = accountId, StartedAt = DateTime.UtcNow.AddMinutes(-2), CompletedAt = DateTime.UtcNow, Status = ScanStatus.Completed };
+        var snapshot = new DemoSnapshot(
+            new[] { new CloudAccount { Id = accountId, CloudProvider = CloudProviderType.Azure } },
+            new[] { principal },
+            new[] { resource },
+            new[] { entitlement },
+            new[] { access },
+            new[] { finding },
+            new[] { recommendation },
+            new[] { scan })
+        {
+            Roles = new[] { role },
+            Permissions = new[] { permission }
+        };
+        var demoData = new SnapshotDemoDataService(snapshot);
+        var liveScan = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) });
+        var entitlements = new EntitlementsViewModel(demoData, liveScan);
+        var effectiveAccess = new EffectiveAccessViewModel(demoData);
+        var riskFindings = new RiskFindingsViewModel(demoData, liveScan);
+        var recommendations = new RecommendationsViewModel(demoData, new SnapshotRecommendationStore(snapshot), liveScan);
+        var history = new ScanHistoryViewModel(demoData, liveScan);
+        var dashboard = new DashboardViewModel(demoData, new NoopAnalyticsService(), liveScan);
+
+        await dashboard.RunScanAsync();
+
+        Assert.True(entitlements.HasResults);
+        Assert.True(entitlements.Entitlements.Count >= 3);
+        Assert.True(effectiveAccess.HasResults);
+        Assert.True(riskFindings.Findings.Count >= 2);
+        Assert.True(recommendations.HasResults);
+        Assert.True(history.Scans.Count >= 2);
+    }
+
     private sealed class NoopDemoDataService : IDemoDataService
     {
         public event EventHandler? DataChanged { add { } remove { } }
@@ -162,12 +227,45 @@ public sealed class NavigationTests
         public AnalyticsSnapshot Calculate(DemoSnapshot snapshot, DateTime? asOf = null) => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
     }
 
+    private sealed class SnapshotDemoDataService(DemoSnapshot snapshot) : IDemoDataService
+    {
+        public event EventHandler? DataChanged { add { } remove { } }
+        public bool IsDemoMode => true;
+        public Task<DemoStatistics> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult(snapshot.Statistics);
+        public Task ResetAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<DemoSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default) => Task.FromResult(snapshot);
+    }
+
+    private sealed class SnapshotRecommendationStore(DemoSnapshot snapshot) : IRecommendationStore
+    {
+        public Task<IReadOnlyList<RecommendationModel>> GetAsync(string? search = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<RecommendationModel>>(snapshot.Recommendations);
+    }
+
     private sealed class RecordingCloudAuthenticationLauncher : ICloudAuthenticationLauncher
     {
         public List<CloudProviderType> LaunchedProviders { get; } = new();
         public List<CloudProviderType> DisconnectedProviders { get; } = new();
         public void LaunchAuthentication(CloudProviderType provider) => LaunchedProviders.Add(provider);
         public void LaunchDisconnection(CloudProviderType provider) => DisconnectedProviders.Add(provider);
+        public Task<bool> IsConnectedAsync(CloudProviderType provider, CancellationToken cancellationToken = default)
+            => Task.FromResult(LaunchedProviders.Contains(provider) && !DisconnectedProviders.Contains(provider));
+        public Task DisconnectAsync(CloudProviderType provider, CancellationToken cancellationToken = default)
+        {
+            DisconnectedProviders.Add(provider);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class TestNavigationService(CloudAccountsViewModel cloudAccounts) : INavigationService
+    {
+        public object CurrentViewModel { get; private set; } = new object();
+        public event EventHandler? CurrentViewModelChanged;
+        public void NavigateTo<TViewModel>() where TViewModel : class
+        {
+            CurrentViewModel = typeof(TViewModel) == typeof(CloudAccountsViewModel) ? cloudAccounts : new object();
+            CurrentViewModelChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private sealed class RecordingDialogService(bool confirmationResult) : IDialogService

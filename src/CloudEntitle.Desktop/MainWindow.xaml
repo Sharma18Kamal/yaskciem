@@ -14,9 +14,9 @@
                     <TextBlock Text="Cloud identity exposure management" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Border Style="{StaticResource StatusPill}"><TextBlock Text="READ-ONLY" Foreground="{StaticResource SuccessBrush}"/></Border>
+                    <Border Style="{StaticResource StatusPill}" ToolTip="Cloud inventory scans do not modify provider resources. Disconnect signs out the provider CLI."><TextBlock Text="SCAN ONLY" Foreground="{StaticResource SuccessBrush}"/></Border>
                     <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
-                    <Button Content="Disconnect Cloud" Command="{Binding OpenCloudDisconnectCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Open provider sign-out controls"/>
+                    <Button Content="Disconnect Cloud" Command="{Binding OpenCloudDisconnectCommand}" IsEnabled="{Binding CanDisconnectCloud}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Sign out of the active provider CLI session"/>
                     <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNavigationItem}" Style="{StaticResource QuietButton}" Margin="12,0,0,0" ToolTip="Open application settings"/>
                     <Button Content="−" Style="{StaticResource WindowChromeButton}" Margin="16,0,0,0" Click="MinimizeButton_Click" ToolTip="Minimize window" AutomationProperties.Name="Minimize window"/>
                     <Button Content="□" Style="{StaticResource WindowChromeButton}" Click="MaximizeButton_Click" ToolTip="Maximize or restore window" AutomationProperties.Name="Maximize or restore window"/>
@@ -31,8 +31,8 @@
                     <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="12" CornerRadius="8">
                         <StackPanel>
                             <TextBlock Text="SECURITY WORKSPACE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold"/>
-                            <TextBlock Text="No cloud connections" Foreground="{StaticResource PrimaryBrush}" FontSize="12" Margin="0,6,0,0"/>
-                            <TextBlock Text="Connect read-only sources when ready." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                            <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource PrimaryBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                            <TextBlock Text="Connect one provider at a time. Scans do not modify cloud resources." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
                         </StackPanel>
                     </Border>
                     <ItemsControl ItemsSource="{Binding NavigationItems}">
