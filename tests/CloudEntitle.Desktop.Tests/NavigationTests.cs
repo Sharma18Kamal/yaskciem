@@ -1,3 +1,4 @@
+using System.IO;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Application.Interfaces;
@@ -145,6 +146,25 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task DashboardViewModel_ShouldGenerateReportAtChosenPathAndFormat()
+    {
+        var outputPath = Path.Combine(Path.GetTempPath(), "selected-yask-report.csv");
+        var dialogs = new RecordingDialogService(confirmationResult: true) { ReportPath = outputPath };
+        var reports = new RecordingReportService();
+        var liveScan = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) });
+        await liveScan.ScanAsync();
+        var dashboard = new DashboardViewModel(new NoopDemoDataService(), new NoopAnalyticsService(), liveScan, reports, dialogs);
+
+        await dashboard.GenerateReportAsync();
+
+        Assert.Equal("csv", reports.ReportType);
+        Assert.Equal(outputPath, reports.OutputPath);
+        Assert.Single(reports.CurrentScanFindings!);
+        Assert.Contains(dialogs.InformationMessages, message => message.Contains(outputPath));
+        Assert.Null(dashboard.ErrorMessage);
+    }
+
+    [Fact]
     public async Task LiveScan_ShouldPopulateSearchableIdentityAndResourceScreens()
     {
         var scanService = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) });
@@ -271,12 +291,37 @@ public sealed class NavigationTests
     private sealed class RecordingDialogService(bool confirmationResult) : IDialogService
     {
         public List<string> Confirmations { get; } = new();
-        public void ShowInformation(string message, string title = "YASK-CIEM") { }
+        public List<string> InformationMessages { get; } = new();
+        public string? ReportPath { get; set; }
+        public void ShowInformation(string message, string title = "YASK-CIEM") => InformationMessages.Add(message);
         public void ShowError(string message, string title = "YASK-CIEM") { }
+        public string? ChooseReportPath() => ReportPath;
         public bool Confirm(string message, string title = "YASK-CIEM")
         {
             Confirmations.Add(message);
             return confirmationResult;
+        }
+    }
+
+    private sealed class RecordingReportService : IReportService
+    {
+        public string? ReportType { get; private set; }
+        public string? OutputPath { get; private set; }
+        public IReadOnlyList<CloudEntitle.Domain.RiskFinding>? CurrentScanFindings { get; private set; }
+        public Task<string> GenerateReportAsync(string reportType, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
+        public Task<string> GenerateReportAsync(string reportType, string outputPath, CancellationToken cancellationToken = default)
+        {
+            ReportType = reportType;
+            OutputPath = outputPath;
+            return Task.FromResult(outputPath);
+        }
+        public Task<string> GenerateReportAsync(string reportType, string outputPath, IReadOnlyList<CloudEntitle.Domain.RiskFinding>? currentScanFindings, CancellationToken cancellationToken = default)
+        {
+            ReportType = reportType;
+            OutputPath = outputPath;
+            CurrentScanFindings = currentScanFindings;
+            return Task.FromResult(outputPath);
         }
     }
 

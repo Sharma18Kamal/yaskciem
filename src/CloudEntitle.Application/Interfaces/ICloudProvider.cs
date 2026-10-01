@@ -66,6 +66,8 @@ public interface ITrialService
 public interface IReportService
 {
     Task<string> GenerateReportAsync(string reportType, CancellationToken cancellationToken = default);
+    Task<string> GenerateReportAsync(string reportType, string outputPath, CancellationToken cancellationToken = default);
+    Task<string> GenerateReportAsync(string reportType, string outputPath, IReadOnlyList<RiskFinding>? currentScanFindings, CancellationToken cancellationToken = default);
 }
 
 public interface IScanResultStore

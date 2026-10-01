@@ -41,6 +41,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IDemoDataService, DemoDataService>();
 		services.AddSingleton<IAnalyticsService, AnalyticsService>();
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
+		services.AddSingleton<IReportService, SqliteReportService>();
 		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new AwsProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));

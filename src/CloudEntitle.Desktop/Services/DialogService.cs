@@ -1,4 +1,6 @@
+using System.IO;
 using System.Windows;
+using Microsoft.Win32;
 
 namespace CloudEntitle.Desktop.Services;
 
@@ -12,4 +14,30 @@ public sealed class DialogService : IDialogService
 
     public bool Confirm(string message, string title = "YASK-CIEM") =>
         MessageBox.Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+
+    public string? ChooseReportPath()
+    {
+        var reportDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YASK-CIEM", "reports");
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save YASK-CIEM report",
+            Filter = "JSON report (*.json)|*.json|CSV report (*.csv)|*.csv",
+            FilterIndex = 1,
+            DefaultExt = ".json",
+            AddExtension = true,
+            OverwritePrompt = true,
+            InitialDirectory = Directory.Exists(reportDirectory) ? reportDirectory : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            FileName = $"yask-ciem-report-{DateTime.Now:yyyyMMdd-HHmmss}"
+        };
+
+        if (dialog.ShowDialog() != true)
+        {
+            return null;
+        }
+
+        var extension = dialog.FilterIndex == 2 ? ".csv" : ".json";
+        return string.Equals(Path.GetExtension(dialog.FileName), extension, StringComparison.OrdinalIgnoreCase)
+            ? dialog.FileName
+            : Path.ChangeExtension(dialog.FileName, extension);
+    }
 }

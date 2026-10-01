@@ -1,3 +1,4 @@
+using System.IO;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain.Entities;
@@ -165,16 +166,21 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private readonly IDemoDataService _demoData;
     private readonly IAnalyticsService _analytics;
     private readonly ILiveCloudScanService? _liveCloudScanService;
+    private readonly IReportService? _reportService;
+    private readonly IDialogService? _dialogService;
     private AnalyticsSnapshot _analyticsSnapshot = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
     private LiveCloudScanResult? _liveScan;
     private string _scanStatusMessage = "Run a scan to refresh signed-in cloud providers.";
 
-    public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null)
+    public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null, IReportService? reportService = null, IDialogService? dialogService = null)
     {
         _demoData = demoData;
         _analytics = analytics;
         _liveCloudScanService = liveCloudScanService;
+        _reportService = reportService;
+        _dialogService = dialogService;
         ScanCommand = new AsyncRelayCommand(RunScanAsync);
+        GenerateReportCommand = new AsyncRelayCommand(GenerateReportAsync);
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
         _ = RefreshAsync();
     }
@@ -182,6 +188,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public override string Title => "Dashboard";
     public override string Subtitle => "A clear view of your cloud entitlement posture.";
     public AsyncRelayCommand ScanCommand { get; }
+    public AsyncRelayCommand GenerateReportCommand { get; }
     public string ScanStatusMessage { get => _scanStatusMessage; private set => SetProperty(ref _scanStatusMessage, value); }
     public int CloudAccounts => _analyticsSnapshot.CloudAccounts + (_liveScan?.AccountCount ?? 0);
     public int Identities => _analyticsSnapshot.Identities + (_liveScan?.IdentityCount ?? 0);
@@ -199,6 +206,44 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public IReadOnlyList<AnalyticsMetric> FindingsByProvider => MergeMetrics(_analyticsSnapshot.FindingsByProvider, _liveScan?.Findings.GroupBy(finding => finding.CloudProvider.ToString()).Select(group => new AnalyticsMetric(group.Key, group.Count())));
     public IReadOnlyList<AnalyticsMetric> FindingsBySeverity => MergeMetrics(_analyticsSnapshot.FindingsBySeverity, _liveScan?.Findings.GroupBy(finding => finding.Severity.ToString()).Select(group => new AnalyticsMetric(group.Key, group.Count())));
     public IReadOnlyList<AnalyticsMetric> AccessByDecision => _analyticsSnapshot.AccessByDecision;
+
+    public async Task GenerateReportAsync()
+    {
+        if (_reportService is null || _dialogService is null)
+        {
+            ErrorMessage = "Report generation is not configured.";
+            return;
+        }
+
+        var outputPath = _dialogService.ChooseReportPath();
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        var reportType = Path.GetExtension(outputPath).TrimStart('.').ToLowerInvariant();
+        if (reportType is not ("json" or "csv"))
+        {
+            ErrorMessage = "Choose a JSON or CSV report file.";
+            return;
+        }
+
+        IsLoading = true;
+        ErrorMessage = null;
+        try
+        {
+            var generatedPath = await _reportService.GenerateReportAsync(reportType, outputPath, _liveCloudScanService?.CurrentResult?.Findings);
+            _dialogService.ShowInformation($"Report saved to:\n{generatedPath}");
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to generate the report: {exception.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
 
     public async Task RunScanAsync()
     {

@@ -3,7 +3,7 @@
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restricted"
          IgnorableNamespaces="uap rescap">
-  <Identity Name="Sharma18Kamal.YASKCIEM" Publisher="CN=YASK-CIEM" Version="1.0.0.10" />
+  <Identity Name="Sharma18Kamal.YASKCIEM" Publisher="CN=YASK-CIEM" Version="1.0.0.11" />
   <Properties>
     <DisplayName>YASK-CIEM</DisplayName>
     <PublisherDisplayName>Sharma18Kamal</PublisherDisplayName>

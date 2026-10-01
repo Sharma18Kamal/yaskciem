@@ -7,6 +7,7 @@
             <StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
                 <Button Content="Scan Now" Command="{Binding ScanCommand}" Style="{StaticResource PrimaryButton}" ToolTip="Scan signed-in cloud providers using read-only CLI access"/>
+                <Button Content="Generate Report" Command="{Binding GenerateReportCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Choose a folder and save findings as JSON or CSV"/>
                 <TextBlock Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
             </StackPanel>
             <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>

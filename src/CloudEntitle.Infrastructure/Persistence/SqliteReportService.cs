@@ -20,16 +20,30 @@ public sealed class SqliteReportService : IReportService
     }
 
     public async Task<string> GenerateReportAsync(string reportType, CancellationToken cancellationToken = default)
+        => await GenerateReportAsync(reportType, GetDefaultPath(reportType), cancellationToken);
+
+    public async Task<string> GenerateReportAsync(string reportType, string outputPath, CancellationToken cancellationToken = default)
+        => await GenerateReportAsync(reportType, outputPath, null, cancellationToken);
+
+    public async Task<string> GenerateReportAsync(string reportType, string outputPath, IReadOnlyList<CloudEntitle.Domain.RiskFinding>? currentScanFindings, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reportType);
-        Directory.CreateDirectory(_reportDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
         await using var context = new CloudEntitleDbContext(_options);
-        var findings = await context.RiskFindings.AsNoTracking()
+        var storedFindings = await context.RiskFindings.AsNoTracking()
             .OrderByDescending(finding => finding.CreatedAt)
             .ToListAsync(cancellationToken);
+        var findings = storedFindings.Select(finding => new ReportFinding(
+                finding.Severity.ToString(), finding.CloudProvider.ToString(), finding.Title, finding.Principal,
+                finding.Resource, finding.Permission, finding.Recommendation, finding.Evidence))
+            .Concat((currentScanFindings ?? Array.Empty<CloudEntitle.Domain.RiskFinding>()).Select(finding => new ReportFinding(
+                finding.Severity.ToString(), finding.CloudProvider.ToString(), finding.Title, finding.Principal,
+                finding.Resource, finding.Permission, finding.Recommendation, finding.Evidence)))
+            .ToArray();
         var extension = reportType.Trim().ToLowerInvariant();
-        var path = Path.Combine(_reportDirectory, $"yask-ciem-report-{DateTime.UtcNow:yyyyMMdd-HHmmss}.{extension}");
+        var path = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
         if (extension == "json")
         {
@@ -42,7 +56,7 @@ public sealed class SqliteReportService : IReportService
             {
                 csv.AppendLine(string.Join(",", new[]
                 {
-                    finding.Severity.ToString(), finding.CloudProvider.ToString(), finding.Title,
+                    finding.Severity, finding.Provider, finding.Title,
                     finding.Principal, finding.Resource, finding.Permission, finding.Recommendation, finding.Evidence
                 }.Select(EscapeCsv)));
             }
@@ -55,6 +69,15 @@ public sealed class SqliteReportService : IReportService
 
         return path;
     }
+
+    private string GetDefaultPath(string reportType)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reportType);
+        var extension = reportType.Trim().ToLowerInvariant();
+        return Path.Combine(_reportDirectory, $"yask-ciem-report-{DateTime.UtcNow:yyyyMMdd-HHmmss}.{extension}");
+    }
+
+    private sealed record ReportFinding(string Severity, string Provider, string Title, string Principal, string Resource, string Permission, string Recommendation, string Evidence);
 
     private static string EscapeCsv(string value)
         => $"\"{value.Replace("\"", "\"\"")}\"";
