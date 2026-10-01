@@ -7,7 +7,7 @@ namespace CloudEntitle.Licensing.Tests;
 public class TrialServiceTests
 {
     [Fact]
-    public async Task TrialService_ShouldCreateFourteenDayTrial()
+    public async Task TrialService_ShouldCreateSevenDayTrial()
     {
         var now = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         var service = new TrialService(() => now, new InMemoryTrialStateStore());
@@ -15,7 +15,7 @@ public class TrialServiceTests
         var trial = await service.StartTrialAsync("User@Example.com", "AA:BB:CC:DD:EE:FF");
 
         Assert.Equal(now, trial.TrialStart);
-        Assert.Equal(now.AddDays(14), trial.TrialEnd);
+        Assert.Equal(now.AddDays(7), trial.TrialEnd);
         Assert.Equal(LicenseStatus.Trial, trial.Status);
     }
 
@@ -27,7 +27,7 @@ public class TrialServiceTests
         await service.StartTrialAsync("user-1@example.com", "device-hash");
 
         now = now.AddDays(14);
-        var trial = await service.GetTrialStatusAsync("USER-1@EXAMPLE.COM");
+        var trial = await service.GetTrialStatusAsync("USER-1@EXAMPLE.COM", "device-hash");
 
         Assert.NotNull(trial);
         Assert.Equal(LicenseStatus.Expired, trial.Status);
@@ -66,5 +66,36 @@ public class TrialServiceTests
         Assert.DoesNotContain("AABBCCDDEEFF", registrations[0].HardwareHash);
         Assert.Equal(64, registrations[0].EmailHash.Length);
         Assert.Equal(64, registrations[0].HardwareHash.Length);
+    }
+
+    [Fact]
+    public async Task TrialService_ShouldRejectStatusFromDifferentDevice()
+    {
+        var service = new TrialService(stateStore: new InMemoryTrialStateStore());
+        await service.StartTrialAsync("user@example.com", "device-one");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.GetTrialStatusAsync("user@example.com", "device-two"));
+    }
+
+    [Fact]
+    public async Task TrialService_ShouldExpireAfterMaterialClockRollback()
+    {
+        var now = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var service = new TrialService(() => now, new InMemoryTrialStateStore());
+        await service.StartTrialAsync("user@example.com", "device-hash");
+        now = now.AddHours(1);
+        await service.GetTrialStatusAsync("user@example.com", "device-hash");
+        now = now.AddHours(-1);
+
+        var trial = await service.GetTrialStatusAsync("user@example.com", "device-hash");
+
+        Assert.NotNull(trial);
+        Assert.Equal(LicenseStatus.Expired, trial.Status);
+
+        now = now.AddHours(2);
+        trial = await service.GetTrialStatusAsync("user@example.com", "device-hash");
+        Assert.NotNull(trial);
+        Assert.Equal(LicenseStatus.Expired, trial.Status);
     }
 }

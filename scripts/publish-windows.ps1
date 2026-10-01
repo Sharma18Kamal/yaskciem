@@ -11,7 +11,7 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $solutionPath = Join-Path $repositoryRoot 'CloudEntitle.sln'
 $projectPath = Join-Path $repositoryRoot 'src\CloudEntitle.Desktop\CloudEntitle.Desktop.csproj'
 $nugetConfigPath = Join-Path $repositoryRoot '.nuget\NuGet.Config'
-$output = Join-Path $repositoryRoot $OutputPath
+$output = if ([IO.Path]::IsPathRooted($OutputPath)) { $OutputPath } else { Join-Path $repositoryRoot $OutputPath }
 
 if (Test-Path $output) {
     Remove-Item $output -Recurse -Force

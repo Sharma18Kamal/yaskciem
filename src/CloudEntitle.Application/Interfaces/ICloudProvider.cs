@@ -60,7 +60,7 @@ public interface ILicenseService
 public interface ITrialService
 {
     Task<TrialInfo> StartTrialAsync(string userId, string deviceIdentifierHash, CancellationToken cancellationToken = default);
-    Task<TrialInfo?> GetTrialStatusAsync(string userId, CancellationToken cancellationToken = default);
+    Task<TrialInfo?> GetTrialStatusAsync(string userId, string deviceIdentifierHash, CancellationToken cancellationToken = default);
 }
 
 public interface IReportService

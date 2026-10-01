@@ -21,8 +21,34 @@ jobs:
       - name: Restore
         run: dotnet restore CloudEntitle.sln --configfile .nuget/NuGet.Config
 
-      - name: Build desktop client
-        run: dotnet build src/CloudEntitle.Desktop/CloudEntitle.Desktop.csproj --configuration Release --no-restore
+      - name: Validate release PowerShell syntax
+        shell: pwsh
+        run: |
+          $scripts = @('scripts/publish-windows.ps1', 'scripts/package-windows-zip.ps1', 'scripts/package-msix.ps1', 'scripts/install-windows-user.ps1')
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $script), [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error "$script`: $($_.Message)" }
+              exit 1
+            }
+          }
+
+      - name: Build solution
+        run: dotnet build CloudEntitle.sln --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test CloudEntitle.sln --configuration Release --no-restore --logger "console;verbosity=normal"
+        run: dotnet test CloudEntitle.sln --configuration Release --no-build --no-restore --logger "console;verbosity=normal"
+
+      - name: Package unsigned MSIX for QA
+        shell: pwsh
+        run: ./scripts/package-msix.ps1 -PackageVersion "0.0.${{ github.run_number }}.${{ github.run_attempt }}" -OutputPath ./artifacts/msix-ci
+
+      - name: Upload unsigned QA package
+        uses: actions/upload-artifact@v4
+        with:
+          name: yask-ciem-msix-qa-${{ github.run_number }}
+          path: artifacts/msix-ci/YASK-CIEM-*.msix
+          if-no-files-found: error
+          retention-days: 7

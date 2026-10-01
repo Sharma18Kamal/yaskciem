@@ -16,6 +16,23 @@ To create an MSIX package:
 
 The output is written to `artifacts/msix/YASK-CIEM-1.0.0.0.msix`.
 
+## MSIX automatic updates
+
+MSIX auto-updates use Windows App Installer. The `.appinstaller` feed and MSIX must be hosted at stable HTTPS URLs, and the MSIX must be signed with a certificate trusted by the installing machines. Build both artifacts by supplying the public URLs and signing certificate:
+
+```powershell
+./scripts/package-msix.ps1 `
+	-PackageVersion 1.0.0.0 `
+	-CertificatePath ./certs/yask-ciem.pfx `
+	-CertificatePassword $env:YASK_CIEM_CERT_PASSWORD `
+	-AppInstallerUri https://downloads.example.com/YASK-CIEM.appinstaller `
+	-PackageUri https://downloads.example.com/YASK-CIEM-1.0.0.0.msix
+```
+
+Publish the generated MSIX at the exact `PackageUri` and the generated `YASK-CIEM.appinstaller` at the exact `AppInstallerUri`. Install users from the `.appinstaller` file (not the bare `.msix`) to enable update checks. The feed checks on launch and in the background; update activation is blocked while a required update is applied. Subsequent releases must keep the same feed URL and package identity, increase the four-part package version, and update the package URL in the newly generated feed.
+
+The feed is generated only when both HTTPS URLs are supplied and the package is signed. The package script preserves other files already in the output directory.
+
 ## ZIP fallback
 
 If the Windows SDK is not installed, create a runnable ZIP package instead:

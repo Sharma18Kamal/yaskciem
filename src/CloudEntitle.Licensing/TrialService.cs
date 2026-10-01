@@ -9,7 +9,8 @@ using CloudEntitle.Domain;
 
 public sealed class TrialService : ITrialService
 {
-    private static readonly TimeSpan TrialDuration = TimeSpan.FromDays(14);
+    private static readonly TimeSpan TrialDuration = TimeSpan.FromDays(7);
+    private static readonly TimeSpan ClockRollbackTolerance = TimeSpan.FromMinutes(5);
     private readonly ITrialStateStore _stateStore;
     private readonly Func<DateTime> _utcNow;
 
@@ -37,19 +38,48 @@ public sealed class TrialService : ITrialService
             throw new TrialAlreadyUsedException("This hardware has already been used for a trial.");
         }
 
-        var start = _utcNow();
-        var record = new TrialRegistration(emailHash, hardwareHash, start, start.Add(TrialDuration));
+        var start = AsUtc(_utcNow());
+        var record = new TrialRegistration(emailHash, hardwareHash, start, start.Add(TrialDuration), start);
         await _stateStore.SaveAsync(registrations.Append(record), cancellationToken);
         return ToTrialInfo(record, email);
     }
 
-    public async Task<TrialInfo?> GetTrialStatusAsync(string userId, CancellationToken cancellationToken = default)
+    public async Task<TrialInfo?> GetTrialStatusAsync(string userId, string deviceIdentifierHash, CancellationToken cancellationToken = default)
     {
         var email = NormalizeEmail(userId);
         var emailHash = Hash(email);
-        var record = (await _stateStore.LoadAsync(cancellationToken))
+        var hardwareHash = Hash(NormalizeHardwareIdentifier(deviceIdentifierHash));
+        var registrations = await _stateStore.LoadAsync(cancellationToken);
+        var record = registrations
             .FirstOrDefault(registration => registration.EmailHash == emailHash);
-        return record is null ? null : ToTrialInfo(record, email);
+        if (record is null)
+        {
+            return null;
+        }
+
+        if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(record.HardwareHash), Convert.FromHexString(hardwareHash)))
+        {
+            throw new InvalidOperationException("The trial is registered to a different device.");
+        }
+
+        var now = AsUtc(_utcNow());
+        var lastObserved = record.LastObservedUtc == default ? record.TrialStart : AsUtc(record.LastObservedUtc);
+        if (now < record.TrialStart || now + ClockRollbackTolerance < lastObserved)
+        {
+            record = record with { TrialEnd = record.TrialStart, LastObservedUtc = lastObserved };
+            await _stateStore.SaveAsync(registrations.Select(registration =>
+                registration.EmailHash == emailHash ? record : registration), cancellationToken);
+            return ToTrialInfo(record, email);
+        }
+
+        if (now > lastObserved)
+        {
+            record = record with { LastObservedUtc = now };
+            await _stateStore.SaveAsync(registrations.Select(registration =>
+                registration.EmailHash == emailHash ? record : registration), cancellationToken);
+        }
+
+        return ToTrialInfo(record, email);
     }
 
     private TrialInfo ToTrialInfo(TrialRegistration record, string email)
@@ -57,7 +87,7 @@ public sealed class TrialService : ITrialService
         {
             TrialStart = record.TrialStart,
             TrialEnd = record.TrialEnd,
-            Status = _utcNow() >= record.TrialEnd ? LicenseStatus.Expired : LicenseStatus.Trial,
+            Status = AsUtc(_utcNow()) >= AsUtc(record.TrialEnd) ? LicenseStatus.Expired : LicenseStatus.Trial,
             UserId = email,
             DeviceIdentifierHash = record.HardwareHash
         };
@@ -76,6 +106,8 @@ public sealed class TrialService : ITrialService
 
     private static string Hash(string value)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static DateTime AsUtc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
 }
 
 public sealed class TrialAlreadyUsedException : InvalidOperationException
@@ -83,7 +115,7 @@ public sealed class TrialAlreadyUsedException : InvalidOperationException
     public TrialAlreadyUsedException(string message) : base(message) { }
 }
 
-public sealed record TrialRegistration(string EmailHash, string HardwareHash, DateTime TrialStart, DateTime TrialEnd);
+public sealed record TrialRegistration(string EmailHash, string HardwareHash, DateTime TrialStart, DateTime TrialEnd, DateTime LastObservedUtc = default);
 
 public interface ITrialStateStore
 {

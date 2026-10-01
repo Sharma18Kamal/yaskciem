@@ -41,7 +41,7 @@ Provider adapters default to deterministic mock data in tests. The desktop compo
 
 ## Running locally
 
-For the complete download, installation, testing, and first-run procedure, see [Getting Started](docs/development/getting-started.md).
+For installation instructions for released Windows packages, see [Install YASK-CIEM](docs/deployment/installation.md). For development setup, testing, and first-run details, see [Getting Started](docs/development/getting-started.md).
 
 1. Install the .NET 9 SDK for the current local scaffold, or update the target framework when .NET 10 is available.
 2. Install and authenticate the required read-only tools: `az`, `aws`, and `gcloud`.

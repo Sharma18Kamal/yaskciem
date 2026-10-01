@@ -1,6 +1,6 @@
 # YASK-CIEM Getting Started
 
-This guide explains how to download, install, test, and run YASK-CIEM on Windows 10 or Windows 11.
+This guide explains how to build, test, and run YASK-CIEM from source on Windows 10 or Windows 11. For installing a released package, see [Install YASK-CIEM](../deployment/installation.md).
 
 ## 1. Download the application
 
@@ -54,7 +54,7 @@ It also creates a `YASK-CIEM` shortcut in the current user's Start Menu. This in
 
 Open **Start**, search for **YASK-CIEM**, and launch it after completing the provider setup below.
 
-For a signed MSIX installation, see [Windows installer instructions](../../installer/README.md). A development-signed MSIX requires certificate trust and normally needs an administrator PowerShell window.
+For signed MSIX packaging and automatic update setup, see [Windows installer instructions](../../installer/README.md). An organization-signed MSIX requires a trusted publisher certificate on the target PC.
 
 ## 4. Authenticate cloud providers
 
@@ -144,21 +144,18 @@ Custom options are supported:
 .\scripts\publish-windows.ps1 -Configuration Release -Runtime win-x64 -OutputPath .\artifacts\publish
 ```
 
-MSI/MSIX packaging and code signing are not included yet. Follow [the installer handoff](../../installer/README.md) for those release steps.
+To create an MSIX package, follow [the Windows installer instructions](../../installer/README.md). Distribution requires organization code signing; automatic updates additionally require an HTTPS App Installer feed.
 
 ## 9. Data and report locations
 
-The application stores local data under:
+The application stores local data in these locations:
 
 ```text
-%LocalAppData%\YASK-CIEM
+%LocalAppData%\CloudEntitle\Data\cloudentitle.db
+%LocalAppData%\CloudEntitle\Logs\
+%LocalAppData%\YASK-CIEM\trial-state.json
+%LocalAppData%\YASK-CIEM\reports\
 ```
-
-This includes:
-
-- `yask-ciem.db` for SQLite inventory, rules, and findings
-- `trial-state.json` for hashed trial identity records
-- `reports\` for exported JSON and CSV reports
 
 Do not manually edit these files while the application is running.
 

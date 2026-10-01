@@ -1,0 +1,51 @@
+name: YASK-CIEM CD Scaffold
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Four-part MSIX version (for example, 1.2.3.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release-candidate:
+    name: Validate release candidate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Validate release version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+            throw 'release_version must contain exactly four numeric components.'
+          }
+
+      - name: Restore
+        run: dotnet restore CloudEntitle.sln --configfile .nuget/NuGet.Config
+
+      - name: Build solution
+        run: dotnet build CloudEntitle.sln --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test CloudEntitle.sln --configuration Release --no-build --no-restore
+
+      # TODO: Configure a protected release environment and organization signing certificate.
+      # TODO: Generate a signed MSIX and App Installer feed using scripts/package-msix.ps1.
+      # TODO: Publish both artifacts to the approved HTTPS distribution host.
+      # TODO: Verify package signature, feed URL, and published version before announcing release.
+      - name: CD deployment is not configured
+        shell: pwsh
+        run: Write-Output 'Release candidate validation complete; signing and deployment are not configured.'

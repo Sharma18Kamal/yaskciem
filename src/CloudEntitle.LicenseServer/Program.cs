@@ -1,11 +1,19 @@
 using CloudEntitle.Domain;
 using CloudEntitle.Integration.Contracts;
+using CloudEntitle.Security.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
+
+var useHsts = app.Configuration.GetValue("Security:UseHsts", !app.Environment.IsDevelopment());
+app.Use(async (context, next) =>
+{
+	SecurityHeaderPolicy.Apply(context.Response, useHsts);
+	await next();
+});
 
 app.MapHealthChecks("/health");
 

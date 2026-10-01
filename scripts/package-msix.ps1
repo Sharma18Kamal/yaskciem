@@ -7,6 +7,10 @@ param(
     [string]$Publisher = 'CN=YASK-CIEM',
     [string]$CertificatePath,
     [string]$CertificatePassword,
+    [string]$AppInstallerUri,
+    [string]$PackageUri,
+    [ValidateRange(1, 168)]
+    [int]$UpdateCheckHours = 8,
     [string]$OutputPath = '.\artifacts\msix'
 )
 
@@ -14,10 +18,29 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifestTemplate = Join-Path $repositoryRoot 'installer\AppxManifest.xml'
 $publishScript = Join-Path $repositoryRoot 'scripts\publish-windows.ps1'
-$packageRoot = Join-Path $repositoryRoot 'artifacts\msix\package'
 $outputDirectory = Join-Path $repositoryRoot $OutputPath
+$packageRoot = Join-Path $outputDirectory 'package'
 $manifestPath = Join-Path $packageRoot 'AppxManifest.xml'
 $packagePath = Join-Path $outputDirectory "YASK-CIEM-$PackageVersion.msix"
+$hasAppInstallerUri = -not [string]::IsNullOrWhiteSpace($AppInstallerUri)
+$hasPackageUri = -not [string]::IsNullOrWhiteSpace($PackageUri)
+
+if ($hasAppInstallerUri -xor $hasPackageUri) {
+    throw 'Specify both -AppInstallerUri and -PackageUri to generate an auto-update feed.'
+}
+
+if ($hasAppInstallerUri) {
+    foreach ($uriValue in @($AppInstallerUri, $PackageUri)) {
+        $parsedUri = $null
+        if (-not [Uri]::TryCreate($uriValue, [UriKind]::Absolute, [ref]$parsedUri) -or $parsedUri.Scheme -ne 'https') {
+            throw "Auto-update URLs must be absolute HTTPS URLs. Invalid URL: $uriValue"
+        }
+    }
+
+    if (-not $CertificatePath) {
+        throw 'App Installer auto-update feeds require a signed MSIX. Specify -CertificatePath.'
+    }
+}
 
 function Find-MakeAppx {
     $command = Get-Command makeappx.exe -ErrorAction SilentlyContinue
@@ -41,11 +64,10 @@ function Find-SignTool {
     throw 'SignTool.exe was not found. Install the Windows 10/11 SDK.'
 }
 
-if (Test-Path $outputDirectory) { Remove-Item $outputDirectory -Recurse -Force }
 New-Item $packageRoot -ItemType Directory -Force | Out-Null
 New-Item $outputDirectory -ItemType Directory -Force | Out-Null
 
-& $publishScript -Configuration $Configuration -Runtime $Runtime -OutputPath '.\artifacts\msix\package'
+& $publishScript -Configuration $Configuration -Runtime $Runtime -OutputPath $packageRoot
 if ($LASTEXITCODE -ne 0) { throw "Publish failed with exit code $LASTEXITCODE." }
 
 $manifest = Get-Content $manifestTemplate -Raw
@@ -69,6 +91,47 @@ if ($CertificatePath) {
     $signtool = Find-SignTool
     & $signtool sign /fd SHA256 /a /f $CertificatePath /p $CertificatePassword $packagePath
     if ($LASTEXITCODE -ne 0) { throw "Signing failed with exit code $LASTEXITCODE." }
+}
+
+if ($hasAppInstallerUri) {
+    $manifestDocument = [xml](Get-Content $manifestPath -Raw)
+    $namespaceManager = [System.Xml.XmlNamespaceManager]::new($manifestDocument.NameTable)
+    $namespaceManager.AddNamespace('appx', 'http://schemas.microsoft.com/appx/manifest/foundation/windows10')
+    $identity = $manifestDocument.SelectSingleNode('/appx:Package/appx:Identity', $namespaceManager)
+    $architecture = switch ($Runtime) {
+        'win-x64' { 'x64' }
+        'win-arm64' { 'arm64' }
+        'win-x86' { 'x86' }
+        default { throw "Unsupported MSIX runtime architecture: $Runtime" }
+    }
+
+    $appInstallerPath = Join-Path $outputDirectory 'YASK-CIEM.appinstaller'
+    $appInstallerNamespace = 'http://schemas.microsoft.com/appx/appinstaller/2018'
+    $appInstallerDocument = [System.Xml.XmlDocument]::new()
+    $appInstaller = $appInstallerDocument.CreateElement('AppInstaller', $appInstallerNamespace)
+    $appInstaller.SetAttribute('Uri', $AppInstallerUri)
+    $appInstaller.SetAttribute('Version', $PackageVersion)
+    $appInstallerDocument.AppendChild($appInstaller) | Out-Null
+
+    $mainPackage = $appInstallerDocument.CreateElement('MainPackage', $appInstallerNamespace)
+    $mainPackage.SetAttribute('Name', $identity.GetAttribute('Name'))
+    $mainPackage.SetAttribute('Publisher', $identity.GetAttribute('Publisher'))
+    $mainPackage.SetAttribute('Version', $PackageVersion)
+    $mainPackage.SetAttribute('ProcessorArchitecture', $architecture)
+    $mainPackage.SetAttribute('Uri', $PackageUri)
+    $appInstaller.AppendChild($mainPackage) | Out-Null
+
+    $updateSettings = $appInstallerDocument.CreateElement('UpdateSettings', $appInstallerNamespace)
+    $onLaunch = $appInstallerDocument.CreateElement('OnLaunch', $appInstallerNamespace)
+    $onLaunch.SetAttribute('HoursBetweenUpdateChecks', [string]$UpdateCheckHours)
+    $onLaunch.SetAttribute('ShowPrompt', 'false')
+    $onLaunch.SetAttribute('UpdateBlocksActivation', 'true')
+    $updateSettings.AppendChild($onLaunch) | Out-Null
+    $updateSettings.AppendChild($appInstallerDocument.CreateElement('AutomaticBackgroundTask', $appInstallerNamespace)) | Out-Null
+    $appInstaller.AppendChild($updateSettings) | Out-Null
+
+    $appInstallerDocument.Save($appInstallerPath)
+    Write-Host "Created App Installer auto-update feed: $appInstallerPath"
 }
 
 Write-Host "Created MSIX package: $packagePath"

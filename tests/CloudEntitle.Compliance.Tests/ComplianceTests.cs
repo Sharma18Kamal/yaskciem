@@ -46,7 +46,7 @@ public sealed class ComplianceTests
         var audit = new AuditEventService().Create("ReviewCompleted", "Access review completed", metadata: new Dictionary<string, string> { ["ticket"] = "INC-1", ["token"] = "do-not-store", ["password"] = "do-not-store" });
 
         Assert.Contains("ticket", audit.Metadata.Keys);
-        Assert.DoesNotContain("token", audit.Metadata.Keys);
-        Assert.DoesNotContain("password", audit.Metadata.Keys);
+        Assert.Equal("[REDACTED]", audit.Metadata["token"]);
+        Assert.Equal("[REDACTED]", audit.Metadata["password"]);
     }
 }

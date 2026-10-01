@@ -2,23 +2,25 @@
 
 ## Automated checks
 
-- Restore with `.nuget/NuGet.Config`.
-- Build `src/CloudEntitle.Desktop/CloudEntitle.Desktop.csproj` in Release mode.
-- Run `dotnet test CloudEntitle.sln`.
-- Run `.\scripts\publish-windows.ps1` on Windows.
+- CI restores and builds the complete solution in Release mode with `.nuget/NuGet.Config`.
+- CI runs the complete test suite against the Release build.
+- CI parses all packaging/install PowerShell scripts and creates an unsigned MSIX smoke package with Windows SDK `MakeAppx`.
+- CI uploads the unsigned MSIX as a short-lived QA artifact (7-day retention). It is not signed or suitable for distribution.
+- Before release, create the signed MSIX and App Installer feed with `scripts/package-msix.ps1`, then verify the signature and install/update flow on a clean Windows VM.
 
 ## Runtime checks
 
-- Confirm `az`, `aws`, and `gcloud` are installed and authenticated.
-- Confirm provider discovery is read-only.
-- Confirm missing or unauthenticated tools produce a status message rather than a crash.
-- Confirm findings, inventory, risk rules, and trial state persist under `%LocalAppData%\\YASK-CIEM`.
-- Confirm JSON report export works.
-- Confirm email and MAC-based trial reuse is rejected.
+- Install on a clean supported Windows 10/11 VM as a standard user; verify Start Menu launch and clean uninstall.
+- Install from the `.appinstaller` feed, publish a higher package version at the same package URL, and verify on-launch/background update behavior and user-data preservation.
+- Confirm `az`, `aws`, and `gcloud` missing, unauthenticated, and authenticated states are handled without crashing; verify discovery remains read-only.
+- Confirm findings, inventory, risk rules, and trial state persist under `%LocalAppData%\\YASK-CIEM` and JSON/CSV report export works.
+- Confirm trial reuse is rejected across normalized email and device identifiers, and validate expiration/clock rollback behavior.
+- Verify the installed build’s logs contain no credential values and that configured API security headers are present.
 
 ## Release blockers
 
-- The local scaffold targets .NET 9 because that is the installed SDK. Production should move to the brief's .NET 10 target after the production SDK is available.
-- MSI/MSIX packaging and code signing require a selected packaging tool and organization certificate.
-- Remote HTTPS license validation is not implemented; the local trial service is not a substitute for a production licensing backend.
-- Real cloud validation requires test tenants/accounts and authenticated CLI sessions.
+- Release signing requires the organization-owned code-signing certificate and trusted publisher chain; CI intentionally produces unsigned QA artifacts only.
+- Automatic updates require stable HTTPS hosting for the signed MSIX and `.appinstaller` feed. The per-user ZIP installer has no automatic update mechanism.
+- Remote HTTPS license validation and a server-approved trial backend are not implemented; local trial state is not production anti-tamper enforcement.
+- Real cloud acceptance testing requires isolated Azure, AWS, and GCP test accounts with least-privilege read-only identities and authenticated CLI sessions.
+- The current application targets .NET 9. A production framework upgrade must be scheduled and validated before declaring the requested .NET 10 target complete.
