@@ -121,25 +121,91 @@ public sealed class DashboardViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;
     private readonly IAnalyticsService _analytics;
+    private readonly ILiveCloudScanService? _liveCloudScanService;
     private AnalyticsSnapshot _analyticsSnapshot = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
-    public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics) { _demoData = demoData; _analytics = analytics; _demoData.DataChanged += async (_, _) => await RefreshAsync(); _ = RefreshAsync(); }
+    private LiveCloudScanResult? _liveScan;
+    private string _scanStatusMessage = "Run a scan to refresh signed-in cloud providers.";
+
+    public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null)
+    {
+        _demoData = demoData;
+        _analytics = analytics;
+        _liveCloudScanService = liveCloudScanService;
+        ScanCommand = new AsyncRelayCommand(RunScanAsync);
+        _demoData.DataChanged += async (_, _) => await RefreshAsync();
+        _ = RefreshAsync();
+    }
+
     public override string Title => "Dashboard";
     public override string Subtitle => "A clear view of your cloud entitlement posture.";
-    public int CloudAccounts => _analyticsSnapshot.CloudAccounts;
-    public int Identities => _analyticsSnapshot.Identities;
-    public int Resources => _analyticsSnapshot.Resources;
+    public AsyncRelayCommand ScanCommand { get; }
+    public string ScanStatusMessage { get => _scanStatusMessage; private set => SetProperty(ref _scanStatusMessage, value); }
+    public int CloudAccounts => _analyticsSnapshot.CloudAccounts + (_liveScan?.AccountCount ?? 0);
+    public int Identities => _analyticsSnapshot.Identities + (_liveScan?.IdentityCount ?? 0);
+    public int Resources => _analyticsSnapshot.Resources + (_liveScan?.ResourceCount ?? 0);
     public int Entitlements => _analyticsSnapshot.Entitlements;
-    public int PrivilegedIdentities => _analyticsSnapshot.PrivilegedIdentities;
-    public int RiskFindings => _analyticsSnapshot.RiskFindings;
-    public int CriticalFindings => _analyticsSnapshot.CriticalFindings;
-    public int HighFindings => _analyticsSnapshot.HighFindings;
+    public int PrivilegedIdentities => _analyticsSnapshot.PrivilegedIdentities + (_liveScan?.PrivilegedIdentityCount ?? 0);
+    public int RiskFindings => _analyticsSnapshot.RiskFindings + (_liveScan?.Findings.Count ?? 0);
+    public int CriticalFindings => _analyticsSnapshot.CriticalFindings + (_liveScan?.Findings.Count(finding => finding.Severity == RiskSeverity.Critical) ?? 0);
+    public int HighFindings => _analyticsSnapshot.HighFindings + (_liveScan?.Findings.Count(finding => finding.Severity == RiskSeverity.High) ?? 0);
     public int DormantIdentities => _analyticsSnapshot.DormantIdentities;
     public int ExternalIdentities => _analyticsSnapshot.ExternalIdentities;
-    public string LastScan => _analyticsSnapshot.LastScan?.ToLocalTime().ToString("g") ?? "No scans yet";
-    public IReadOnlyList<AnalyticsMetric> FindingsByProvider => _analyticsSnapshot.FindingsByProvider;
-    public IReadOnlyList<AnalyticsMetric> FindingsBySeverity => _analyticsSnapshot.FindingsBySeverity;
+    public string LastScan => (_liveScan is not null && (!_analyticsSnapshot.LastScan.HasValue || _liveScan.CompletedAt > _analyticsSnapshot.LastScan.Value)
+        ? _liveScan.CompletedAt
+        : _analyticsSnapshot.LastScan)?.ToLocalTime().ToString("g") ?? "No scans yet";
+    public IReadOnlyList<AnalyticsMetric> FindingsByProvider => MergeMetrics(_analyticsSnapshot.FindingsByProvider, _liveScan?.Findings.GroupBy(finding => finding.CloudProvider.ToString()).Select(group => new AnalyticsMetric(group.Key, group.Count())));
+    public IReadOnlyList<AnalyticsMetric> FindingsBySeverity => MergeMetrics(_analyticsSnapshot.FindingsBySeverity, _liveScan?.Findings.GroupBy(finding => finding.Severity.ToString()).Select(group => new AnalyticsMetric(group.Key, group.Count())));
     public IReadOnlyList<AnalyticsMetric> AccessByDecision => _analyticsSnapshot.AccessByDecision;
-    private async Task RefreshAsync() { _analyticsSnapshot = _analytics.Calculate(await _demoData.GetSnapshotAsync()); foreach (var property in new[] { nameof(CloudAccounts), nameof(Identities), nameof(Resources), nameof(Entitlements), nameof(PrivilegedIdentities), nameof(RiskFindings), nameof(CriticalFindings), nameof(HighFindings), nameof(DormantIdentities), nameof(ExternalIdentities), nameof(LastScan), nameof(FindingsByProvider), nameof(FindingsBySeverity), nameof(AccessByDecision) }) OnPropertyChanged(property); }
+
+    public async Task RunScanAsync()
+    {
+        if (_liveCloudScanService is null)
+        {
+            ScanStatusMessage = "Live cloud scanning is not configured.";
+            return;
+        }
+
+        IsLoading = true;
+        ErrorMessage = null;
+        ScanStatusMessage = "Checking provider sign-ins and scanning available accounts...";
+        try
+        {
+            _liveScan = await _liveCloudScanService.ScanAsync();
+            ScanStatusMessage = string.Join("  |  ", _liveScan.ProviderMessages);
+            await RefreshAsync();
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Scan failed: {exception.Message}";
+            ScanStatusMessage = "The scan did not complete.";
+        }
+        finally
+        {
+            IsLoading = false;
+            OnPropertyChanged(nameof(ScanStatusMessage));
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        _analyticsSnapshot = _analytics.Calculate(await _demoData.GetSnapshotAsync());
+        foreach (var property in new[] { nameof(CloudAccounts), nameof(Identities), nameof(Resources), nameof(Entitlements), nameof(PrivilegedIdentities), nameof(RiskFindings), nameof(CriticalFindings), nameof(HighFindings), nameof(DormantIdentities), nameof(ExternalIdentities), nameof(LastScan), nameof(FindingsByProvider), nameof(FindingsBySeverity), nameof(AccessByDecision) })
+        {
+            OnPropertyChanged(property);
+        }
+    }
+
+    private static IReadOnlyList<AnalyticsMetric> MergeMetrics(IReadOnlyList<AnalyticsMetric> existing, IEnumerable<AnalyticsMetric>? additional)
+    {
+        var values = existing.Where(metric => metric.Value > 0)
+            .Concat(additional ?? Array.Empty<AnalyticsMetric>())
+            .GroupBy(metric => metric.Label)
+            .Select(group => new AnalyticsMetric(group.Key, group.Sum(metric => metric.Value)))
+            .OrderByDescending(metric => metric.Value)
+            .ThenBy(metric => metric.Label)
+            .ToArray();
+        return values.Length == 0 ? new[] { new AnalyticsMetric("No findings", 0) } : values;
+    }
 }
 public sealed class CloudAccountsViewModel : WorkspaceViewModel
 {

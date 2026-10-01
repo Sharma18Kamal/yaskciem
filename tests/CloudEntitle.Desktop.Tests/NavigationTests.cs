@@ -104,6 +104,26 @@ public sealed class NavigationTests
         Assert.Contains("sign-out command was opened", viewModel.ConnectionGuidance);
     }
 
+    [Fact]
+    public async Task DashboardViewModel_ShouldDisplayLiveScanResultsAndPartialProviderStatus()
+    {
+        var azure = new FakeCloudProvider(CloudProviderType.Azure, connected: true);
+        var aws = new FakeCloudProvider(CloudProviderType.Aws, connected: false);
+        var scanService = new LiveCloudScanService(new ICloudProvider[] { azure, aws });
+        var dashboard = new DashboardViewModel(new NoopDemoDataService(), new NoopAnalyticsService(), scanService);
+
+        await dashboard.RunScanAsync();
+
+        Assert.Equal(1, dashboard.CloudAccounts);
+        Assert.Equal(2, dashboard.Identities);
+        Assert.Equal(1, dashboard.Resources);
+        Assert.Equal(1, dashboard.PrivilegedIdentities);
+        Assert.Equal(1, dashboard.RiskFindings);
+        Assert.Equal(1, dashboard.HighFindings);
+        Assert.Contains("Aws: no active CLI sign-in", dashboard.ScanStatusMessage);
+        Assert.NotEqual("No scans yet", dashboard.LastScan);
+    }
+
     private sealed class NoopDemoDataService : IDemoDataService
     {
         public event EventHandler? DataChanged { add { } remove { } }
@@ -136,5 +156,43 @@ public sealed class NavigationTests
             Confirmations.Add(message);
             return confirmationResult;
         }
+    }
+
+    private sealed class FakeCloudProvider(CloudProviderType providerType, bool connected) : ICloudProvider, IResourceProvider
+    {
+        private readonly Guid _accountId = Guid.NewGuid();
+        public CloudProviderType ProviderType => providerType;
+        public Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(connected);
+
+        public Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudAccount>>(new[]
+            {
+                new CloudAccount { Id = _accountId, Name = "Test subscription", CloudProvider = providerType, SubscriptionId = "sub-test", ExternalAccountId = "tenant-test" }
+            });
+
+        public Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPrincipal>>(new[]
+            {
+                new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = providerType, Name = "Owner", PrincipalId = "owner-test", IdentityType = IdentityType.User, IsPrivileged = true },
+                new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = providerType, Name = "Reader", PrincipalId = "reader-test", IdentityType = IdentityType.User }
+            });
+
+        public Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudRole>>(new[]
+            {
+                new CloudRole { Id = Guid.NewGuid(), AccountId = accountId, Name = "Owner", RoleId = "owner-role" }
+            });
+
+        public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPermission>>(new[]
+            {
+                new CloudPermission { Id = Guid.NewGuid(), AccountId = accountId, Name = "Owner", Action = "*", Resource = "*", Source = "Test provider" }
+            });
+
+        public Task<IReadOnlyList<CloudResource>> GetResourcesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudResource>>(new[]
+            {
+                new CloudResource { Id = Guid.NewGuid(), AccountId = accountId, Name = "Test resource", ResourceId = "resource-test", Type = "Resource" }
+            });
     }
 }

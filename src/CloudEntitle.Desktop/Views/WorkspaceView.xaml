@@ -5,6 +5,11 @@
     <UserControl.Resources>
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
             <StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                <Button Content="Scan Now" Command="{Binding ScanCommand}" Style="{StaticResource PrimaryButton}" ToolTip="Scan signed-in cloud providers using read-only CLI access"/>
+                <TextBlock Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
             <UniformGrid Columns="2" Rows="4">
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CLOUD ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CloudAccounts}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="IDENTITIES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding Identities}" Style="{StaticResource CardValue}"/></StackPanel></Border>
