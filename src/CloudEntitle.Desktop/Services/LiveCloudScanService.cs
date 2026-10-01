@@ -23,7 +23,13 @@ public sealed record LiveCloudScanResult(
     DateTime CompletedAt,
     IReadOnlyList<string> ProviderMessages,
     IReadOnlyList<CloudPrincipal> IdentityRecords,
-    IReadOnlyList<CloudResource> ResourceRecords);
+    IReadOnlyList<CloudResource> ResourceRecords,
+    IReadOnlyList<DiscoveredCloudRole> RoleRecords,
+    IReadOnlyList<DiscoveredCloudPermission> PermissionRecords,
+    DateTime StartedAt);
+
+public sealed record DiscoveredCloudRole(CloudProviderType Provider, CloudRole Role);
+public sealed record DiscoveredCloudPermission(CloudProviderType Provider, CloudPermission Permission);
 
 public sealed class LiveCloudScanService : ILiveCloudScanService
 {
@@ -40,6 +46,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
 
     public async Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default)
     {
+        var startedAt = DateTime.UtcNow;
         var accountsScanned = 0;
         var identitiesScanned = 0;
         var resourcesScanned = 0;
@@ -48,6 +55,8 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var privilegedIdentities = 0;
         var identityRecords = new List<CloudPrincipal>();
         var resourceRecords = new List<CloudResource>();
+        var roleRecords = new List<DiscoveredCloudRole>();
+        var permissionRecords = new List<DiscoveredCloudPermission>();
         var findings = new List<RiskFinding>();
         var messages = new List<string>();
 
@@ -74,10 +83,13 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                         identityRecords.AddRange(identities);
                         privilegedIdentities += identities.Count(identity => identity.IsPrivileged);
 
-                        rolesScanned += (await provider.DiscoverRolesAsync(account.Id, cancellationToken)).Count;
+                        var roles = await provider.DiscoverRolesAsync(account.Id, cancellationToken);
+                        rolesScanned += roles.Count;
+                        roleRecords.AddRange(roles.Select(role => new DiscoveredCloudRole(provider.ProviderType, role)));
 
                         var permissions = await provider.DiscoverPermissionsAsync(account.Id, cancellationToken);
                         permissionsScanned += permissions.Count;
+                        permissionRecords.AddRange(permissions.Select(permission => new DiscoveredCloudPermission(provider.ProviderType, permission)));
                         findings.AddRange(await _riskEngine.EvaluateAsync(permissions, provider.ProviderType, cancellationToken));
 
                         if (provider is IResourceProvider resourceProvider)
@@ -125,7 +137,10 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             DateTime.UtcNow,
             messages,
             identityRecords,
-            resourceRecords);
+            resourceRecords,
+            roleRecords,
+            permissionRecords,
+            startedAt);
         ScanCompleted?.Invoke(this, EventArgs.Empty);
         return CurrentResult;
     }

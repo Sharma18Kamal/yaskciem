@@ -32,6 +32,9 @@ public sealed record DemoSnapshot(
     IReadOnlyList<RecommendationModel> Recommendations,
     IReadOnlyList<Scan> Scans)
 {
+    public IReadOnlyList<CloudRole> Roles { get; init; } = Array.Empty<CloudRole>();
+    public IReadOnlyList<CloudPermission> Permissions { get; init; } = Array.Empty<CloudPermission>();
+
     public DemoStatistics Statistics => new(
         Accounts.Count,
         Principals.Count,

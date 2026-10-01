@@ -93,7 +93,11 @@ public sealed class DemoDataService : IDemoDataService
             await context.EffectiveAccesses.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken),
             await context.NormalizedRiskFindings.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken),
             await context.NormalizedRecommendations.AsNoTracking().Where(item => context.NormalizedRiskFindings.Where(finding => ids.Contains(finding.CloudAccountId)).Select(finding => finding.Id).Contains(item.RiskFindingId)).ToListAsync(cancellationToken),
-            await context.Scans.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
+            await context.Scans.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken))
+        {
+            Roles = await context.CloudRoles.AsNoTracking().Where(item => ids.Contains(item.AccountId)).ToListAsync(cancellationToken),
+            Permissions = await context.CloudPermissions.AsNoTracking().Where(item => ids.Contains(item.AccountId)).ToListAsync(cancellationToken)
+        };
     }
 
     private async Task<DemoStatistics> GetStatisticsAsync(CloudEntitleDbContext context, CancellationToken cancellationToken)
