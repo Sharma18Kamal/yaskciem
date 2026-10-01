@@ -124,6 +124,30 @@ public sealed class NavigationTests
         Assert.NotEqual("No scans yet", dashboard.LastScan);
     }
 
+    [Fact]
+    public async Task LiveScan_ShouldPopulateSearchableIdentityAndResourceScreens()
+    {
+        var scanService = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) });
+        var identities = new IdentitiesViewModel(new NoopDemoDataService(), scanService);
+        var resources = new ResourcesViewModel(new NoopDemoDataService(), scanService);
+        var dashboard = new DashboardViewModel(new NoopDemoDataService(), new NoopAnalyticsService(), scanService);
+
+        await dashboard.RunScanAsync();
+
+        Assert.Equal(2, identities.Identities.Count);
+        Assert.True(identities.HasResults);
+        Assert.Single(resources.Resources);
+        Assert.True(resources.HasResults);
+        identities.SearchText = "Owner";
+        resources.SearchText = "resource-test";
+        Assert.Single(identities.Identities);
+        Assert.Single(resources.Resources);
+        identities.SearchText = "missing";
+        resources.SearchText = "missing";
+        Assert.False(identities.HasResults);
+        Assert.False(resources.HasResults);
+    }
+
     private sealed class NoopDemoDataService : IDemoDataService
     {
         public event EventHandler? DataChanged { add { } remove { } }

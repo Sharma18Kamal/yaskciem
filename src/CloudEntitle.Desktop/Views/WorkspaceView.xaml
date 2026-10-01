@@ -29,7 +29,39 @@
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ResourcesViewModel}">
-            <StackPanel><TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search resources"/><ContentControl Content="{Binding}"/></StackPanel>
+            <StackPanel>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search resources"/>
+                <DataGrid ItemsSource="{Binding Resources}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" CanUserSortColumns="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="180"/>
+                        <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="140"/>
+                        <DataGridTextColumn Header="Resource ID" Binding="{Binding ResourceId}" Width="220"/>
+                        <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="*"/>
+                        <DataGridTextColumn Header="Location" Binding="{Binding Location}" Width="120"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Text="No scanned resources match this search. Run a scan from Dashboard to discover resources." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:IdentitiesViewModel}">
+            <StackPanel>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search identities"/>
+                <DataGrid ItemsSource="{Binding Identities}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" CanUserSortColumns="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="180"/>
+                        <DataGridTextColumn Header="Provider" Binding="{Binding CloudProvider}" Width="110"/>
+                        <DataGridTextColumn Header="Type" Binding="{Binding IdentityType}" Width="110"/>
+                        <DataGridTextColumn Header="Email" Binding="{Binding Email}" Width="180"/>
+                        <DataGridTextColumn Header="Principal ID" Binding="{Binding PrincipalId}" Width="*"/>
+                        <DataGridCheckBoxColumn Header="Privileged" Binding="{Binding IsPrivileged}" Width="90"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Text="No scanned identities match this search. Run a scan from Dashboard to discover identities." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:CloudAccountsViewModel}">
             <StackPanel>

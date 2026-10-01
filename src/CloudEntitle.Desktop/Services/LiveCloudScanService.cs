@@ -7,6 +7,8 @@ namespace CloudEntitle.Desktop.Services;
 
 public interface ILiveCloudScanService
 {
+    LiveCloudScanResult? CurrentResult { get; }
+    event EventHandler? ScanCompleted;
     Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default);
 }
 
@@ -19,12 +21,17 @@ public sealed record LiveCloudScanResult(
     int PrivilegedIdentityCount,
     IReadOnlyList<RiskFinding> Findings,
     DateTime CompletedAt,
-    IReadOnlyList<string> ProviderMessages);
+    IReadOnlyList<string> ProviderMessages,
+    IReadOnlyList<CloudPrincipal> IdentityRecords,
+    IReadOnlyList<CloudResource> ResourceRecords);
 
 public sealed class LiveCloudScanService : ILiveCloudScanService
 {
     private readonly IReadOnlyList<ICloudProvider> _providers;
     private readonly RiskEngine _riskEngine = new();
+
+    public LiveCloudScanResult? CurrentResult { get; private set; }
+    public event EventHandler? ScanCompleted;
 
     public LiveCloudScanService(IEnumerable<ICloudProvider> providers)
     {
@@ -39,6 +46,8 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var rolesScanned = 0;
         var permissionsScanned = 0;
         var privilegedIdentities = 0;
+        var identityRecords = new List<CloudPrincipal>();
+        var resourceRecords = new List<CloudResource>();
         var findings = new List<RiskFinding>();
         var messages = new List<string>();
 
@@ -62,6 +71,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     {
                         var identities = await provider.DiscoverIdentitiesAsync(account.Id, cancellationToken);
                         identitiesScanned += identities.Count;
+                        identityRecords.AddRange(identities);
                         privilegedIdentities += identities.Count(identity => identity.IsPrivileged);
 
                         rolesScanned += (await provider.DiscoverRolesAsync(account.Id, cancellationToken)).Count;
@@ -72,7 +82,9 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
 
                         if (provider is IResourceProvider resourceProvider)
                         {
-                            resourcesScanned += (await resourceProvider.GetResourcesAsync(account.Id, cancellationToken)).Count;
+                            var resources = await resourceProvider.GetResourcesAsync(account.Id, cancellationToken);
+                            resourcesScanned += resources.Count;
+                            resourceRecords.AddRange(resources);
                         }
                     }
                     catch (OperationCanceledException)
@@ -102,7 +114,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             messages.Add("No cloud providers are configured.");
         }
 
-        return new LiveCloudScanResult(
+        CurrentResult = new LiveCloudScanResult(
             accountsScanned,
             identitiesScanned,
             resourcesScanned,
@@ -111,6 +123,10 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             privilegedIdentities,
             findings,
             DateTime.UtcNow,
-            messages);
+            messages,
+            identityRecords,
+            resourceRecords);
+        ScanCompleted?.Invoke(this, EventArgs.Empty);
+        return CurrentResult;
     }
 }

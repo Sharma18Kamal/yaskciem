@@ -48,6 +48,11 @@ public sealed class MainWindowViewModel : ObservableObject
                 Navigate(item);
             }
         });
+        OpenCloudDisconnectCommand = new RelayCommand(() =>
+        {
+            Navigate(CloudAccountsNavigationItem);
+            StatusMessage = "Choose a provider to disconnect its CLI session";
+        });
     }
 
     public string ApplicationName => "YASK-CIEM";
@@ -61,6 +66,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public NavigationItem CurrentNavigationItem { get => _currentNavigationItem; private set => SetProperty(ref _currentNavigationItem, value); }
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public ParameterizedRelayCommand NavigateCommand { get; }
+    public RelayCommand OpenCloudDisconnectCommand { get; }
 
     public void Navigate(NavigationItem item)
     {
@@ -269,8 +275,66 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
 }
 
 public sealed record CloudProviderConnectionOption(string Name, string CliName, string Command, string Description, RelayCommand ConnectCommand, RelayCommand DisconnectCommand);
-public sealed class IdentitiesViewModel : WorkspaceViewModel { public IdentitiesViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Identities"; public override string Subtitle => "Review users, groups, service identities, and privilege signals."; }
-public sealed class ResourcesViewModel : WorkspaceViewModel { public ResourcesViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Resources"; public override string Subtitle => "Search normalized cloud resources by provider and scope."; public string SearchText { get; set; } = string.Empty; }
+public sealed class IdentitiesViewModel : WorkspaceViewModel
+{
+    private readonly ILiveCloudScanService? _liveCloudScanService;
+    private string _searchText = string.Empty;
+
+    public IdentitiesViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
+    {
+        _liveCloudScanService = liveCloudScanService;
+        if (_liveCloudScanService is not null)
+        {
+            _liveCloudScanService.ScanCompleted += (_, _) =>
+            {
+                OnPropertyChanged(nameof(Identities));
+                OnPropertyChanged(nameof(HasResults));
+            };
+        }
+    }
+
+    public override string Title => "Identities";
+    public override string Subtitle => "Review users, groups, service identities, and privilege signals.";
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Identities)); OnPropertyChanged(nameof(HasResults)); } } }
+    public IReadOnlyList<CloudPrincipal> Identities => (_liveCloudScanService?.CurrentResult?.IdentityRecords ?? Array.Empty<CloudPrincipal>())
+        .Where(identity => string.IsNullOrWhiteSpace(SearchText)
+            || identity.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+            || (identity.Email?.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (identity.PrincipalId?.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ?? false))
+        .ToArray();
+    public bool HasResults => Identities.Count > 0;
+}
+
+public sealed class ResourcesViewModel : WorkspaceViewModel
+{
+    private readonly ILiveCloudScanService? _liveCloudScanService;
+    private string _searchText = string.Empty;
+
+    public ResourcesViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
+    {
+        _liveCloudScanService = liveCloudScanService;
+        if (_liveCloudScanService is not null)
+        {
+            _liveCloudScanService.ScanCompleted += (_, _) =>
+            {
+                OnPropertyChanged(nameof(Resources));
+                OnPropertyChanged(nameof(HasResults));
+            };
+        }
+    }
+
+    public override string Title => "Resources";
+    public override string Subtitle => "Search normalized cloud resources by provider and scope.";
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Resources)); OnPropertyChanged(nameof(HasResults)); } } }
+    public IReadOnlyList<CloudResource> Resources => (_liveCloudScanService?.CurrentResult?.ResourceRecords ?? Array.Empty<CloudResource>())
+        .Where(resource => string.IsNullOrWhiteSpace(SearchText)
+            || resource.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+            || resource.Type.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+            || (resource.ResourceId?.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (resource.Scope?.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ?? false))
+        .ToArray();
+    public bool HasResults => Resources.Count > 0;
+}
 public sealed class EntitlementsViewModel : WorkspaceViewModel { public EntitlementsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Entitlements"; public override string Subtitle => "Understand which roles, policies, and permissions are granted."; }
 public sealed class EffectiveAccessViewModel : WorkspaceViewModel { public EffectiveAccessViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Effective Access"; public override string Subtitle => "Trace direct and inherited access paths."; }
 public sealed class RiskFindingsViewModel : WorkspaceViewModel { public RiskFindingsViewModel(IDemoDataService demoData) : base(demoData) { } public override string Title => "Risk Findings"; public override string Subtitle => "Evidence-backed findings will appear here after analysis is enabled."; }
