@@ -8,8 +8,10 @@ namespace CloudEntitle.Desktop;
 public partial class MainWindow : Window
 {
     private static readonly TimeSpan SessionIdleTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan TrialStatusRefreshInterval = TimeSpan.FromSeconds(30);
     private readonly MainWindowViewModel _viewModel;
     private readonly DispatcherTimer _idleTimer;
+    private readonly DispatcherTimer _trialStatusTimer;
 
     public MainWindow(MainWindowViewModel viewModel)
     {
@@ -18,8 +20,18 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         _idleTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = SessionIdleTimeout };
         _idleTimer.Tick += IdleTimer_Tick;
-        Loaded += (_, _) => RestartIdleTimer();
-        Closed += (_, _) => _idleTimer.Stop();
+        _trialStatusTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TrialStatusRefreshInterval };
+        _trialStatusTimer.Tick += TrialStatusTimer_Tick;
+        Loaded += (_, _) =>
+        {
+            RestartIdleTimer();
+            _trialStatusTimer.Start();
+        };
+        Closed += (_, _) =>
+        {
+            _idleTimer.Stop();
+            _trialStatusTimer.Stop();
+        };
         PreviewMouseMove += UserActivity;
         PreviewMouseDown += UserActivity;
         PreviewMouseWheel += UserActivity;
@@ -73,5 +85,10 @@ public partial class MainWindow : Window
         {
             RestartIdleTimer();
         }
+    }
+
+    private async void TrialStatusTimer_Tick(object? sender, EventArgs e)
+    {
+        await _viewModel.RefreshTrialStatusAsync();
     }
 }

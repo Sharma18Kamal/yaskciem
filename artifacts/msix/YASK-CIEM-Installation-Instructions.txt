@@ -1,6 +1,14 @@
 Before You Start
 Install the provider CLIs on the same Windows account that runs YASK-CIEM. Then open a new PowerShell window and verify they’re on your PATH.
 
+Install Prerequisites:
+Install prerequisites:
+	winget install Microsoft.DotNet.SDK.9
+	winget install Microsoft.AzureCLI
+	winget install Amazon.AWSCLI
+	winget install Google.CloudSDK
+
+
 Azure
 
 Install Azure CLI with WinGet:

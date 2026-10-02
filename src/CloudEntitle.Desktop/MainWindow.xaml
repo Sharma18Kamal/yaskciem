@@ -14,17 +14,17 @@
                     <TextBlock Text="Cloud identity exposure management" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Border Style="{StaticResource StatusPill}" ToolTip="Cloud inventory scans do not modify provider resources. Disconnect signs out the provider CLI."><TextBlock Text="SCAN ONLY" Foreground="{StaticResource SuccessBrush}"/></Border>
-                    <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
+                    <Border Style="{StaticResource StatusPill}" ToolTip="Seven-day local trial status. The trial continues across app reinstalls on this Windows installation."><TextBlock Text="{Binding TrialStatusText}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
+                    <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" IsEnabled="{Binding IsTrialActive}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
                     <Button Content="Disconnect Cloud" Command="{Binding OpenCloudDisconnectCommand}" IsEnabled="{Binding CanDisconnectCloud}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Sign out of the active provider CLI session"/>
-                    <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNavigationItem}" Style="{StaticResource QuietButton}" Margin="12,0,0,0" ToolTip="Open application settings"/>
+                    <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNavigationItem}" IsEnabled="{Binding IsTrialActive}" Style="{StaticResource QuietButton}" Margin="12,0,0,0" ToolTip="Open application settings"/>
                     <Button Content="−" Style="{StaticResource WindowChromeButton}" Margin="16,0,0,0" Click="MinimizeButton_Click" ToolTip="Minimize window" AutomationProperties.Name="Minimize window"/>
                     <Button Content="□" Style="{StaticResource WindowChromeButton}" Click="MaximizeButton_Click" ToolTip="Maximize or restore window" AutomationProperties.Name="Maximize or restore window"/>
                     <Button Content="×" Style="{StaticResource WindowChromeButton}" Click="CloseButton_Click" ToolTip="Close YASK-CIEM" AutomationProperties.Name="Close YASK-CIEM"/>
                 </StackPanel>
             </Grid>
         </Border>
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="1" IsEnabled="{Binding IsTrialActive}">
             <Grid.ColumnDefinitions><ColumnDefinition Width="250"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0" Padding="16,22">
                 <DockPanel>

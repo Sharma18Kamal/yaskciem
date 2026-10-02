@@ -10,6 +10,7 @@ using CloudEntitle.Cloud.Azure;
 using CloudEntitle.Cloud.Gcp;
 using CloudEntitle.Infrastructure;
 using CloudEntitle.Infrastructure.Persistence;
+using CloudEntitle.Licensing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -23,7 +24,7 @@ public partial class App : System.Windows.Application
 {
 	private ServiceProvider? _services;
 
-	protected override void OnStartup(StartupEventArgs e)
+	protected override async void OnStartup(StartupEventArgs e)
 	{
 		base.OnStartup(e);
 		var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CloudEntitle", "Logs");
@@ -36,13 +37,14 @@ public partial class App : System.Windows.Application
 
 		var services = new ServiceCollection();
 		var databaseConfiguration = new DatabaseConfiguration();
-		new DbInitializer(databaseConfiguration).InitializeAsync().GetAwaiter().GetResult();
+		await new DbInitializer(databaseConfiguration).InitializeAsync();
 		services.AddDbContextFactory<CloudEntitleDbContext>(options => options.UseSqlite(databaseConfiguration.ConnectionString));
 		services.AddSingleton<IDemoDataService, DemoDataService>();
 		services.AddSingleton<IAnalyticsService, AnalyticsService>();
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<IReportService, SqliteReportService>();
 		services.AddSingleton<ILiveScanHistoryStore, LocalLiveScanHistoryStore>();
+		services.AddSingleton<ITrialService, TrialService>();
 		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new AwsProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
@@ -67,6 +69,7 @@ public partial class App : System.Windows.Application
 		services.AddTransient<SettingsViewModel>();
 		services.AddSingleton<MainWindow>();
 		_services = services.BuildServiceProvider();
+		await _services.GetRequiredService<MainWindowViewModel>().InitializeTrialAsync();
 		_services.GetRequiredService<MainWindow>().Show();
 	}
 

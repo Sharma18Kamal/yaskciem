@@ -1,3 +1,4 @@
+using System.IO;
 using CloudEntitle.Domain;
 using CloudEntitle.Licensing;
 using Xunit;
@@ -17,6 +18,29 @@ public class TrialServiceTests
         Assert.Equal(now, trial.TrialStart);
         Assert.Equal(now.AddDays(7), trial.TrialEnd);
         Assert.Equal(LicenseStatus.Trial, trial.Status);
+    }
+
+    [Fact]
+    public async Task TrialService_ShouldContinueOriginalTrialAfterReinstantiationOnSameDevice()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var statePath = Path.Combine(directory, "trial-state.json");
+        var now = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var deviceIdentifier = "stable-windows-device-id";
+        var localTrialId = $"YASK-LOCAL-DEVICE-{deviceIdentifier}";
+        var installedService = new TrialService(() => now, new JsonTrialStateStore(statePath));
+        var initialTrial = await installedService.StartTrialAsync(localTrialId, deviceIdentifier);
+
+        now = now.AddDays(4);
+        var reinstalledService = new TrialService(() => now, new JsonTrialStateStore(statePath));
+        var continuedTrial = await reinstalledService.GetTrialStatusAsync(localTrialId, deviceIdentifier);
+
+        Assert.NotNull(continuedTrial);
+        Assert.Equal(initialTrial.TrialStart, continuedTrial.TrialStart);
+        Assert.Equal(initialTrial.TrialEnd, continuedTrial.TrialEnd);
+        Assert.Equal(3, Math.Ceiling((continuedTrial.TrialEnd - now).TotalDays));
+        await Assert.ThrowsAsync<TrialAlreadyUsedException>(() => reinstalledService.StartTrialAsync(localTrialId, deviceIdentifier));
+        Directory.Delete(directory, recursive: true);
     }
 
     [Fact]

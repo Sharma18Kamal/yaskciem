@@ -69,6 +69,90 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task MainWindowViewModel_ShouldStartDeviceTrialWithoutRequestingEmail()
+    {
+        var trialService = new RecordingTrialService(existingTrial: null, newTrial: new TrialInfo
+        {
+            TrialStart = DateTime.UtcNow,
+            TrialEnd = DateTime.UtcNow.AddDays(7),
+            Status = LicenseStatus.Trial
+        });
+        var viewModel = new MainWindowViewModel(new TestNavigationService(new CloudAccountsViewModel(new NoopDemoDataService())), trialService: trialService, getDeviceIdentifier: () => "stable-machine-id");
+
+        await viewModel.InitializeTrialAsync();
+
+        Assert.True(viewModel.IsTrialActive);
+        Assert.Contains("7 days left", viewModel.TrialStatusText);
+        Assert.Equal("YASK-LOCAL-DEVICE-stable-machine-id", trialService.StartedUserId);
+        Assert.Equal("stable-machine-id", trialService.StartedDeviceIdentifier);
+        Assert.DoesNotContain('@', trialService.StartedUserId!);
+    }
+
+    [Fact]
+    public async Task MainWindowViewModel_ShouldContinueExistingTrialOnSameDevice()
+    {
+        var existingTrial = new TrialInfo
+        {
+            TrialStart = DateTime.UtcNow.AddDays(-4),
+            TrialEnd = DateTime.UtcNow.AddDays(3),
+            Status = LicenseStatus.Trial
+        };
+        var trialService = new RecordingTrialService(existingTrial, new TrialInfo());
+        var viewModel = new MainWindowViewModel(new TestNavigationService(new CloudAccountsViewModel(new NoopDemoDataService())), trialService: trialService, getDeviceIdentifier: () => "stable-machine-id");
+
+        await viewModel.InitializeTrialAsync();
+
+        Assert.True(viewModel.IsTrialActive);
+        Assert.Contains("3 days left", viewModel.TrialStatusText);
+        Assert.Null(trialService.StartedUserId);
+        Assert.Equal("YASK-LOCAL-DEVICE-stable-machine-id", trialService.CheckedUserId);
+        Assert.Equal("stable-machine-id", trialService.CheckedDeviceIdentifier);
+    }
+
+    [Fact]
+    public async Task MainWindowViewModel_ShouldLockFeaturesWhenTrialExpired()
+    {
+        var trialService = new RecordingTrialService(new TrialInfo
+        {
+            TrialStart = DateTime.UtcNow.AddDays(-8),
+            TrialEnd = DateTime.UtcNow.AddDays(-1),
+            Status = LicenseStatus.Expired
+        }, new TrialInfo());
+        var viewModel = new MainWindowViewModel(new TestNavigationService(new CloudAccountsViewModel(new NoopDemoDataService())), trialService: trialService, getDeviceIdentifier: () => "stable-machine-id");
+
+        await viewModel.InitializeTrialAsync();
+
+        Assert.False(viewModel.IsTrialActive);
+        Assert.Equal("Trial expired", viewModel.TrialStatusText);
+        Assert.Contains("options are locked", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task MainWindowViewModel_ShouldLockFeaturesWhenTrialExpiresWhileOpen()
+    {
+        var trialService = new RecordingTrialService(new TrialInfo
+        {
+            TrialStart = DateTime.UtcNow.AddDays(-6),
+            TrialEnd = DateTime.UtcNow.AddDays(1),
+            Status = LicenseStatus.Trial
+        }, new TrialInfo());
+        var viewModel = new MainWindowViewModel(new TestNavigationService(new CloudAccountsViewModel(new NoopDemoDataService())), trialService: trialService, getDeviceIdentifier: () => "stable-machine-id");
+        await viewModel.InitializeTrialAsync();
+        Assert.True(viewModel.IsTrialActive);
+
+        trialService.ExistingTrial = new TrialInfo
+        {
+            TrialStart = DateTime.UtcNow.AddDays(-8),
+            TrialEnd = DateTime.UtcNow.AddSeconds(-1),
+            Status = LicenseStatus.Expired
+        };
+        await viewModel.RefreshTrialStatusAsync();
+
+        Assert.False(viewModel.IsTrialActive);
+        Assert.Equal("Trial expired", viewModel.TrialStatusText);
+    }
+
+    [Fact]
     public async Task CloudAccountsViewModel_ShouldDisableOtherProvidersAfterSignIn()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
@@ -316,6 +400,34 @@ public sealed class NavigationTests
     private sealed class NoopAnalyticsService : IAnalyticsService
     {
         public AnalyticsSnapshot Calculate(DemoSnapshot snapshot, DateTime? asOf = null) => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
+    }
+
+    private sealed class RecordingTrialService : ITrialService
+    {
+        public RecordingTrialService(TrialInfo? existingTrial, TrialInfo newTrial)
+        {
+            ExistingTrial = existingTrial;
+            NewTrial = newTrial;
+        }
+
+        public TrialInfo? ExistingTrial { get; set; }
+        public TrialInfo NewTrial { get; }
+        public string? CheckedUserId { get; private set; }
+        public string? CheckedDeviceIdentifier { get; private set; }
+        public string? StartedUserId { get; private set; }
+        public string? StartedDeviceIdentifier { get; private set; }
+        public Task<TrialInfo?> GetTrialStatusAsync(string userId, string deviceIdentifierHash, CancellationToken cancellationToken = default)
+        {
+            CheckedUserId = userId;
+            CheckedDeviceIdentifier = deviceIdentifierHash;
+            return Task.FromResult(ExistingTrial);
+        }
+        public Task<TrialInfo> StartTrialAsync(string userId, string deviceIdentifierHash, CancellationToken cancellationToken = default)
+        {
+            StartedUserId = userId;
+            StartedDeviceIdentifier = deviceIdentifierHash;
+            return Task.FromResult(NewTrial);
+        }
     }
 
     private sealed class SnapshotDemoDataService(DemoSnapshot snapshot) : IDemoDataService
