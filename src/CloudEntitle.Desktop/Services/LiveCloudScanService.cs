@@ -107,7 +107,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                         {
                             var access = await accessProvider.DiscoverEffectiveAccessAsync(account.Id, cancellationToken);
                             effectiveAccessRecords.AddRange(access.Select(item => new LiveEffectiveAccessRecord(
-                                provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged)));
+                                provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType)));
                         }
                     }
                     catch (OperationCanceledException)
@@ -118,6 +118,19 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     {
                         messages.Add($"{provider.ProviderType}/{account.Name}: {exception.Message}");
                     }
+                }
+
+                if (provider is IEntraDirectoryProvider entraProvider)
+                {
+                    var entraResult = await entraProvider.DiscoverEntraDirectoryAsync(accounts.FirstOrDefault()?.Id ?? Guid.Empty, cancellationToken);
+                    var knownPrincipalIds = identityRecords.Select(identity => identity.PrincipalId).Where(id => id is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var newPrincipals = entraResult.Principals.Where(principal => principal.PrincipalId is null || knownPrincipalIds.Add(principal.PrincipalId)).ToArray();
+                    identityRecords.AddRange(newPrincipals);
+                    identitiesScanned += newPrincipals.Length;
+                    privilegedIdentities += newPrincipals.Count(identity => identity.IsPrivileged);
+                    effectiveAccessRecords.AddRange(entraResult.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
+                        provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType)));
+                    messages.AddRange(entraResult.ProviderMessages);
                 }
 
                 messages.Add($"{provider.ProviderType}: discovered {accounts.Count} account(s).");

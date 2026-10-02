@@ -478,7 +478,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         };
         Providers =
         [
-            new(CloudProviderType.Azure, "Azure", "Azure CLI", "az login", "Sign in to an Azure account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Azure)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Azure))),
+            new(CloudProviderType.Azure, "Azure", "Azure CLI", "az login", "Sign in with az. Entra/PIM needs tenant-approved Microsoft Graph read permissions.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Azure)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Azure))),
             new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure sso", "Set up an AWS IAM Identity Center profile.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
             new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
         ];
@@ -847,8 +847,8 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 item.Role,
                 item.Role,
                 item.Scope,
-                "Assigned",
-                "Provider-reported",
+                item.AssignmentType,
+                item.AssignmentType,
                 item.Source,
                 item.IsPrivileged)));
             return demoRows.Concat(liveRows)

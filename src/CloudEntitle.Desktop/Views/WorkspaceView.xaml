@@ -144,7 +144,7 @@
         <DataTemplate DataType="{x:Type vm:CloudAccountsViewModel}">
             <StackPanel>
                 <TextBlock Text="CONNECT A CLOUD PROVIDER" Style="{StaticResource CardLabel}"/>
-                <TextBlock Text="Sign-in opens in the provider's CLI. Use organization-approved identities with read-only permissions; credentials stay with the CLI and are never entered into YASK-CIEM. Disconnect signs out of the shared CLI session and may affect other tools." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
+                <TextBlock Text="Sign-in opens in the provider's CLI. Use organization-approved read-only identities; credentials stay with the CLI and are never entered into YASK-CIEM. Azure Entra/PIM enrichment needs tenant-approved Microsoft Graph read consent. Disconnect signs out of the shared CLI session and may affect other tools." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
                     <Button Content="Refresh sign-in status" Command="{Binding RefreshConnectionsCommand}" Style="{StaticResource QuietButton}"/>
                     <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>

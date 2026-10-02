@@ -24,6 +24,7 @@ The desktop client currently supports:
 - SQLite persistence for risk rules, normalized inventory, and findings
 - Provider-filtered findings and identity views
 - Read-only Azure CLI, AWS CLI, and gcloud discovery adapters
+- Azure Entra users, groups, service principals, and active/eligible PIM schedules through the signed-in Azure CLI's Graph access
 - Graceful reporting when a CLI is missing or unauthenticated
 - JSON report export under `%LocalAppData%\\YASK-CIEM\\reports`
 

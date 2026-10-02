@@ -322,6 +322,19 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task LiveScan_ShouldIncludeEntraDirectoryAndPimRows()
+    {
+        var scanner = new LiveCloudScanService(new ICloudProvider[] { new FakeEntraCloudProvider() });
+
+        var result = await scanner.ScanAsync();
+
+        Assert.Contains(result.IdentityRecords, principal => principal.Name == "Entra User");
+        Assert.Contains(result.IdentityRecords, principal => principal.Name == "Entra Group");
+        Assert.Contains(result.EffectiveAccessRecords, assignment => assignment.AssignmentType == "Active (PIM)");
+        Assert.Contains(result.EffectiveAccessRecords, assignment => assignment.AssignmentType == "Eligible (PIM)");
+    }
+
+    [Fact]
     public async Task LiveScanHistory_ShouldRetainAccessForSevenDaysThenPruneIt()
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -550,5 +563,33 @@ public sealed class NavigationTests
             {
                 new CloudEffectiveAccessAssignment("test-principal", "Owner", "test-scope", "Test assignment", true)
             });
+    }
+
+    private sealed class FakeEntraCloudProvider : ICloudProvider, IEntraDirectoryProvider
+    {
+        private readonly Guid _accountId = Guid.NewGuid();
+        public CloudProviderType ProviderType => CloudProviderType.Azure;
+        public Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudAccount>>(new[] { new CloudAccount { Id = _accountId, Name = "Azure test", CloudProvider = CloudProviderType.Azure } });
+        public Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPrincipal>>(Array.Empty<CloudPrincipal>());
+        public Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudRole>>(Array.Empty<CloudRole>());
+        public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPermission>>(Array.Empty<CloudPermission>());
+        public Task<EntraDirectoryScanResult> DiscoverEntraDirectoryAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult(new EntraDirectoryScanResult(
+                new[]
+                {
+                    new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Azure, Name = "Entra User", PrincipalId = "entra-user", IdentityType = IdentityType.User },
+                    new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Azure, Name = "Entra Group", PrincipalId = "entra-group", IdentityType = IdentityType.Group }
+                },
+                new[]
+                {
+                    new CloudEffectiveAccessAssignment("Entra User", "Global Administrator", "/", "Entra PIM", true, "Active (PIM)"),
+                    new CloudEffectiveAccessAssignment("Entra Group", "Security Administrator", "/", "Entra PIM", true, "Eligible (PIM)")
+                },
+                new[] { "Azure Entra: discovered test directory data." }));
     }
 }

@@ -45,7 +45,17 @@ public interface ICloudEffectiveAccessProvider
     Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default);
 }
 
-public sealed record CloudEffectiveAccessAssignment(string Principal, string Role, string Scope, string Source, bool IsPrivileged);
+public sealed record CloudEffectiveAccessAssignment(string Principal, string Role, string Scope, string Source, bool IsPrivileged, string AssignmentType = "Assigned");
+
+public interface IEntraDirectoryProvider
+{
+    Task<EntraDirectoryScanResult> DiscoverEntraDirectoryAsync(Guid accountId, CancellationToken cancellationToken = default);
+}
+
+public sealed record EntraDirectoryScanResult(
+    IReadOnlyList<CloudPrincipal> Principals,
+    IReadOnlyList<CloudEffectiveAccessAssignment> AccessAssignments,
+    IReadOnlyList<string> ProviderMessages);
 
 public interface IRoleProvider
 {

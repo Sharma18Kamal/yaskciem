@@ -7,7 +7,7 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Cloud.Azure.Services;
 using CloudEntitle.Cloud.Azure.Mappers;
 
-public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider
+public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider, IEntraDirectoryProvider
 {
     private readonly ICloudCommandRunner? _commandRunner;
     private readonly bool _useLiveDiscovery;
@@ -172,6 +172,149 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
             })
             .ToArray();
     }
+
+    public async Task<EntraDirectoryScanResult> DiscoverEntraDirectoryAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery)
+        {
+            return new EntraDirectoryScanResult(Array.Empty<CloudPrincipal>(), Array.Empty<CloudEffectiveAccessAssignment>(), Array.Empty<string>());
+        }
+
+        var principals = new List<CloudPrincipal>();
+        var accessAssignments = new List<CloudEffectiveAccessAssignment>();
+        var messages = new List<string>();
+
+        await LoadDirectoryCollectionAsync("users", "https://graph.microsoft.com/v1.0/users?$select=id,displayName,userPrincipalName,accountEnabled&$top=999", element =>
+        {
+            principals.Add(new CloudPrincipal
+            {
+                Id = Guid.NewGuid(),
+                AccountId = accountId,
+                CloudProvider = CloudProviderType.Azure,
+                Name = ReadString(element, "displayName") ?? "Entra user",
+                PrincipalId = ReadString(element, "id"),
+                Email = ReadString(element, "userPrincipalName"),
+                IdentityType = IdentityType.User,
+                IsActive = ReadBoolean(element, "accountEnabled")
+            });
+        });
+        await LoadDirectoryCollectionAsync("groups", "https://graph.microsoft.com/v1.0/groups?$select=id,displayName,securityEnabled,groupTypes&$top=999", element =>
+        {
+            principals.Add(new CloudPrincipal
+            {
+                Id = Guid.NewGuid(),
+                AccountId = accountId,
+                CloudProvider = CloudProviderType.Azure,
+                Name = ReadString(element, "displayName") ?? "Entra group",
+                PrincipalId = ReadString(element, "id"),
+                IdentityType = IdentityType.Group,
+                IsActive = true
+            });
+        });
+        await LoadDirectoryCollectionAsync("service principals", "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,displayName,appId,servicePrincipalType,accountEnabled&$top=999", element =>
+        {
+            var type = ReadString(element, "servicePrincipalType");
+            principals.Add(new CloudPrincipal
+            {
+                Id = Guid.NewGuid(),
+                AccountId = accountId,
+                CloudProvider = CloudProviderType.Azure,
+                Name = ReadString(element, "displayName") ?? "Entra service principal",
+                PrincipalId = ReadString(element, "id"),
+                IdentityType = type?.Equals("ManagedIdentity", StringComparison.OrdinalIgnoreCase) == true ? IdentityType.ManagedIdentity : IdentityType.ServicePrincipal,
+                IsActive = ReadBoolean(element, "accountEnabled")
+            });
+        });
+
+        await LoadPimAssignmentsAsync(
+            "active PIM assignments",
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleInstances?$expand=principal,roleDefinition&$top=999",
+            "Active (PIM)");
+        await LoadPimAssignmentsAsync(
+            "eligible PIM assignments",
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilityScheduleInstances?$expand=principal,roleDefinition&$top=999",
+            "Eligible (PIM)");
+
+        messages.Add($"Azure Entra: discovered {principals.Count} directory identities and {accessAssignments.Count} PIM role schedule(s).");
+        return new EntraDirectoryScanResult(principals, accessAssignments, messages);
+
+        async Task LoadDirectoryCollectionAsync(string label, string url, Action<JsonElement> map)
+        {
+            try
+            {
+                foreach (var element in await GetGraphCollectionAsync(url, cancellationToken)) map(element);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                messages.Add($"Azure Entra {label} unavailable: {exception.Message}");
+            }
+        }
+
+        async Task LoadPimAssignmentsAsync(string label, string url, string assignmentType)
+        {
+            try
+            {
+                foreach (var assignment in await GetGraphCollectionAsync(url, cancellationToken))
+                {
+                    var principal = ReadExpandedName(assignment, "principal")
+                        ?? ReadString(assignment, "principalId")
+                        ?? "Unknown principal";
+                    var role = ReadExpandedName(assignment, "roleDefinition")
+                        ?? ReadString(assignment, "roleDefinitionId")
+                        ?? "Unknown Entra role";
+                    accessAssignments.Add(new CloudEffectiveAccessAssignment(
+                        principal,
+                        role,
+                        ReadString(assignment, "directoryScopeId") ?? "/",
+                        $"Entra {assignmentType}",
+                        true,
+                        assignmentType));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                messages.Add($"Azure Entra {label} unavailable: {exception.Message}");
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<JsonElement>> GetGraphCollectionAsync(string url, CancellationToken cancellationToken)
+    {
+        var items = new List<JsonElement>();
+        var nextUrl = url;
+        while (!string.IsNullOrWhiteSpace(nextUrl))
+        {
+            using var document = JsonDocument.Parse(await GetAzOutputAsync(new[] { "rest", "--method", "GET", "--url", nextUrl, "--output", "json" }, cancellationToken));
+            var root = document.RootElement;
+            if (root.TryGetProperty("value", out var values) && values.ValueKind == JsonValueKind.Array)
+            {
+                items.AddRange(values.EnumerateArray().Select(item => item.Clone()));
+            }
+            nextUrl = ReadString(root, "@odata.nextLink") ?? string.Empty;
+        }
+        return items;
+    }
+
+    private static string? ReadString(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static bool ReadBoolean(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static string? ReadExpandedName(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var expanded)
+            ? ReadString(expanded, "displayName")
+            : null;
 
     public async Task<(IReadOnlyList<CloudRole> Roles, IReadOnlyList<CloudPermission> Permissions)> DiscoverRoleDefinitionsAsync(Guid accountId, CancellationToken cancellationToken = default)
     {

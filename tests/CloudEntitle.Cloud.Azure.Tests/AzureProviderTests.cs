@@ -59,6 +59,34 @@ public class AzureProviderTests
     }
 
     [Fact]
+    public async Task AzureProvider_ShouldDiscoverEntraDirectoryAndActiveAndEligiblePim()
+    {
+        var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);
+        var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+        var result = await provider.DiscoverEntraDirectoryAsync(account.Id);
+
+        Assert.Contains(result.Principals, principal => principal.Name == "Entra User" && principal.IdentityType == IdentityType.User);
+        Assert.Contains(result.Principals, principal => principal.Name == "Security Group" && principal.IdentityType == IdentityType.Group);
+        Assert.Contains(result.Principals, principal => principal.Name == "Workload Identity" && principal.IdentityType == IdentityType.ManagedIdentity);
+        Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Active (PIM)" && assignment.Role == "Global Administrator");
+        Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Eligible (PIM)" && assignment.Role == "Security Administrator");
+    }
+
+    [Fact]
+    public async Task AzureProvider_ShouldExposePartialEntraResultsWhenPimConsentIsMissing()
+    {
+        var provider = new AzureProvider(new FakeCommandRunner(denyPim: true), useLiveDiscovery: true);
+        var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+        var result = await provider.DiscoverEntraDirectoryAsync(account.Id);
+
+        Assert.NotEmpty(result.Principals);
+        Assert.Empty(result.AccessAssignments);
+        Assert.Contains(result.ProviderMessages, message => message.Contains("PIM", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task AzureProvider_ShouldReturnNormalizedCompletedScan()
     {
         var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);
@@ -85,10 +113,30 @@ public class AzureProviderTests
         Assert.Equal(ScanStatus.Cancelled, result.Scan.Status);
     }
 
-    private sealed class FakeCommandRunner : ICloudCommandRunner
+    private sealed class FakeCommandRunner(bool denyPim = false) : ICloudCommandRunner
     {
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
+            if (arguments.Contains("rest"))
+            {
+                var urlIndex = Array.IndexOf(arguments.ToArray(), "--url");
+                var url = urlIndex >= 0 && urlIndex + 1 < arguments.Count ? arguments[urlIndex + 1] : string.Empty;
+                if (denyPim && url.Contains("roleManagement", StringComparison.Ordinal))
+                {
+                    return Task.FromResult(new CloudCommandResult(1, string.Empty, "Insufficient privileges to complete the operation."));
+                }
+                var graphOutput = url.Contains("/users?", StringComparison.Ordinal)
+                    ? "{\"value\":[{\"id\":\"user-1\",\"displayName\":\"Entra User\",\"userPrincipalName\":\"entra@example.com\",\"accountEnabled\":true}]}"
+                    : url.Contains("/groups?", StringComparison.Ordinal)
+                        ? "{\"value\":[{\"id\":\"group-1\",\"displayName\":\"Security Group\",\"securityEnabled\":true}]}"
+                        : url.Contains("/servicePrincipals?", StringComparison.Ordinal)
+                            ? "{\"value\":[{\"id\":\"sp-1\",\"displayName\":\"Workload Identity\",\"servicePrincipalType\":\"ManagedIdentity\",\"accountEnabled\":true}]}"
+                            : url.Contains("roleAssignmentScheduleInstances", StringComparison.Ordinal)
+                                ? "{\"value\":[{\"principalId\":\"user-1\",\"principal\":{\"displayName\":\"Entra User\"},\"roleDefinition\":{\"displayName\":\"Global Administrator\"},\"directoryScopeId\":\"/\"}]}"
+                                : "{\"value\":[{\"principalId\":\"user-1\",\"principal\":{\"displayName\":\"Entra User\"},\"roleDefinition\":{\"displayName\":\"Security Administrator\"},\"directoryScopeId\":\"/\"}]}";
+                return Task.FromResult(new CloudCommandResult(0, graphOutput, string.Empty));
+            }
+
             var output = arguments[0] == "account"
                 ? "{\"name\":\"Production\",\"id\":\"subscription-001\",\"tenantId\":\"tenant-001\"}"
                 : "[{\"principalId\":\"principal-001\",\"principalName\":\"owner@example.com\",\"principalType\":\"User\",\"roleDefinitionId\":\"role-001\",\"roleDefinitionName\":\"Owner\",\"scope\":\"/subscriptions/subscription-001\"}]";

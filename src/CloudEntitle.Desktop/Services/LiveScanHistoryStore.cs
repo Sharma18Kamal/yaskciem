@@ -10,7 +10,8 @@ public sealed record LiveEffectiveAccessRecord(
     string Role,
     string Scope,
     string Source,
-    bool IsPrivileged);
+    bool IsPrivileged,
+    string AssignmentType = "Assigned");
 
 public sealed record LiveScanHistoryEntry(
     DateTime StartedAt,
