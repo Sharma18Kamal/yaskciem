@@ -7,7 +7,7 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Cloud.Aws.Mappers;
 using CloudEntitle.Cloud.Aws.Services;
 
-public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider
+public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider
 {
     private readonly ICloudCommandRunner? _commandRunner;
     private readonly bool _useLiveDiscovery;
@@ -82,6 +82,55 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
             Description = role.TryGetProperty("Description", out var description) ? description.GetString() : null,
             Scope = "AWS account"
         }).ToArray();
+    }
+
+    public async Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery) return Array.Empty<CloudEffectiveAccessAssignment>();
+
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(
+            new[] { "iam", "get-account-authorization-details", "--filter", "User", "Role", "Group", "--output", "json" },
+            cancellationToken));
+        var assignments = new List<CloudEffectiveAccessAssignment>();
+        AddAssignments("UserDetailList", "UserName", "AttachedManagedPolicies", "UserPolicyList", "IAM user policy", "UserPolicyName");
+        AddAssignments("GroupDetailList", "GroupName", "AttachedManagedPolicies", "GroupPolicyList", "IAM group policy", "GroupPolicyName");
+        AddAssignments("RoleDetailList", "RoleName", "AttachedManagedPolicies", "RolePolicyList", "IAM role policy", "RolePolicyName");
+        return assignments;
+
+        void AddAssignments(string collectionName, string principalProperty, string attachedProperty, string inlineProperty, string source, string inlinePolicyProperty)
+        {
+            if (!document.RootElement.TryGetProperty(collectionName, out var principals) || principals.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+
+            foreach (var item in principals.EnumerateArray())
+            {
+                var principal = item.TryGetProperty(principalProperty, out var principalElement) ? principalElement.GetString() ?? "Unknown principal" : "Unknown principal";
+                if (item.TryGetProperty(attachedProperty, out var attached) && attached.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var policy in attached.EnumerateArray())
+                    {
+                        Add(principal, policy.TryGetProperty("PolicyName", out var name) ? name.GetString() ?? "Managed policy" : "Managed policy", source);
+                    }
+                }
+                if (item.TryGetProperty(inlineProperty, out var inlinePolicies) && inlinePolicies.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var policy in inlinePolicies.EnumerateArray())
+                    {
+                        Add(principal, policy.TryGetProperty(inlinePolicyProperty, out var name) ? name.GetString() ?? "Inline policy" : "Inline policy", source);
+                    }
+                }
+            }
+        }
+
+        void Add(string principal, string policyName, string source)
+        {
+            var privileged = policyName.Contains("Administrator", StringComparison.OrdinalIgnoreCase)
+                || policyName.Contains("PowerUser", StringComparison.OrdinalIgnoreCase)
+                || policyName.Contains("FullAccess", StringComparison.OrdinalIgnoreCase);
+            assignments.Add(new CloudEffectiveAccessAssignment(principal, policyName, "AWS account", source, privileged));
+        }
     }
 
     public Task<IReadOnlyList<CloudPrincipal>> GetPrincipalsAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverIdentitiesAsync(accountId, cancellationToken);

@@ -45,6 +45,20 @@ public class AzureProviderTests
     }
 
     [Fact]
+    public async Task AzureProvider_ShouldExposeObservedRoleAssignmentsAsEffectiveAccess()
+    {
+        var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);
+        var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+        var access = await provider.DiscoverEffectiveAccessAsync(account.Id);
+
+        var assignment = Assert.Single(access);
+        Assert.Equal("owner@example.com", assignment.Principal);
+        Assert.Equal("Owner", assignment.Role);
+        Assert.True(assignment.IsPrivileged);
+    }
+
+    [Fact]
     public async Task AzureProvider_ShouldReturnNormalizedCompletedScan()
     {
         var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);

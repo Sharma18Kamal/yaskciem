@@ -26,7 +26,8 @@ public sealed record LiveCloudScanResult(
     IReadOnlyList<CloudResource> ResourceRecords,
     IReadOnlyList<DiscoveredCloudRole> RoleRecords,
     IReadOnlyList<DiscoveredCloudPermission> PermissionRecords,
-    DateTime StartedAt);
+    DateTime StartedAt,
+    IReadOnlyList<LiveEffectiveAccessRecord> EffectiveAccessRecords);
 
 public sealed record DiscoveredCloudRole(CloudProviderType Provider, CloudRole Role);
 public sealed record DiscoveredCloudPermission(CloudProviderType Provider, CloudPermission Permission);
@@ -34,14 +35,16 @@ public sealed record DiscoveredCloudPermission(CloudProviderType Provider, Cloud
 public sealed class LiveCloudScanService : ILiveCloudScanService
 {
     private readonly IReadOnlyList<ICloudProvider> _providers;
+    private readonly ILiveScanHistoryStore? _historyStore;
     private readonly RiskEngine _riskEngine = new();
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
     public event EventHandler? ScanCompleted;
 
-    public LiveCloudScanService(IEnumerable<ICloudProvider> providers)
+    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null)
     {
         _providers = providers.ToArray();
+        _historyStore = historyStore;
     }
 
     public async Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default)
@@ -57,6 +60,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var resourceRecords = new List<CloudResource>();
         var roleRecords = new List<DiscoveredCloudRole>();
         var permissionRecords = new List<DiscoveredCloudPermission>();
+        var effectiveAccessRecords = new List<LiveEffectiveAccessRecord>();
         var findings = new List<RiskFinding>();
         var messages = new List<string>();
 
@@ -98,6 +102,13 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                             resourcesScanned += resources.Count;
                             resourceRecords.AddRange(resources);
                         }
+
+                        if (provider is ICloudEffectiveAccessProvider accessProvider)
+                        {
+                            var access = await accessProvider.DiscoverEffectiveAccessAsync(account.Id, cancellationToken);
+                            effectiveAccessRecords.AddRange(access.Select(item => new LiveEffectiveAccessRecord(
+                                provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged)));
+                        }
                     }
                     catch (OperationCanceledException)
                     {
@@ -126,7 +137,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             messages.Add("No cloud providers are configured.");
         }
 
-        CurrentResult = new LiveCloudScanResult(
+        var result = new LiveCloudScanResult(
             accountsScanned,
             identitiesScanned,
             resourcesScanned,
@@ -140,7 +151,33 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             resourceRecords,
             roleRecords,
             permissionRecords,
-            startedAt);
+            startedAt,
+            effectiveAccessRecords);
+        if (_historyStore is not null)
+        {
+            var providers = string.Join(", ", messages.Select(message => message.Split(':')[0]).Distinct());
+            var historyEntry = new LiveScanHistoryEntry(
+                result.StartedAt,
+                result.CompletedAt,
+                providers,
+                result.AccountCount,
+                result.IdentityCount,
+                result.ResourceCount,
+                result.RoleCount,
+                result.PermissionCount,
+                result.Findings.Count,
+                result.EffectiveAccessRecords);
+            try
+            {
+                await _historyStore.RecordAsync(historyEntry, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                result = result with { ProviderMessages = result.ProviderMessages.Append($"Scan history could not be saved: {exception.Message}").ToArray() };
+            }
+        }
+
+        CurrentResult = result;
         ScanCompleted?.Invoke(this, EventArgs.Empty);
         return CurrentResult;
     }

@@ -40,6 +40,13 @@ public interface IResourceProvider
     Task<IReadOnlyList<CloudResource>> GetResourcesAsync(Guid accountId, CancellationToken cancellationToken = default);
 }
 
+public interface ICloudEffectiveAccessProvider
+{
+    Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default);
+}
+
+public sealed record CloudEffectiveAccessAssignment(string Principal, string Role, string Scope, string Source, bool IsPrivileged);
+
 public interface IRoleProvider
 {
     Task<IReadOnlyList<CloudRole>> GetRolesAsync(Guid accountId, CancellationToken cancellationToken = default);

@@ -29,6 +29,7 @@ public sealed class NavigationTests
         services.AddTransient<RiskFindingsViewModel>();
         services.AddTransient<RecommendationsViewModel>();
         services.AddTransient<ScanHistoryViewModel>();
+        services.AddTransient<FeedbackViewModel>();
         services.AddTransient<SettingsViewModel>();
         using var provider = services.BuildServiceProvider();
         var navigation = new NavigationService(provider);
@@ -36,6 +37,10 @@ public sealed class NavigationTests
         navigation.NavigateTo<CloudAccountsViewModel>();
         var first = navigation.CurrentViewModel;
         navigation.NavigateTo<IdentitiesViewModel>();
+        var mainWindow = new MainWindowViewModel(navigation);
+        Assert.Equal("Identities", mainWindow.CurrentNavigationItem.Title);
+        Assert.True(mainWindow.CurrentNavigationItem.IsSelected);
+        Assert.False(mainWindow.NavigationItems.Single(item => item.Title == "Dashboard").IsSelected);
         navigation.NavigateTo<CloudAccountsViewModel>();
 
         Assert.IsType<CloudAccountsViewModel>(navigation.CurrentViewModel);
@@ -55,7 +60,7 @@ public sealed class NavigationTests
         var navigation = provider.GetRequiredService<INavigationService>();
         var viewModel = new MainWindowViewModel(navigation);
 
-        Assert.Equal(10, viewModel.NavigationItems.Count);
+        Assert.Equal(11, viewModel.NavigationItems.Count);
         Assert.Equal("Dashboard", viewModel.CurrentNavigationItem.Title);
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Effective Access");
         Assert.Equal("YASK-CIEM", viewModel.ApplicationName);
@@ -126,6 +131,23 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task IdleTimeout_ShouldSignOutActiveProviderWithoutConfirmation()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        launcher.LaunchedProviders.Add(CloudProviderType.Azure);
+        var connectionState = new CloudConnectionState();
+        connectionState.Update(new[] { CloudProviderType.Azure });
+        var navigation = new TestNavigationService(new CloudAccountsViewModel(new NoopDemoDataService(), launcher, cloudConnectionState: connectionState));
+        var viewModel = new MainWindowViewModel(navigation, connectionState, launcher);
+
+        await viewModel.DisconnectCloudForInactivityAsync();
+
+        Assert.Equal(new[] { CloudProviderType.Azure }, launcher.DisconnectedProviders);
+        Assert.Equal("No active CLI sign-in", viewModel.CloudConnectionStatus);
+        Assert.Contains("5 minutes of inactivity", viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task DashboardViewModel_ShouldDisplayLiveScanResultsAndPartialProviderStatus()
     {
         var azure = new FakeCloudProvider(CloudProviderType.Azure, connected: true);
@@ -165,6 +187,33 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task FeedbackViewModel_ShouldRequireBothFieldsAndSubmitAnonymously()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var filePath = Path.Combine(directory, "feedback.jsonl");
+        var viewModel = new FeedbackViewModel(new LocalUserFeedbackService(filePath));
+
+        Assert.False(viewModel.CanSubmit);
+        viewModel.FeedbackText = "The scan summary is helpful.";
+        Assert.False(viewModel.CanSubmit);
+        viewModel.SuggestionsText = "Add provider filters.";
+        Assert.True(viewModel.CanSubmit);
+
+        await viewModel.SubmitAsync();
+
+        Assert.False(viewModel.CanSubmit);
+        Assert.Contains("submitted on this device", viewModel.SubmissionMessage);
+        var savedSubmission = await File.ReadAllTextAsync(filePath);
+        Assert.Contains("The scan summary is helpful.", savedSubmission);
+        Assert.Contains("Add provider filters.", savedSubmission);
+        Assert.DoesNotContain("username", savedSubmission, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("email", savedSubmission, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("phone", savedSubmission, StringComparison.OrdinalIgnoreCase);
+
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
     public async Task LiveScan_ShouldPopulateSearchableIdentityAndResourceScreens()
     {
         var scanService = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) });
@@ -186,6 +235,24 @@ public sealed class NavigationTests
         resources.SearchText = "missing";
         Assert.False(identities.HasResults);
         Assert.False(resources.HasResults);
+    }
+
+    [Fact]
+    public async Task LiveScanHistory_ShouldRetainAccessForSevenDaysThenPruneIt()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var now = DateTime.UtcNow;
+        var historyStore = new LocalLiveScanHistoryStore(Path.Combine(directory, "scans.jsonl"), () => now);
+        var scanService = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) }, historyStore);
+
+        await scanService.ScanAsync();
+        var recentScans = await historyStore.GetRecentAsync();
+
+        Assert.Single(recentScans);
+        Assert.Single(recentScans[0].EffectiveAccess);
+        now = now.AddDays(7).AddSeconds(1);
+        Assert.Empty(await historyStore.GetRecentAsync());
+        Directory.Delete(directory, recursive: true);
     }
 
     [Fact]
@@ -215,22 +282,26 @@ public sealed class NavigationTests
             Permissions = new[] { permission }
         };
         var demoData = new SnapshotDemoDataService(snapshot);
-        var liveScan = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) });
+        var historyDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var historyStore = new LocalLiveScanHistoryStore(Path.Combine(historyDirectory, "scans.jsonl"));
+        var liveScan = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) }, historyStore);
         var entitlements = new EntitlementsViewModel(demoData, liveScan);
-        var effectiveAccess = new EffectiveAccessViewModel(demoData);
+        var effectiveAccess = new EffectiveAccessViewModel(demoData, liveScan, historyStore);
         var riskFindings = new RiskFindingsViewModel(demoData, liveScan);
         var recommendations = new RecommendationsViewModel(demoData, new SnapshotRecommendationStore(snapshot), liveScan);
-        var history = new ScanHistoryViewModel(demoData, liveScan);
+        var history = new ScanHistoryViewModel(demoData, liveScan, historyStore);
         var dashboard = new DashboardViewModel(demoData, new NoopAnalyticsService(), liveScan);
 
         await dashboard.RunScanAsync();
+        await Task.WhenAll(entitlements.RefreshAsync(), effectiveAccess.RefreshAsync(), riskFindings.RefreshAsync(), recommendations.RefreshAsync(), history.RefreshAsync());
 
         Assert.True(entitlements.HasResults);
         Assert.True(entitlements.Entitlements.Count >= 3);
-        Assert.True(effectiveAccess.HasResults);
-        Assert.True(riskFindings.Findings.Count >= 2);
+        Assert.Equal(2, effectiveAccess.AccessRecords.Count);
+        Assert.Equal(2, riskFindings.Findings.Count);
         Assert.True(recommendations.HasResults);
         Assert.True(history.Scans.Count >= 2);
+        Directory.Delete(historyDirectory, recursive: true);
     }
 
     private sealed class NoopDemoDataService : IDemoDataService
@@ -325,7 +396,7 @@ public sealed class NavigationTests
         }
     }
 
-    private sealed class FakeCloudProvider(CloudProviderType providerType, bool connected) : ICloudProvider, IResourceProvider
+    private sealed class FakeCloudProvider(CloudProviderType providerType, bool connected) : ICloudProvider, IResourceProvider, ICloudEffectiveAccessProvider
     {
         private readonly Guid _accountId = Guid.NewGuid();
         public CloudProviderType ProviderType => providerType;
@@ -360,6 +431,12 @@ public sealed class NavigationTests
             => Task.FromResult<IReadOnlyList<CloudResource>>(new[]
             {
                 new CloudResource { Id = Guid.NewGuid(), AccountId = accountId, Name = "Test resource", ResourceId = "resource-test", Type = "Resource" }
+            });
+
+        public Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudEffectiveAccessAssignment>>(new[]
+            {
+                new CloudEffectiveAccessAssignment("test-principal", "Owner", "test-scope", "Test assignment", true)
             });
     }
 }

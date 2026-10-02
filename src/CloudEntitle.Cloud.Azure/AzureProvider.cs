@@ -7,7 +7,7 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Cloud.Azure.Services;
 using CloudEntitle.Cloud.Azure.Mappers;
 
-public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider
+public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider
 {
     private readonly ICloudCommandRunner? _commandRunner;
     private readonly bool _useLiveDiscovery;
@@ -141,6 +141,34 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
                     RoleId = group.Key ?? string.Empty,
                     Scope = assignment.TryGetProperty("scope", out var scope) ? scope.GetString() : null
                 };
+            })
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery)
+        {
+            return Array.Empty<CloudEffectiveAccessAssignment>();
+        }
+
+        return (await GetAssignmentsAsync(accountId, cancellationToken))
+            .Where(assignment => assignment.TryGetProperty("principalId", out _))
+            .Select(assignment =>
+            {
+                var roleName = assignment.TryGetProperty("roleDefinitionName", out var role) ? role.GetString() ?? "Unknown role" : "Unknown role";
+                var principal = assignment.TryGetProperty("principalName", out var name) ? name.GetString() : null;
+                if (string.IsNullOrWhiteSpace(principal) && assignment.TryGetProperty("principalId", out var principalId))
+                {
+                    principal = principalId.GetString();
+                }
+                var scope = assignment.TryGetProperty("scope", out var scopeValue) ? scopeValue.GetString() ?? "Subscription" : "Subscription";
+                return new CloudEffectiveAccessAssignment(
+                    principal ?? "Unknown principal",
+                    roleName,
+                    scope,
+                    "Azure RBAC role assignment",
+                    roleName.Contains("Owner", StringComparison.OrdinalIgnoreCase) || roleName.Contains("Administrator", StringComparison.OrdinalIgnoreCase));
             })
             .ToArray();
     }

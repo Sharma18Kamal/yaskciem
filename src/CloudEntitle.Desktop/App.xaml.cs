@@ -42,6 +42,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IAnalyticsService, AnalyticsService>();
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<IReportService, SqliteReportService>();
+		services.AddSingleton<ILiveScanHistoryStore, LocalLiveScanHistoryStore>();
 		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new AwsProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
@@ -50,6 +51,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<CloudConnectionState>();
 		services.AddSingleton<IDialogService, DialogService>();
+		services.AddSingleton<IUserFeedbackService, LocalUserFeedbackService>();
 		services.AddSingleton<ICloudAuthenticationLauncher, CloudAuthenticationLauncher>();
 		services.AddSingleton<MainWindowViewModel>();
 		services.AddTransient<DashboardViewModel>();
@@ -61,6 +63,7 @@ public partial class App : System.Windows.Application
 		services.AddTransient<RiskFindingsViewModel>();
 		services.AddTransient<RecommendationsViewModel>();
 		services.AddTransient<ScanHistoryViewModel>();
+		services.AddTransient<FeedbackViewModel>();
 		services.AddTransient<SettingsViewModel>();
 		services.AddSingleton<MainWindow>();
 		_services = services.BuildServiceProvider();

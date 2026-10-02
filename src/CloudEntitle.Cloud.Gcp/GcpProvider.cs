@@ -7,7 +7,7 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Cloud.Gcp.Mappers;
 using CloudEntitle.Cloud.Gcp.Services;
 
-public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider
+public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider
 {
     private readonly ICloudCommandRunner? _commandRunner;
     private readonly bool _useLiveDiscovery;
@@ -70,6 +70,24 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
         {
             Id = Guid.NewGuid(), AccountId = accountId, Name = group.Key, RoleId = group.Key, Scope = project
         }).ToArray();
+    }
+
+    public async Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery)
+        {
+            return Array.Empty<CloudEffectiveAccessAssignment>();
+        }
+
+        var project = GetProject(accountId);
+        return GetBindings(await GetPolicyAsync(accountId, cancellationToken))
+            .Select(binding => new CloudEffectiveAccessAssignment(
+                binding.Member,
+                binding.Role,
+                $"projects/{project}",
+                "GCP project IAM binding",
+                binding.Role.Contains("owner", StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
     }
 
     public Task<IReadOnlyList<CloudPrincipal>> GetPrincipalsAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverIdentitiesAsync(accountId, cancellationToken);

@@ -1,0 +1,68 @@
+Before You Start
+Install the provider CLIs on the same Windows account that runs YASK-CIEM. Then open a new PowerShell window and verify they’re on your PATH.
+
+Azure
+
+Install Azure CLI with WinGet:
+
+	winget install -e --id Microsoft.AzureCLI
+
+Or use the official Windows install guide.
+In PowerShell, sign in and select the subscription you want YASK-CIEM to scan:
+	az login
+	az account list -o table
+	az account set --subscription "<subscription name or ID>"
+	az account show -o table
+
+Ask your Azure administrator for read-only access at the appropriate subscription scope, such as the Reader role. 
+Your organization may need to grant additional read permissions for role-assignment visibility.
+
+
+AWS
+
+Install AWS CLI v2 using the official Windows installer. Verify it:
+
+	aws --version
+
+In YASK-CIEM, choose Connect Cloud > AWS > Connect. 
+In the terminal that opens, follow the aws configure sso prompts: provide your organization’s IAM Identity Center start URL and region, complete browser sign-in, and select the account and a read-only permission set.
+When asked for a profile name, use default. YASK-CIEM checks the default AWS CLI profile. Verify access:
+	aws sts get-caller-identity
+T
+he account’s read-only permissions need to allow the IAM listing operations YASK-CIEM uses.
+An administrator can provide a suitable least-privilege permission set.
+
+
+Google Cloud
+
+Install the Google Cloud CLI for Windows, then open a new PowerShell window.
+Sign in and choose the project:
+	gcloud init
+
+Complete browser sign-in and select the project to scan. Check the active account and project:
+	gcloud auth list
+	gcloud config get-value project
+
+Ask your Google Cloud administrator for read-only access that permits listing projects, viewing project IAM policy, and listing service accounts.
+Connect and Scan
+
+Certificate Installation:
+certificate is available in cert folder.
+Install for your Windows account
+Copy the .cer file to the target PC using a trusted method.
+Open PowerShell and run, adjusting the path if needed:
+	Import-Certificate -FilePath "$HOME\Downloads\yask-ciem-dev.cer" `
+  	-CertStoreLocation Cert:\CurrentUser\TrustedPeople
+This is user-scoped and normally doesn’t require administrator access.
+
+Install the MSIX by double-clicking it.
+You will see YASK-CIEM in start Menu.
+Launch YASK-CIEM. 
+
+The steps above can be done before launching, or start sign-in from Connect Cloud; the app opens the provider CLI command and checks for sign-in.
+Connect one provider at a time. 
+After a connection is detected, the other providers’ Connect buttons are disabled.
+Select Dashboard > Scan Now to scan. 
+If you changed sign-in outside the app, use Refresh sign-in status on Cloud Accounts.
+Use Disconnect Cloud to sign out of the active CLI session before connecting another provider.
+Disconnect affects the shared CLI session used by other tools too; AWS sign-out clears cached SSO sessions.

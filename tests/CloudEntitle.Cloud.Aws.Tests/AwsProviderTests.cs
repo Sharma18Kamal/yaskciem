@@ -47,6 +47,18 @@ public class AwsProviderTests
         }
 
         [Fact]
+        public async Task AwsProvider_ShouldExposeObservedIamPolicyAttachmentsAsEffectiveAccess()
+        {
+            var provider = new AwsProvider(new FakeAwsCommandRunner(), useLiveDiscovery: true);
+            var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+            var access = await provider.DiscoverEffectiveAccessAsync(account.Id);
+
+            Assert.Contains(access, assignment => assignment.Principal == "demo-user" && assignment.Role == "ReadOnlyAccess");
+            Assert.Contains(access, assignment => assignment.Principal == "demo-user" && assignment.Role == "InlineRead");
+        }
+
+        [Fact]
         public async Task AwsProvider_ShouldHonorCancellation()
         {
             var provider = new AwsProvider(new FakeAwsCommandRunner(), useLiveDiscovery: true);
@@ -62,7 +74,9 @@ public class AwsProviderTests
         {
             public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
             {
-                var output = arguments.Contains("sts")
+                var output = arguments.Contains("get-account-authorization-details")
+                    ? "{\"UserDetailList\":[{\"UserName\":\"demo-user\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"UserPolicyList\":[{\"UserPolicyName\":\"InlineRead\"}]}],\"GroupDetailList\":[],\"RoleDetailList\":[]}"
+                    : arguments.Contains("sts")
                     ? "{\"Account\":\"123456789012\",\"Arn\":\"arn:aws:iam::123456789012:user/demo\"}"
                     : arguments.Contains("list-users")
                         ? "{\"Users\":[{\"UserName\":\"demo-user\",\"UserId\":\"AIDEMO\"}]}"

@@ -48,6 +48,17 @@ public class GcpProviderTests
     }
 
     [Fact]
+    public async Task GcpProvider_ShouldExposeObservedProjectIamBindingsAsEffectiveAccess()
+    {
+        var provider = new GcpProvider(new FakeGcloudRunner(), useLiveDiscovery: true);
+        var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+        var access = await provider.DiscoverEffectiveAccessAsync(account.Id);
+
+        Assert.Contains(access, assignment => assignment.Principal == "user:demo@example.invalid" && assignment.Role == "roles/owner");
+    }
+
+    [Fact]
     public async Task GcpProvider_ShouldHonorCancellation()
     {
         var provider = new GcpProvider(new FakeGcloudRunner(), useLiveDiscovery: true);

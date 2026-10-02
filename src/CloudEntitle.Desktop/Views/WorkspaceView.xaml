@@ -29,6 +29,24 @@
             </Grid>
             </StackPanel>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:FeedbackViewModel}">
+            <StackPanel MaxWidth="820">
+                <Border Style="{StaticResource SectionCard}" Padding="24">
+                    <StackPanel>
+                        <TextBlock Text="YOUR FEEDBACK *" Style="{StaticResource CardLabel}"/>
+                        <TextBox Text="{Binding FeedbackText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="150" MaxLength="5000" Background="{StaticResource PanelBrush}" Foreground="{StaticResource PrimaryBrush}" BorderBrush="{StaticResource LineBrush}" Padding="12" Margin="0,8,0,20"/>
+                        <TextBlock Text="SUGGESTIONS *" Style="{StaticResource CardLabel}"/>
+                        <TextBox Text="{Binding SuggestionsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="150" MaxLength="5000" Background="{StaticResource PanelBrush}" Foreground="{StaticResource PrimaryBrush}" BorderBrush="{StaticResource LineBrush}" Padding="12" Margin="0,8,0,16"/>
+                        <TextBlock Text="No username, email address, or phone number is requested. Submissions are stored locally on this device." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="Submit Feedback" Command="{Binding SubmitCommand}" IsEnabled="{Binding CanSubmit}" Style="{StaticResource PrimaryButton}"/>
+                            <TextBlock Text="{Binding SubmissionMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ResourcesViewModel}">
             <StackPanel>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search resources"/>
@@ -95,6 +113,7 @@
                         <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
                         <DataGridTextColumn Header="Decision" Binding="{Binding Decision}" Width="90"/>
                         <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="90"/>
+                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="190"/>
                         <DataGridCheckBoxColumn Header="Privileged" Binding="{Binding Privileged}" Width="90"/>
                     </DataGrid.Columns>
                 </DataGrid>
@@ -195,6 +214,7 @@
                         <DataGridTextColumn Header="Items" Binding="{Binding Items}" Width="80"/>
                         <DataGridTextColumn Header="Permissions" Binding="{Binding Permissions}" Width="100"/>
                         <DataGridTextColumn Header="Findings" Binding="{Binding Findings}" Width="80"/>
+                        <DataGridTextColumn Header="Effective Access" Binding="{Binding EffectiveAccess}" Width="120"/>
                     </DataGrid.Columns>
                 </DataGrid>
                 <TextBlock Text="No completed scans are available." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">

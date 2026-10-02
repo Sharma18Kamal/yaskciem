@@ -8,7 +8,22 @@ using CloudEntitle.Domain;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
-public sealed record NavigationItem(string Title, string Icon, Type ViewModelType);
+public sealed class NavigationItem : ObservableObject
+{
+    private bool _isSelected;
+
+    public NavigationItem(string title, string icon, Type viewModelType)
+    {
+        Title = title;
+        Icon = icon;
+        ViewModelType = viewModelType;
+    }
+
+    public string Title { get; }
+    public string Icon { get; }
+    public Type ViewModelType { get; }
+    public bool IsSelected { get => _isSelected; internal set => SetProperty(ref _isSelected, value); }
+}
 
 public sealed class CloudConnectionState : ObservableObject
 {
@@ -37,14 +52,16 @@ public sealed class MainWindowViewModel : ObservableObject
 {
     private readonly INavigationService _navigation;
     private readonly CloudConnectionState _cloudConnectionState;
+    private readonly ICloudAuthenticationLauncher? _authenticationLauncher;
     private object _currentViewModel;
     private NavigationItem _currentNavigationItem;
     private string _statusMessage = "Ready";
 
-    public MainWindowViewModel(INavigationService navigation, CloudConnectionState? cloudConnectionState = null)
+    public MainWindowViewModel(INavigationService navigation, CloudConnectionState? cloudConnectionState = null, ICloudAuthenticationLauncher? authenticationLauncher = null)
     {
         _navigation = navigation;
         _cloudConnectionState = cloudConnectionState ?? new CloudConnectionState();
+        _authenticationLauncher = authenticationLauncher;
         _cloudConnectionState.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(CloudConnectionState.Status)) OnPropertyChanged(nameof(CloudConnectionStatus));
@@ -53,7 +70,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _navigation.CurrentViewModelChanged += (_, _) =>
         {
             CurrentViewModel = _navigation.CurrentViewModel;
-            CurrentNavigationItem = NavigationItems!.FirstOrDefault(item => item.ViewModelType == CurrentViewModel.GetType()) ?? NavigationItems![0];
+            SetSelectedNavigationItem(NavigationItems!.FirstOrDefault(item => item.ViewModelType == CurrentViewModel.GetType()) ?? NavigationItems![0]);
             StatusMessage = $"Viewing {CurrentNavigationItem.Title}";
         };
 
@@ -68,10 +85,12 @@ public sealed class MainWindowViewModel : ObservableObject
             new("Risk Findings", "!", typeof(RiskFindingsViewModel)),
             new("Recommendations", "✓", typeof(RecommendationsViewModel)),
             new("Scan History", "◷", typeof(ScanHistoryViewModel)),
+            new("Feedback", "✎", typeof(FeedbackViewModel)),
             new("Settings", "⚙", typeof(SettingsViewModel))
         ];
         _currentViewModel = navigation.CurrentViewModel;
-        _currentNavigationItem = NavigationItems[0];
+        _currentNavigationItem = NavigationItems.FirstOrDefault(item => item.ViewModelType == _currentViewModel.GetType()) ?? NavigationItems[0];
+        _currentNavigationItem.IsSelected = true;
         NavigateCommand = new ParameterizedRelayCommand(parameter =>
         {
             if (parameter is NavigationItem item)
@@ -106,10 +125,69 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public async Task DisconnectCloudForInactivityAsync()
+    {
+        if (_authenticationLauncher is null)
+        {
+            return;
+        }
+
+        var connectedProviders = new List<CloudProviderType>();
+        foreach (var provider in Enum.GetValues<CloudProviderType>())
+        {
+            try
+            {
+                if (await _authenticationLauncher.IsConnectedAsync(provider))
+                {
+                    connectedProviders.Add(provider);
+                }
+            }
+            catch
+            {
+                // Preserve the current state when a provider CLI cannot be checked.
+            }
+        }
+
+        if (connectedProviders.Count == 0)
+        {
+            _cloudConnectionState.Update(Array.Empty<CloudProviderType>());
+            return;
+        }
+
+        var remainingProviders = new List<CloudProviderType>(connectedProviders);
+        foreach (var provider in connectedProviders)
+        {
+            try
+            {
+                await _authenticationLauncher.DisconnectAsync(provider);
+                remainingProviders.Remove(provider);
+            }
+            catch (Exception exception)
+            {
+                _cloudConnectionState.Update(remainingProviders);
+                StatusMessage = $"Automatic {provider} sign-out failed: {exception.Message}";
+                return;
+            }
+        }
+
+        _cloudConnectionState.Update(remainingProviders);
+        StatusMessage = "Cloud sessions disconnected after 5 minutes of inactivity";
+    }
+
     public void Navigate(NavigationItem item)
     {
         var method = typeof(INavigationService).GetMethod(nameof(INavigationService.NavigateTo))!.MakeGenericMethod(item.ViewModelType);
         method.Invoke(_navigation, null);
+    }
+
+    private void SetSelectedNavigationItem(NavigationItem item)
+    {
+        if (CurrentNavigationItem is not null)
+        {
+            CurrentNavigationItem.IsSelected = false;
+        }
+        item.IsSelected = true;
+        CurrentNavigationItem = item;
     }
 }
 
@@ -560,10 +638,10 @@ public sealed class ResourcesViewModel : WorkspaceViewModel
     public bool HasResults => Resources.Count > 0;
 }
 public sealed record EntitlementGridRow(string Provider, string Subject, string Grant, string Scope, string Assignment, string Source);
-public sealed record EffectiveAccessGridRow(string Provider, string Principal, string Role, string Permission, string Resource, string Decision, string Path, bool Privileged);
+public sealed record EffectiveAccessGridRow(string Provider, string Principal, string Role, string Permission, string Resource, string Decision, string Path, string Source, bool Privileged);
 public sealed record RiskFindingGridRow(string Provider, string Severity, string Title, string Principal, string Resource, string Evidence, string Recommendation);
 public sealed record RecommendationGridRow(string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority);
-public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings);
+public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings, int EffectiveAccess);
 
 public sealed class EntitlementsViewModel : WorkspaceViewModel
 {
@@ -618,7 +696,7 @@ public sealed class EntitlementsViewModel : WorkspaceViewModel
     }
     public bool HasResults => Entitlements.Count > 0;
 
-    private async Task RefreshAsync()
+    public async Task RefreshAsync()
     {
         try
         {
@@ -636,20 +714,27 @@ public sealed class EntitlementsViewModel : WorkspaceViewModel
 public sealed class EffectiveAccessViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;
+    private readonly ILiveScanHistoryStore? _liveScanHistoryStore;
     private DemoSnapshot? _snapshot;
+    private IReadOnlyList<LiveScanHistoryEntry> _liveHistory = Array.Empty<LiveScanHistoryEntry>();
     private string _searchText = string.Empty;
 
-    public EffectiveAccessViewModel(IDemoDataService demoData) : base(demoData)
+    public EffectiveAccessViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null, ILiveScanHistoryStore? liveScanHistoryStore = null) : base(demoData)
     {
         _demoData = demoData;
+        _liveScanHistoryStore = liveScanHistoryStore;
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
+        if (liveCloudScanService is not null)
+        {
+            liveCloudScanService.ScanCompleted += async (_, _) => await RefreshAsync();
+        }
         _ = RefreshAsync();
     }
 
     public override string Title => "Effective Access";
     public override string Subtitle => "Trace modeled direct and inherited access paths.";
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(AccessRecords)); OnPropertyChanged(nameof(HasResults)); } } }
-    public string DataCoverageMessage => "Effective access is shown for modeled Demo Mode data. Live provider scans do not yet collect principal-to-role assignments, so access is not inferred from inventory alone.";
+    public string DataCoverageMessage => "Live rows show provider-reported role and policy assignments. Conditional inheritance and explicit-deny evaluation are not simulated.";
     public IReadOnlyList<EffectiveAccessGridRow> AccessRecords
     {
         get
@@ -659,7 +744,7 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
             var roles = snapshot?.Roles.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudRole>();
             var permissions = snapshot?.Permissions.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudPermission>();
             var resources = snapshot?.Resources.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudResource>();
-            return (snapshot?.EffectiveAccess ?? Array.Empty<EffectiveAccess>()).Select(item => new EffectiveAccessGridRow(
+            var demoRows = (snapshot?.EffectiveAccess ?? Array.Empty<EffectiveAccess>()).Select(item => new EffectiveAccessGridRow(
                 item.Provider.ToString(),
                 principals.GetValueOrDefault(item.PrincipalId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PrincipalId),
                 item.RoleId is Guid roleId ? roles.GetValueOrDefault(roleId)?.Name ?? WorkspaceDataFormatting.ShortId(roleId) : "Direct permission",
@@ -667,18 +752,31 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 resources.GetValueOrDefault(item.ResourceId ?? Guid.Empty)?.Name ?? item.Scope ?? "Account scope",
                 item.Decision.ToString(),
                 item.IsInherited ? "Inherited" : item.IsDirect ? "Direct" : "Other",
-                item.IsPrivileged))
+                item.AccessSource ?? "Demo Mode model",
+                item.IsPrivileged));
+            var liveRows = _liveHistory.SelectMany(scan => scan.EffectiveAccess.Select(item => new EffectiveAccessGridRow(
+                item.Provider,
+                item.Principal,
+                item.Role,
+                item.Role,
+                item.Scope,
+                "Assigned",
+                "Provider-reported",
+                item.Source,
+                item.IsPrivileged)));
+            return demoRows.Concat(liveRows)
                 .Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Principal, row.Role, row.Permission, row.Resource, row.Decision, row.Path))
                 .ToArray();
         }
     }
     public bool HasResults => AccessRecords.Count > 0;
 
-    private async Task RefreshAsync()
+    public async Task RefreshAsync()
     {
         try
         {
             _snapshot = await _demoData.GetSnapshotAsync();
+            _liveHistory = _liveScanHistoryStore is null ? Array.Empty<LiveScanHistoryEntry>() : await _liveScanHistoryStore.GetRecentAsync();
             OnPropertyChanged(nameof(AccessRecords));
             OnPropertyChanged(nameof(HasResults));
         }
@@ -731,7 +829,7 @@ public sealed class RiskFindingsViewModel : WorkspaceViewModel
     }
     public bool HasResults => Findings.Count > 0;
 
-    private async Task RefreshAsync()
+    public async Task RefreshAsync()
     {
         try
         {
@@ -768,6 +866,8 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
     public bool HasResults => Recommendations.Count > 0;
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) RefreshRecommendationsCommand.Execute(null); } }
     public AsyncRelayCommand RefreshRecommendationsCommand { get; }
+    public async Task RefreshAsync() => await LoadAsync();
+
     private async Task LoadAsync()
     {
         IsLoading = true;
@@ -802,13 +902,16 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;
     private readonly ILiveCloudScanService? _liveCloudScanService;
+    private readonly ILiveScanHistoryStore? _liveScanHistoryStore;
     private DemoSnapshot? _snapshot;
+    private IReadOnlyList<LiveScanHistoryEntry> _liveHistory = Array.Empty<LiveScanHistoryEntry>();
     private string _searchText = string.Empty;
 
-    public ScanHistoryViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
+    public ScanHistoryViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null, ILiveScanHistoryStore? liveScanHistoryStore = null) : base(demoData)
     {
         _demoData = demoData;
         _liveCloudScanService = liveCloudScanService;
+        _liveScanHistoryStore = liveScanHistoryStore;
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
         if (_liveCloudScanService is not null)
         {
@@ -818,41 +921,114 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
     }
 
     public override string Title => "Scan History";
-    public override string Subtitle => "Review completed provider scans and discovered-record totals.";
+    public override string Subtitle => "Review live and Demo Mode scans completed in the last seven days.";
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Scans)); OnPropertyChanged(nameof(HasResults)); } } }
     public IReadOnlyList<ScanHistoryGridRow> Scans
     {
         get
         {
             var accounts = _snapshot?.Accounts.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudAccount>();
-            var rows = (_snapshot?.Scans ?? Array.Empty<Scan>()).Select(item => new ScanHistoryGridRow(
+            var cutoff = DateTime.UtcNow.AddDays(-7);
+            var rows = (_snapshot?.Scans ?? Array.Empty<Scan>()).Where(item => (item.CompletedAt ?? item.StartedAt) >= cutoff).Select(item => new ScanHistoryGridRow(
                 accounts.GetValueOrDefault(item.CloudAccountId)?.CloudProvider.ToString() ?? "Demo",
                 item.StartedAt, item.CompletedAt, item.Status.ToString(), item.IdentitiesDiscovered,
-                item.ItemsDiscovered, item.PermissionsDiscovered, item.FindingsGenerated));
-            var live = _liveCloudScanService?.CurrentResult;
-            if (live is not null)
-            {
-                var providers = string.Join(", ", live.ProviderMessages.Select(message => message.Split(':')[0]).Distinct());
-                rows = rows.Append(new ScanHistoryGridRow(providers, live.StartedAt, live.CompletedAt, "Completed",
-                    live.IdentityCount, live.AccountCount + live.IdentityCount + live.ResourceCount + live.RoleCount + live.PermissionCount,
-                    live.PermissionCount, live.Findings.Count));
-            }
+                item.ItemsDiscovered, item.PermissionsDiscovered, item.FindingsGenerated,
+                _snapshot?.EffectiveAccess.Count(access => access.CloudAccountId == item.CloudAccountId) ?? 0));
+            var live = _liveHistory.Select(item => new ScanHistoryGridRow(
+                item.Provider, item.StartedAt, item.CompletedAt, "Completed", item.Identities,
+                item.Accounts + item.Identities + item.Resources + item.Roles + item.Permissions,
+                item.Permissions, item.Findings, item.EffectiveAccess.Count));
+            rows = rows.Concat(live);
             return rows.Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Status)).OrderByDescending(row => row.StartedAt).ToArray();
         }
     }
     public bool HasResults => Scans.Count > 0;
 
-    private async Task RefreshAsync()
+    public async Task RefreshAsync()
     {
         try
         {
             _snapshot = await _demoData.GetSnapshotAsync();
+            _liveHistory = _liveScanHistoryStore is null ? Array.Empty<LiveScanHistoryEntry>() : await _liveScanHistoryStore.GetRecentAsync();
             OnPropertyChanged(nameof(Scans));
             OnPropertyChanged(nameof(HasResults));
         }
         catch (Exception exception)
         {
             ErrorMessage = $"Unable to load scan history: {exception.Message}";
+        }
+    }
+}
+
+public sealed class FeedbackViewModel : WorkspaceViewModel
+{
+    private readonly IUserFeedbackService _feedbackService;
+    private string _feedbackText = string.Empty;
+    private string _suggestionsText = string.Empty;
+    private string _submissionMessage = string.Empty;
+
+    public FeedbackViewModel(IUserFeedbackService feedbackService)
+    {
+        _feedbackService = feedbackService;
+        SubmitCommand = new AsyncRelayCommand(SubmitAsync);
+    }
+
+    public override string Title => "Feedback";
+    public override string Subtitle => "Share product feedback and ideas for improvement.";
+    public string FeedbackText
+    {
+        get => _feedbackText;
+        set
+        {
+            if (SetProperty(ref _feedbackText, value))
+            {
+                OnPropertyChanged(nameof(CanSubmit));
+                SubmissionMessage = string.Empty;
+            }
+        }
+    }
+    public string SuggestionsText
+    {
+        get => _suggestionsText;
+        set
+        {
+            if (SetProperty(ref _suggestionsText, value))
+            {
+                OnPropertyChanged(nameof(CanSubmit));
+                SubmissionMessage = string.Empty;
+            }
+        }
+    }
+    public string SubmissionMessage { get => _submissionMessage; private set => SetProperty(ref _submissionMessage, value); }
+    public bool CanSubmit => !IsLoading && !string.IsNullOrWhiteSpace(FeedbackText) && !string.IsNullOrWhiteSpace(SuggestionsText);
+    public AsyncRelayCommand SubmitCommand { get; }
+
+    public async Task SubmitAsync()
+    {
+        if (!CanSubmit)
+        {
+            return;
+        }
+
+        IsLoading = true;
+        OnPropertyChanged(nameof(CanSubmit));
+        ErrorMessage = null;
+        SubmissionMessage = string.Empty;
+        try
+        {
+            await _feedbackService.SubmitAsync(FeedbackText.Trim(), SuggestionsText.Trim());
+            FeedbackText = string.Empty;
+            SuggestionsText = string.Empty;
+            SubmissionMessage = "Thank you. Your anonymous feedback was submitted on this device.";
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to submit feedback: {exception.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+            OnPropertyChanged(nameof(CanSubmit));
         }
     }
 }
