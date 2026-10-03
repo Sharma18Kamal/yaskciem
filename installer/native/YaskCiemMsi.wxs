@@ -1,0 +1,34 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="YASK-CIEM"
+      Manufacturer="YASK-CIEM"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="{D0B7D2CC-5BD5-4A29-9E79-2E5EA68F6B4C}"
+      Scope="perMachine"
+      Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of YASK-CIEM is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="YASK-CIEM" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="APPLICATIONMENUDIR" Name="YASK-CIEM">
+        <Component Id="StartMenuShortcut" Guid="{F47E0C41-82A8-452E-8B3C-EA33D41456A3}">
+          <Shortcut Id="YaskCiemStartMenuShortcut"
+                    Name="YASK-CIEM"
+                    Target="[INSTALLFOLDER]CloudEntitle.Desktop.exe"
+                    WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveYaskCiemStartMenuFolder" On="uninstall" />
+          <RegistryValue Root="HKLM" Key="Software\YASK-CIEM" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="YASK-CIEM" Level="1">
+      <Files Include="!(bindpath.PublishedApp)\**" Directory="INSTALLFOLDER" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>
