@@ -11,7 +11,7 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken = default)
     {
-        var executable = ResolveExecutable(command);
+        var executable = CloudCliExecutableResolver.Resolve(command) ?? (command, false);
         var isAzureBatchLauncher = command == "az" && executable.IsBatchFile;
         var startInfo = new ProcessStartInfo
         {
@@ -35,9 +35,7 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
         }
         else if (executable.IsBatchFile)
         {
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(BuildBatchCommand(executable.Path, arguments));
+            startInfo.Arguments = BuildBatchCommand(executable.Path, arguments);
         }
         else
         {
@@ -67,41 +65,60 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
             await errorTask);
     }
 
-    private static (string Path, bool IsBatchFile) ResolveExecutable(string command)
-    {
-        var resolved = (command switch
-        {
-            "az" => new[]
-            {
-                "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin\\az.cmd",
-                "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin\\az.exe"
-            },
-            "aws" => new[]
-            {
-                "C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe",
-                "C:\\Program Files\\Amazon\\AWSCLI\\bin\\aws.exe"
-            },
-            "gcloud" => new[]
-            {
-                "C:\\Program Files (x86)\\Google\\Cloud SDK\\google-cloud-sdk\\bin\\gcloud.cmd",
-                "C:\\Program Files\\Google\\Cloud SDK\\google-cloud-sdk\\bin\\gcloud.cmd"
-            },
-            _ => Array.Empty<string>()
-        }).FirstOrDefault(File.Exists);
-
-        if (resolved is not null)
-        {
-            return (resolved, Path.GetExtension(resolved).Equals(".cmd", StringComparison.OrdinalIgnoreCase));
-        }
-
-        return (command, false);
-    }
-
     private static string BuildBatchCommand(string path, IReadOnlyList<string> arguments)
-        => string.Join(" ", new[] { QuoteBatchArgument(path) }.Concat(arguments.Select(QuoteBatchArgument)));
+        => $"/d /s /c \"\"{path}\" {string.Join(" ", arguments.Select(QuoteBatchArgument))}\"";
 
     private static string QuoteBatchArgument(string argument)
         => argument.Contains(' ') || argument.Contains('"')
             ? $"\"{argument.Replace("\"", "\"\"")}\""
             : argument;
+}
+
+public static class CloudCliExecutableResolver
+{
+    public static (string Path, bool IsBatchFile)? Resolve(string command)
+    {
+        var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        var candidates = (command switch
+        {
+            "az" => new[]
+            {
+                Path.Combine(programFiles, "Microsoft SDKs\\Azure\\CLI2\\wbin\\az.cmd"),
+                Path.Combine(programFiles, "Microsoft SDKs\\Azure\\CLI2\\wbin\\az.exe"),
+                Path.Combine(localApplicationData, "Programs\\Azure CLI\\wbin\\az.cmd")
+            },
+            "aws" => new[]
+            {
+                Path.Combine(programFiles, "Amazon\\AWSCLIV2\\aws.exe"),
+                Path.Combine(programFiles, "Amazon\\AWSCLI\\bin\\aws.exe"),
+                Path.Combine(localApplicationData, "Programs\\Amazon\\AWSCLIV2\\aws.exe")
+            },
+            "gcloud" => new[]
+            {
+                Path.Combine(programFilesX86, "Google\\Cloud SDK\\google-cloud-sdk\\bin\\gcloud.cmd"),
+                Path.Combine(programFiles, "Google\\Cloud SDK\\google-cloud-sdk\\bin\\gcloud.cmd"),
+                Path.Combine(localApplicationData, "Google\\Cloud SDK\\google-cloud-sdk\\bin\\gcloud.cmd")
+            },
+            _ => Array.Empty<string>()
+        });
+
+        var resolved = candidates.FirstOrDefault(File.Exists);
+        if (resolved is null)
+        {
+            var extensions = command.Equals("gcloud", StringComparison.OrdinalIgnoreCase) || command.Equals("az", StringComparison.OrdinalIgnoreCase)
+                ? new[] { ".cmd", ".exe", ".bat" }
+                : new[] { ".exe", ".cmd", ".bat" };
+            resolved = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .SelectMany(directory => extensions.Select(extension => Path.Combine(directory.Trim('"'), command + extension)))
+                .FirstOrDefault(File.Exists);
+        }
+
+        return resolved is null
+            ? null
+            : (resolved, Path.GetExtension(resolved).Equals(".cmd", StringComparison.OrdinalIgnoreCase)
+                || Path.GetExtension(resolved).Equals(".bat", StringComparison.OrdinalIgnoreCase));
+    }
 }

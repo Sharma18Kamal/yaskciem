@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using CloudEntitle.Domain;
 using CloudEntitle.Application.Interfaces;
+using CloudEntitle.Infrastructure;
 
 namespace CloudEntitle.Desktop.Services;
 
@@ -24,19 +25,24 @@ public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
 
     public void LaunchAuthentication(CloudProviderType provider)
     {
-        var command = provider switch
+        var (command, arguments, displayName, installUrl) = provider switch
         {
-            CloudProviderType.Azure => "az login",
-            CloudProviderType.Aws => "aws configure sso",
-            CloudProviderType.Gcp => "gcloud auth login",
+            CloudProviderType.Azure => ("az", "login", "Azure CLI", "https://learn.microsoft.com/cli/azure/install-azure-cli-windows"),
+            CloudProviderType.Aws => ("aws", "configure sso", "AWS CLI v2", "https://awscli.amazonaws.com/AWSCLIV2-User.msi"),
+            CloudProviderType.Gcp => ("gcloud", "auth login", "Google Cloud CLI", "https://dl.google.com/dl/cloudsdk/channels/rapid/GoogleCloudSDKInstaller.exe"),
             _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported cloud provider.")
         };
+        var executable = CloudCliExecutableResolver.Resolve(command);
+        if (executable is null)
+        {
+            throw new InvalidOperationException($"{displayName} was not found. Install it from {installUrl}, then reopen YASK-CIEM and try again.");
+        }
 
         var commandShell = Environment.GetEnvironmentVariable("ComSpec");
         var startInfo = new ProcessStartInfo
         {
             FileName = string.IsNullOrWhiteSpace(commandShell) ? "cmd.exe" : commandShell,
-            Arguments = $"/k {command}",
+            Arguments = $"/k \"\"{executable.Value.Path}\" {arguments}\"",
             UseShellExecute = true,
             WindowStyle = ProcessWindowStyle.Normal
         };

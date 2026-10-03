@@ -170,6 +170,23 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task CloudAccountsViewModel_ShouldRecoverWhenProviderCliIsMissing()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher
+        {
+            LaunchFailure = new FileNotFoundException("AWS CLI was not found. Install it and reopen YASK-CIEM.")
+        };
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
+
+        await viewModel.ConnectAsync(CloudProviderType.Aws);
+
+        var awsProvider = viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws);
+        Assert.False(awsProvider.IsConnecting);
+        Assert.True(awsProvider.CanConnect);
+        Assert.Contains("AWS CLI was not found", viewModel.ErrorMessage);
+    }
+
+    [Fact]
     public async Task CloudAccountsViewModel_ShouldRequireConfirmationBeforeDisconnecting()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
@@ -482,7 +499,12 @@ public sealed class NavigationTests
     {
         public List<CloudProviderType> LaunchedProviders { get; } = new();
         public List<CloudProviderType> DisconnectedProviders { get; } = new();
-        public void LaunchAuthentication(CloudProviderType provider) => LaunchedProviders.Add(provider);
+        public Exception? LaunchFailure { get; set; }
+        public void LaunchAuthentication(CloudProviderType provider)
+        {
+            if (LaunchFailure is not null) throw LaunchFailure;
+            LaunchedProviders.Add(provider);
+        }
         public void LaunchDisconnection(CloudProviderType provider) => DisconnectedProviders.Add(provider);
         public Task<bool> IsConnectedAsync(CloudProviderType provider, CancellationToken cancellationToken = default)
             => Task.FromResult(LaunchedProviders.Contains(provider) && !DisconnectedProviders.Contains(provider));
