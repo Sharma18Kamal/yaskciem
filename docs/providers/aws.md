@@ -4,11 +4,11 @@ The AWS adapter lives in `CloudEntitle.Cloud.Aws` and maps AWS IAM and account m
 
 ## Authentication
 
-The connector supports the AWS CLI credential path and includes an `AwsCredentialFactory` using the AWS SDK default credential chain. Profiles, environment credentials, and role-based credentials are resolved by AWS SDK/CLI mechanisms. Access keys, secret keys, session tokens, and private keys are never stored or logged.
+The connector enumerates AWS CLI profiles, including IAM Identity Center SSO profiles, and verifies each with STS. Every working profile/account pair is scanned separately, even when multiple permission sets target the same AWS account. Access keys, secret keys, session tokens, and private keys are never stored or logged.
 
 ## Required Permissions
 
-Use read-only IAM permissions appropriate to the selected account or organization. Typical discovery needs read access for STS caller identity, IAM users/groups/roles/policies/role versions, role trust policies, and Organizations accounts/OUs where organization discovery is enabled. CloudTrail and access-key last-used metadata are optional and should be granted only when required.
+Use read-only IAM permissions appropriate to each configured account/profile. Discovery uses STS caller identity, IAM users/groups/roles/policies/account authorization details, plus `access-analyzer:ListAnalyzers` and `access-analyzer:ListFindings` for already-configured analyzers. `cloudtrail:LookupEvents` enables recent IAM change timestamps. `organizations:ListAccounts` can add the organization roster to Cloud Accounts, but does not grant member-account access or trigger role assumption; only accounts with a configured, working profile are scanned. Permission-set names are inferred from assumed-role ARNs. No analyzer is created or modified.
 
 ## Discovery and Normalization
 
@@ -18,6 +18,11 @@ Use read-only IAM permissions appropriate to the selected account or organizatio
 - Roles and policies map to `CloudRole` and `CloudPolicy`.
 - Policy statements map to `CloudPermission`, preserving Effect, Action, NotAction, Resource, NotResource, service prefixes, and wildcard values such as `s3:*`.
 - Trust-policy principals are returned as `AwsTrustRelationship` records for future access-path analysis.
+- Active findings from existing IAM Access Analyzer instances are added to Risk Findings.
+- Each profile/account appears separately in the Cloud Accounts inventory, with its CLI profile and inferred permission set.
+- Organization members without a configured working profile appear as roster-only rows and are not represented as scanned.
+- IAM role usage dates/regions and IAM user's console-password last-use time are shown with their specific meanings.
+- Recent CloudTrail IAM management events can populate `Last changed` for matching users, groups, roles, or policies; this is separate from IAM's last-used signals. The lookup uses `us-east-1`, where IAM global-service events are recorded.
 - AWS ARNs are preserved as resource and scope identifiers.
 
 ## Reliability
@@ -26,15 +31,15 @@ AWS CLI pagination is enabled by default for supported list operations, so the a
 
 ## Activity Limitations
 
-Role last-used and access-key last-used metadata can be added when the authenticated principal has permission. CloudTrail is optional. Missing activity data remains unknown; the connector never labels an identity unused without evidence.
+`RoleLastUsed` is limited to IAM's supported tracking period and describes role use, while `PasswordLastUsed` describes console-password use only. CloudTrail event history lookup covers events within the last 90 days and is limited to 50 returned events per query. Missing or denied audit data leaves `Last changed` unreported; it is not evidence that access was never changed or used. Access Analyzer requires a pre-existing analyzer and read permission.
 
 ## Read-Only Guarantee
 
-The connector invokes only STS/IAM/Organizations read operations. It does not create users, policies, roles, access keys, or assignments, and it does not modify trust relationships or permissions.
+The connector invokes only STS, IAM, Organizations, and CloudTrail read operations. It does not create users, policies, roles, access keys, or assignments, and it does not modify trust relationships or permissions.
 
 ## Troubleshooting
 
 - Authentication failures: verify the active AWS profile with `aws sts get-caller-identity`.
-- Access denied: grant the minimum read-only IAM actions at the required account/organization scope.
+- Access denied: grant the minimum read-only IAM actions, including `cloudtrail:LookupEvents` for change history and `organizations:ListAccounts` at organization scope when roster discovery is required.
 - Throttling or network failures: retry with the bounded connector backoff and review logs for the failed operation.
-- Missing organization data: organization APIs may be unavailable outside the management account or without Organizations read permissions.
+- Missing member accounts: configure and authenticate an AWS CLI/IAM Identity Center profile for each account and permission set to be scanned; organization rosters do not grant access to member accounts.

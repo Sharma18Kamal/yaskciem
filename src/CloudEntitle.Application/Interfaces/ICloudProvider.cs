@@ -12,6 +12,11 @@ public interface ICloudProvider
     Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default);
 }
 
+public interface ICloudProviderDiagnostics
+{
+    IReadOnlyList<string> DrainProviderMessages();
+}
+
 public interface ICloudCommandRunner
 {
     Task<CloudCommandResult> RunAsync(
@@ -45,11 +50,38 @@ public interface ICloudEffectiveAccessProvider
     Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default);
 }
 
-public sealed record CloudEffectiveAccessAssignment(string Principal, string Role, string Scope, string Source, bool IsPrivileged, string AssignmentType = "Assigned");
+public sealed record CloudEffectiveAccessAssignment(string Principal, string Role, string Scope, string Source, bool IsPrivileged, string AssignmentType = "Assigned", DateTime? LastUsedAt = null, DateTime? LastChangedAt = null);
+
+public interface ICloudOrganizationProvider
+{
+    Task<CloudOrganizationScanResult> DiscoverOrganizationAccountsAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed record CloudOrganizationScanResult(IReadOnlyList<CloudAccount> Accounts, IReadOnlyList<string> ProviderMessages);
+
+public interface IKubernetesRbacProvider
+{
+    Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed record KubernetesRbacScanResult(IReadOnlyList<KubernetesClusterScan> Clusters, IReadOnlyList<string> ProviderMessages);
+
+public sealed record KubernetesClusterScan(
+    CloudAccount Cluster,
+    IReadOnlyList<CloudPrincipal> Principals,
+    IReadOnlyList<CloudRole> Roles,
+    IReadOnlyList<CloudPermission> Permissions,
+    IReadOnlyList<CloudEffectiveAccessAssignment> AccessAssignments,
+    IReadOnlyList<CloudResource> Resources);
 
 public interface IEntraDirectoryProvider
 {
     Task<EntraDirectoryScanResult> DiscoverEntraDirectoryAsync(Guid accountId, CancellationToken cancellationToken = default);
+}
+
+public interface IAccessAnalyzerFindingsProvider
+{
+    Task<IReadOnlyList<RiskFinding>> DiscoverAccessAnalyzerFindingsAsync(Guid accountId, CancellationToken cancellationToken = default);
 }
 
 public sealed record EntraDirectoryScanResult(

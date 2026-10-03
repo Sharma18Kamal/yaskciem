@@ -465,13 +465,15 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
     private readonly ICloudAuthenticationLauncher _authenticationLauncher;
     private readonly IDialogService? _dialogService;
     private readonly CloudConnectionState _cloudConnectionState;
+    private readonly ILiveCloudScanService? _liveCloudScanService;
     private CloudProviderType? _pendingProvider;
 
-    public CloudAccountsViewModel(IDemoDataService demoData, ICloudAuthenticationLauncher? authenticationLauncher = null, IDialogService? dialogService = null, CloudConnectionState? cloudConnectionState = null) : base(demoData)
+    public CloudAccountsViewModel(IDemoDataService demoData, ICloudAuthenticationLauncher? authenticationLauncher = null, IDialogService? dialogService = null, CloudConnectionState? cloudConnectionState = null, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
     {
         _authenticationLauncher = authenticationLauncher ?? new CloudAuthenticationLauncher();
         _dialogService = dialogService;
         _cloudConnectionState = cloudConnectionState ?? new CloudConnectionState();
+        _liveCloudScanService = liveCloudScanService;
         _cloudConnectionState.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(CloudConnectionState.Status)) OnPropertyChanged(nameof(CloudConnectionStatus));
@@ -483,6 +485,10 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
         ];
         RefreshConnectionsCommand = new AsyncRelayCommand(RefreshConnectionsAsync);
+        if (_liveCloudScanService is not null)
+        {
+            _liveCloudScanService.ScanCompleted += (_, _) => OnPropertyChanged(nameof(DiscoveredAccounts));
+        }
         _ = RefreshConnectionsAsync();
     }
 
@@ -491,6 +497,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
     public IReadOnlyList<CloudProviderConnectionOption> Providers { get; }
     public string ConnectionGuidance { get; private set; } = "Choose a provider to start its official sign-in flow in a separate terminal.";
     public string CloudConnectionStatus => _cloudConnectionState.Status;
+    public IReadOnlyList<LiveScanAccountRecord> DiscoveredAccounts => _liveCloudScanService?.CurrentResult?.AccountRecords ?? Array.Empty<LiveScanAccountRecord>();
     public AsyncRelayCommand RefreshConnectionsCommand { get; }
 
     public async Task<bool> DisconnectActiveCloudAsync()
@@ -725,7 +732,7 @@ public sealed class ResourcesViewModel : WorkspaceViewModel
     public bool HasResults => Resources.Count > 0;
 }
 public sealed record EntitlementGridRow(string Provider, string Subject, string Grant, string Scope, string Assignment, string Source);
-public sealed record EffectiveAccessGridRow(string Provider, string Principal, string Role, string Permission, string Resource, string Decision, string Path, string Source, bool Privileged);
+public sealed record EffectiveAccessGridRow(string Provider, string Principal, string Role, string Permission, string Resource, string Decision, string Path, string Source, string LastUsed, string LastChanged, bool Privileged);
 public sealed record RiskFindingGridRow(string Provider, string Severity, string Title, string Principal, string Resource, string Evidence, string Recommendation);
 public sealed record RecommendationGridRow(string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority);
 public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings, int EffectiveAccess);
@@ -821,7 +828,7 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
     public override string Title => "Effective Access";
     public override string Subtitle => "Trace modeled direct and inherited access paths.";
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(AccessRecords)); OnPropertyChanged(nameof(HasResults)); } } }
-    public string DataCoverageMessage => "Live rows show provider-reported role and policy assignments. Conditional inheritance and explicit-deny evaluation are not simulated.";
+    public string DataCoverageMessage => "Last used and last changed are separate provider-reported signals. Missing audit data remains unknown; conditional inheritance and explicit-deny evaluation are not simulated.";
     public IReadOnlyList<EffectiveAccessGridRow> AccessRecords
     {
         get
@@ -840,6 +847,8 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 item.Decision.ToString(),
                 item.IsInherited ? "Inherited" : item.IsDirect ? "Direct" : "Other",
                 item.AccessSource ?? "Demo Mode model",
+                "Not recorded",
+                "Not recorded",
                 item.IsPrivileged));
             var liveRows = _liveHistory.SelectMany(scan => scan.EffectiveAccess.Select(item => new EffectiveAccessGridRow(
                 item.Provider,
@@ -850,6 +859,8 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 item.AssignmentType,
                 item.AssignmentType,
                 item.Source,
+                item.LastUsedAt?.ToLocalTime().ToString("g") ?? "Not reported",
+                item.LastChangedAt?.ToLocalTime().ToString("g") ?? "Not reported",
                 item.IsPrivileged)));
             return demoRows.Concat(liveRows)
                 .Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Principal, row.Role, row.Permission, row.Resource, row.Decision, row.Path))

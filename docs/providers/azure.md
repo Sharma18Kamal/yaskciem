@@ -8,7 +8,7 @@ The connector uses the authenticated Azure CLI session (`az account show`) for A
 
 ## Required Permissions
 
-Use the least-privileged read-only access needed for the selected scope. ARM discovery requires permission to read subscriptions, resources, role definitions, and role assignments. Entra discovery uses Microsoft Graph delegated read permissions `User.ReadBasic.All`, `Group.Read.All`, and `Application.Read.All`. PIM active and eligible assignments use `RoleAssignmentSchedule.Read.Directory` and `RoleEligibilitySchedule.Read.Directory`. Microsoft Graph documents supported read roles including Global Reader, Security Reader, Security Operator, Security Administrator, and Privileged Role Administrator. A tenant administrator may need to grant consent to these delegated permissions for the Azure CLI application used by `az rest`. Do not grant Owner, Contributor, or User Access Administrator for scanning.
+Use the least-privileged read-only access needed for the selected scope. ARM discovery requires permission to read subscriptions, resources, role definitions, and role assignments. Azure Activity Log timestamps require `Microsoft.Insights/eventtypes/values/read` at subscription scope. Entra discovery uses Microsoft Graph delegated read permissions `User.ReadBasic.All`, `Group.Read.All`, and `Application.Read.All`. PIM active and eligible assignments use `RoleAssignmentSchedule.Read.Directory` and `RoleEligibilitySchedule.Read.Directory`. Microsoft Graph documents supported read roles including Global Reader, Security Reader, Security Operator, Security Administrator, and Privileged Role Administrator. A tenant administrator may need to grant consent to these delegated permissions for the Azure CLI application used by `az rest`. Do not grant Owner, Contributor, or User Access Administrator for scanning.
 
 ## Discovery
 
@@ -22,6 +22,7 @@ The adapter normalizes:
 - Microsoft Entra users, groups, and service principals into `CloudPrincipal`.
 - Active and eligible Entra PIM role schedules into Effective Access, labeled with assignment state and source.
 - Azure scope strings into `CloudScope`, preserving the original value.
+- Successful role-assignment writes from the last 90 days can populate `Last changed` when the Activity Log principal, role-definition ID, and scope match the current assignment.
 
 Azure `actions` and `dataActions` become Allow permissions. `notActions` and `notDataActions` become Deny permissions with a source marker identifying the original Azure field. Wildcards are preserved as supplied.
 
@@ -33,7 +34,7 @@ The current scan result is returned to the Application layer for persistence; th
 
 ## Limitations
 
-The current implementation uses Azure CLI discovery for ARM and Graph. Tenant management-group enumeration and activity-log collection remain future expansions. PIM rows are provider-reported schedules, not a full simulation of nested group membership, conditional access, or authorization evaluation.
+The current implementation uses Azure CLI discovery for ARM, Graph, and subscription Activity Logs. The change timestamp covers matching role-assignment writes in the returned 90-day window; it does not infer last use or attribute unrelated subscription events to an assignment. PIM rows are provider-reported schedules, not a full simulation of nested group membership, conditional access, or authorization evaluation.
 
 ## Troubleshooting
 

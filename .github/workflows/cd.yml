@@ -42,10 +42,30 @@ jobs:
       - name: Run tests
         run: dotnet test CloudEntitle.sln --configuration Release --no-build --no-restore
 
-      # TODO: Configure a protected release environment and organization signing certificate.
       # TODO: Generate a signed MSIX and App Installer feed using scripts/package-msix.ps1.
       # TODO: Publish both artifacts to the approved HTTPS distribution host.
       # TODO: Verify package signature, feed URL, and published version before announcing release.
       - name: CD deployment is not configured
         shell: pwsh
-        run: Write-Output 'Release candidate validation complete; signing and deployment are not configured.'
+        run: Write-Output 'Release candidate validation complete; signing and publishing remain pending.'
+
+  release-signing-preflight:
+    name: Verify protected signing environment
+    needs: release-candidate
+    runs-on: windows-latest
+    environment:
+      name: release
+    steps:
+      - name: Validate signing certificate secrets
+        shell: pwsh
+        env:
+          SIGNING_CERTIFICATE_BASE64: ${{ secrets.YASK_CIEM_SIGNING_CERT_BASE64 }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.YASK_CIEM_SIGNING_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_BASE64)) {
+            throw 'Set YASK_CIEM_SIGNING_CERT_BASE64 in the protected release environment.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_PASSWORD)) {
+            throw 'Set YASK_CIEM_SIGNING_CERT_PASSWORD in the protected release environment.'
+          }
+          Write-Output 'Protected release environment and signing inputs are configured.'

@@ -49,6 +49,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new AwsProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new GcpProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
+		services.AddSingleton<IKubernetesRbacProvider>(provider => new KubernetesRbacScanner(provider.GetRequiredService<ICloudCommandRunner>()));
 		services.AddSingleton<ILiveCloudScanService, LiveCloudScanService>();
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<CloudConnectionState>();

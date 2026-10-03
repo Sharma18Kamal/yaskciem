@@ -11,7 +11,9 @@ public sealed record LiveEffectiveAccessRecord(
     string Scope,
     string Source,
     bool IsPrivileged,
-    string AssignmentType = "Assigned");
+    string AssignmentType = "Assigned",
+    DateTime? LastUsedAt = null,
+    DateTime? LastChangedAt = null);
 
 public sealed record LiveScanHistoryEntry(
     DateTime StartedAt,
@@ -23,7 +25,8 @@ public sealed record LiveScanHistoryEntry(
     int Roles,
     int Permissions,
     int Findings,
-    IReadOnlyList<LiveEffectiveAccessRecord> EffectiveAccess);
+    IReadOnlyList<LiveEffectiveAccessRecord> EffectiveAccess,
+    IReadOnlyList<LiveScanAccountRecord> AccountDetails);
 
 public interface ILiveScanHistoryStore
 {

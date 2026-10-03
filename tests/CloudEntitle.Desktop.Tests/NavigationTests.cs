@@ -353,6 +353,26 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task LiveScanHistory_ShouldPersistLastChangedSeparatelyFromLastUsed()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var historyStore = new LocalLiveScanHistoryStore(Path.Combine(directory, "scans.jsonl"));
+        var lastUsedAt = DateTime.UtcNow.AddDays(-2);
+        var lastChangedAt = DateTime.UtcNow.AddDays(-1);
+        var entry = new LiveScanHistoryEntry(
+            DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow, "AWS", 1, 1, 0, 1, 1, 0,
+            new[] { new LiveEffectiveAccessRecord("AWS", "audit-user", "ReadOnly", "account", "CloudTrail", false, LastUsedAt: lastUsedAt, LastChangedAt: lastChangedAt) },
+            Array.Empty<LiveScanAccountRecord>());
+
+        await historyStore.RecordAsync(entry);
+        var savedAccess = Assert.Single(Assert.Single(await historyStore.GetRecentAsync()).EffectiveAccess);
+
+        Assert.Equal(lastUsedAt, savedAccess.LastUsedAt);
+        Assert.Equal(lastChangedAt, savedAccess.LastChangedAt);
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
     public async Task DataScreens_ShouldShowDemoRecordsAndLiveScanResults()
     {
         var accountId = Guid.NewGuid();

@@ -38,7 +38,13 @@ public abstract class RiskRuleBase : IRiskRule
     }
 
     protected static Guid Stable(string value) => GuidUtility.Create(GuidUtility.Namespace, value);
-    protected static CloudProvider Provider(CloudProviderType provider) => provider == CloudProviderType.Azure ? CloudProvider.Azure : provider == CloudProviderType.Aws ? CloudProvider.Aws : CloudProvider.Gcp;
+    protected static CloudProvider Provider(CloudProviderType provider) => provider switch
+    {
+        CloudProviderType.Azure => CloudProvider.Azure,
+        CloudProviderType.Aws => CloudProvider.Aws,
+        CloudProviderType.Gcp => CloudProvider.Gcp,
+        _ => CloudProvider.Kubernetes
+    };
 }
 
 public sealed class PrivilegedIdentityRule : RiskRuleBase { public override string RuleId => "CIEM-001"; public override string Name => "Privileged Identity"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.Privilege; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "The principal has privileged effective access.", "EffectiveAccess.IsPrivileged=true")).ToArray()); }

@@ -44,7 +44,13 @@ public sealed class EffectiveAccessEngine : IEffectiveAccessEngine
                     results.Add(new DomainEffectiveAccess
                     {
                         Id = StableId(principalId, resource.Id, permission.Id),
-                        Provider = request.Normalized.Principals.FirstOrDefault(item => item.Id == principalId)?.CloudProvider == CloudProviderType.Azure ? CloudProvider.Azure : request.Normalized.Principals.FirstOrDefault(item => item.Id == principalId)?.CloudProvider == CloudProviderType.Aws ? CloudProvider.Aws : CloudProvider.Gcp,
+                        Provider = request.Normalized.Principals.FirstOrDefault(item => item.Id == principalId)?.CloudProvider switch
+                        {
+                            CloudProviderType.Azure => CloudProvider.Azure,
+                            CloudProviderType.Aws => CloudProvider.Aws,
+                            CloudProviderType.Gcp => CloudProvider.Gcp,
+                            _ => CloudProvider.Kubernetes
+                        },
                         CloudAccountId = resource.AccountId,
                         PrincipalId = principalId,
                         ResourceId = resource.Id,

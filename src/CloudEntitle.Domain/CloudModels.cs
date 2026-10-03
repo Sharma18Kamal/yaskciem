@@ -4,14 +4,16 @@ public enum CloudProviderType
 {
     Azure,
     Aws,
-    Gcp
+    Gcp,
+    Kubernetes
 }
 
 public enum CloudProvider
 {
     Azure,
     Aws,
-    Gcp
+    Gcp,
+    Kubernetes
 }
 
 public enum ConnectionStatus
@@ -43,7 +45,8 @@ public enum AccountType
     AwsAccount,
     GcpOrganization,
     Folder,
-    Project
+    Project,
+    Cluster
 }
 
 public enum AssignmentType
@@ -258,6 +261,7 @@ public class CloudAccount
     {
         CloudProviderType.Azure => global::CloudEntitle.Domain.CloudProvider.Azure,
         CloudProviderType.Aws => global::CloudEntitle.Domain.CloudProvider.Aws,
+        CloudProviderType.Kubernetes => global::CloudEntitle.Domain.CloudProvider.Kubernetes,
         _ => global::CloudEntitle.Domain.CloudProvider.Gcp
     };
 

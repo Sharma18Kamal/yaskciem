@@ -7,11 +7,13 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Cloud.Aws.Mappers;
 using CloudEntitle.Cloud.Aws.Services;
 
-public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider
+public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider, IAccessAnalyzerFindingsProvider, ICloudOrganizationProvider
 {
     private readonly ICloudCommandRunner? _commandRunner;
     private readonly bool _useLiveDiscovery;
     private readonly Dictionary<Guid, CloudAccount> _accounts = new();
+    private readonly Dictionary<Guid, string?> _accountProfiles = new();
+    private readonly List<string> _providerMessages = new();
 
     public AwsProvider(ICloudCommandRunner? commandRunner = null, bool useLiveDiscovery = false)
     {
@@ -22,36 +24,111 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     public CloudProviderType ProviderType => CloudProviderType.Aws;
 
     public async Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default)
-        => !_useLiveDiscovery || (await RunAwsAsync(new[] { "sts", "get-caller-identity", "--output", "json" }, cancellationToken)).IsSuccess;
+    {
+        if (!_useLiveDiscovery) return true;
+        var profiles = await GetConfiguredProfilesAsync(cancellationToken);
+        foreach (var profile in profiles)
+        {
+            var result = await RunAwsAsync(new[] { "sts", "get-caller-identity", "--output", "json" }, cancellationToken, profile);
+            if (result.IsSuccess) return true;
+        }
+        return false;
+    }
 
     public async Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
     {
         if (!_useLiveDiscovery) return MockAccounts();
-        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "sts", "get-caller-identity", "--output", "json" }, cancellationToken));
-        var root = document.RootElement;
-        var account = new CloudAccount
+        var profiles = await GetConfiguredProfilesAsync(cancellationToken);
+        var accounts = new List<CloudAccount>();
+        var discoveredProfiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var profile in profiles)
         {
-            Id = Guid.NewGuid(),
-            Name = root.TryGetProperty("Arn", out var arn) ? arn.GetString() ?? "AWS account" : "AWS account",
-            CloudProvider = CloudProviderType.Aws,
-            ExternalAccountId = root.GetProperty("Account").GetString(),
-            ConnectionStatus = ConnectionStatus.Connected,
-            IsReadOnly = true,
-            LastScanAt = DateTime.UtcNow
-        };
-        _accounts[account.Id] = account;
-        return new[] { account };
+            if (profile is not null && !discoveredProfiles.Add(profile)) continue;
+            var result = await RunAwsAsync(new[] { "sts", "get-caller-identity", "--output", "json" }, cancellationToken, profile);
+            if (!result.IsSuccess) continue;
+
+            using var document = JsonDocument.Parse(result.StandardOutput);
+            var root = document.RootElement;
+            var externalAccountId = root.TryGetProperty("Account", out var accountId) ? accountId.GetString() : null;
+            if (string.IsNullOrWhiteSpace(externalAccountId)) continue;
+            var arnText = root.TryGetProperty("Arn", out var arn) ? arn.GetString() : null;
+            var permissionSet = ExtractRoleName(arnText);
+            var account = new CloudAccount
+            {
+                Id = Guid.NewGuid(),
+                Name = arnText ?? $"AWS {externalAccountId}",
+                Description = string.IsNullOrWhiteSpace(profile) ? $"Permission set: {permissionSet}" : $"CLI profile: {profile}; permission set: {permissionSet}",
+                CloudProvider = CloudProviderType.Aws,
+                ExternalAccountId = externalAccountId,
+                AccountType = AccountType.AwsAccount,
+                ConnectionStatus = ConnectionStatus.Connected,
+                IsReadOnly = true,
+                LastScanAt = DateTime.UtcNow
+            };
+            _accounts[account.Id] = account;
+            _accountProfiles[account.Id] = profile;
+            accounts.Add(account);
+        }
+        return accounts;
+    }
+
+    public async Task<CloudOrganizationScanResult> DiscoverOrganizationAccountsAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery) return new CloudOrganizationScanResult(Array.Empty<CloudAccount>(), Array.Empty<string>());
+
+        var messages = new List<string>(_providerMessages);
+        _providerMessages.Clear();
+        foreach (var profile in _accountProfiles.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var result = await RunAwsAsync(new[] { "organizations", "list-accounts", "--output", "json" }, cancellationToken, profile);
+            if (!result.IsSuccess)
+            {
+                messages.Add($"AWS Organizations roster unavailable for profile {profile ?? "default"}: {result.StandardError.Trim()}");
+                continue;
+            }
+
+            using var document = JsonDocument.Parse(result.StandardOutput);
+            if (!document.RootElement.TryGetProperty("Accounts", out var accounts) || accounts.ValueKind != JsonValueKind.Array)
+            {
+                messages.Add("AWS Organizations returned no account roster.");
+                continue;
+            }
+
+            var roster = accounts.EnumerateArray().Select(item =>
+            {
+                var externalAccountId = item.TryGetProperty("Id", out var id) ? id.GetString() : null;
+                var hasOrganizationStatus = item.TryGetProperty("Status", out var organizationStatus);
+                var isProfileConnected = externalAccountId is not null && _accounts.Values.Any(account => account.ExternalAccountId == externalAccountId);
+                return new CloudAccount
+                {
+                    Id = Guid.NewGuid(),
+                    Name = item.TryGetProperty("Name", out var name) ? name.GetString() ?? "AWS member account" : "AWS member account",
+                    CloudProvider = CloudProviderType.Aws,
+                    ExternalAccountId = externalAccountId,
+                    AccountType = AccountType.AwsAccount,
+                    ConnectionStatus = isProfileConnected ? ConnectionStatus.Connected : ConnectionStatus.Disconnected,
+                    IsReadOnly = true,
+                    Description = hasOrganizationStatus ? $"AWS Organizations status: {organizationStatus.GetString()}" : "AWS Organizations member account"
+                };
+            }).Where(account => !string.IsNullOrWhiteSpace(account.ExternalAccountId)).ToArray();
+            return new CloudOrganizationScanResult(roster, messages);
+        }
+
+        return new CloudOrganizationScanResult(Array.Empty<CloudAccount>(), messages);
     }
 
     public async Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
         if (!_useLiveDiscovery) return MockIdentities(accountId);
-        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-users", "--output", "json" }, cancellationToken));
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-users", "--output", "json" }, cancellationToken, accountId));
         return document.RootElement.GetProperty("Users").EnumerateArray().Select(user => new CloudPrincipal
         {
             Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Aws,
             Name = user.GetProperty("UserName").GetString() ?? "unknown-user",
             PrincipalId = user.TryGetProperty("UserId", out var userId) ? userId.GetString() : null,
+            LastActivity = user.TryGetProperty("PasswordLastUsed", out var passwordLastUsed) && passwordLastUsed.ValueKind == JsonValueKind.String
+                ? $"Console password used {passwordLastUsed.GetString()}"
+                : null,
             IdentityType = IdentityType.User, IsActive = true
         }).ToArray();
     }
@@ -59,7 +136,7 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     public async Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
         if (!_useLiveDiscovery) return MockPermissions(accountId);
-        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-policies", "--scope", "Local", "--only-attached", "--output", "json" }, cancellationToken));
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-policies", "--scope", "Local", "--only-attached", "--output", "json" }, cancellationToken, accountId));
         return document.RootElement.GetProperty("Policies").EnumerateArray().Select(policy => new CloudPermission
         {
             Id = Guid.NewGuid(), AccountId = accountId,
@@ -73,7 +150,7 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     public async Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
         if (!_useLiveDiscovery) return MockRoles(accountId);
-        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-roles", "--output", "json" }, cancellationToken));
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-roles", "--output", "json" }, cancellationToken, accountId));
         return document.RootElement.GetProperty("Roles").EnumerateArray().Select(role => new CloudRole
         {
             Id = Guid.NewGuid(), AccountId = accountId,
@@ -90,12 +167,103 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
 
         using var document = JsonDocument.Parse(await GetAwsOutputAsync(
             new[] { "iam", "get-account-authorization-details", "--filter", "User", "Role", "Group", "--output", "json" },
-            cancellationToken));
+            cancellationToken,
+            accountId));
         var assignments = new List<CloudEffectiveAccessAssignment>();
         AddAssignments("UserDetailList", "UserName", "AttachedManagedPolicies", "UserPolicyList", "IAM user policy", "UserPolicyName");
         AddAssignments("GroupDetailList", "GroupName", "AttachedManagedPolicies", "GroupPolicyList", "IAM group policy", "GroupPolicyName");
         AddAssignments("RoleDetailList", "RoleName", "AttachedManagedPolicies", "RolePolicyList", "IAM role policy", "RolePolicyName");
+        AddRoleUsage();
+        await AddCloudTrailChangeTimesAsync(cancellationToken);
         return assignments;
+
+        async Task AddCloudTrailChangeTimesAsync(CancellationToken token)
+        {
+            var profile = _accountProfiles.TryGetValue(accountId, out var configuredProfile) ? configuredProfile : null;
+            var result = await RunAwsAsync(new[]
+            {
+                "cloudtrail", "lookup-events", "--lookup-attributes", "AttributeKey=EventSource,AttributeValue=iam.amazonaws.com",
+                "--max-items", "50", "--region", "us-east-1", "--output", "json"
+            }, token, profile);
+            if (!result.IsSuccess)
+            {
+                _providerMessages.Add($"AWS IAM change history unavailable: {result.StandardError.Trim()}");
+                return;
+            }
+
+            using var eventsDocument = JsonDocument.Parse(result.StandardOutput);
+            if (!eventsDocument.RootElement.TryGetProperty("Events", out var events) || events.ValueKind != JsonValueKind.Array) return;
+            var latestByTarget = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+            foreach (var cloudTrailEvent in events.EnumerateArray())
+            {
+                if (!cloudTrailEvent.TryGetProperty("EventName", out var eventName) || eventName.ValueKind != JsonValueKind.String) continue;
+                var name = eventName.GetString();
+                if (name is null || !IsAccessChangeEvent(name)
+                    || !cloudTrailEvent.TryGetProperty("EventTime", out var eventTime)
+                    || !DateTime.TryParse(eventTime.GetString(), out var changedAt)
+                    || !cloudTrailEvent.TryGetProperty("CloudTrailEvent", out var serializedEvent)
+                    || serializedEvent.ValueKind != JsonValueKind.String) continue;
+
+                using var eventDocument = JsonDocument.Parse(serializedEvent.GetString()!);
+                if (!eventDocument.RootElement.TryGetProperty("requestParameters", out var requestParameters)
+                    || requestParameters.ValueKind != JsonValueKind.Object) continue;
+                foreach (var targetProperty in new[] { "roleName", "userName", "groupName", "policyName" })
+                {
+                    if (!requestParameters.TryGetProperty(targetProperty, out var target) || target.ValueKind != JsonValueKind.String) continue;
+                    var targetName = target.GetString();
+                    if (string.IsNullOrWhiteSpace(targetName)) continue;
+                    if (!latestByTarget.TryGetValue(targetName, out var existing) || changedAt > existing)
+                    {
+                        latestByTarget[targetName] = changedAt.ToUniversalTime();
+                    }
+                }
+            }
+
+            for (var index = 0; index < assignments.Count; index++)
+            {
+                var assignment = assignments[index];
+                var changedAt = latestByTarget.Where(item => item.Key.Equals(assignment.Principal, StringComparison.OrdinalIgnoreCase)
+                        || item.Key.Equals(assignment.Role, StringComparison.OrdinalIgnoreCase))
+                    .Select(item => (DateTime?)item.Value)
+                    .Max();
+                if (changedAt.HasValue)
+                {
+                    assignments[index] = assignment with { LastChangedAt = changedAt, Source = $"{assignment.Source}; CloudTrail IAM change" };
+                }
+            }
+        }
+
+        static bool IsAccessChangeEvent(string eventName)
+            => eventName.StartsWith("Create", StringComparison.OrdinalIgnoreCase)
+                || eventName.StartsWith("Delete", StringComparison.OrdinalIgnoreCase)
+                || eventName.StartsWith("Put", StringComparison.OrdinalIgnoreCase)
+                || eventName.StartsWith("Attach", StringComparison.OrdinalIgnoreCase)
+                || eventName.StartsWith("Detach", StringComparison.OrdinalIgnoreCase)
+                || eventName.StartsWith("Update", StringComparison.OrdinalIgnoreCase)
+                || eventName.StartsWith("Add", StringComparison.OrdinalIgnoreCase)
+                || eventName.StartsWith("Remove", StringComparison.OrdinalIgnoreCase);
+
+        void AddRoleUsage()
+        {
+            if (!document.RootElement.TryGetProperty("RoleDetailList", out var roles) || roles.ValueKind != JsonValueKind.Array) return;
+            foreach (var role in roles.EnumerateArray())
+            {
+                if (!role.TryGetProperty("RoleLastUsed", out var lastUsed)
+                    || !lastUsed.TryGetProperty("LastUsedDate", out var lastUsedDate)
+                    || lastUsedDate.ValueKind != JsonValueKind.String
+                    || !DateTime.TryParse(lastUsedDate.GetString(), out var parsedDate)) continue;
+                var roleName = role.TryGetProperty("RoleName", out var name) ? name.GetString() ?? "IAM role" : "IAM role";
+                var region = lastUsed.TryGetProperty("Region", out var regionValue) ? regionValue.GetString() : null;
+                assignments.Add(new CloudEffectiveAccessAssignment(
+                    roleName,
+                    roleName,
+                    "AWS account",
+                    string.IsNullOrWhiteSpace(region) ? "AWS IAM role usage" : $"AWS IAM role usage in {region}",
+                    roleName.Contains("Administrator", StringComparison.OrdinalIgnoreCase),
+                    "Role usage",
+                    DateTime.SpecifyKind(parsedDate, DateTimeKind.Utc)));
+            }
+        }
 
         void AddAssignments(string collectionName, string principalProperty, string attachedProperty, string inlineProperty, string source, string inlinePolicyProperty)
         {
@@ -133,6 +301,70 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
         }
     }
 
+    public async Task<IReadOnlyList<RiskFinding>> DiscoverAccessAnalyzerFindingsAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery) return Array.Empty<RiskFinding>();
+        var analyzersJson = await GetAwsOutputAsync(new[] { "accessanalyzer", "list-analyzers", "--output", "json" }, cancellationToken, accountId);
+        using var analyzersDocument = JsonDocument.Parse(analyzersJson);
+        if (!analyzersDocument.RootElement.TryGetProperty("analyzers", out var analyzers) || analyzers.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<RiskFinding>();
+        }
+
+        var findings = new List<RiskFinding>();
+        foreach (var analyzer in analyzers.EnumerateArray())
+        {
+            if (!string.Equals(ReadString(analyzer, "status"), "ACTIVE", StringComparison.OrdinalIgnoreCase)
+                || ReadString(analyzer, "arn") is not { } analyzerArn)
+            {
+                continue;
+            }
+
+            using var findingsDocument = JsonDocument.Parse(await GetAwsOutputAsync(
+                new[] { "accessanalyzer", "list-findings-v2", "--analyzer-arn", analyzerArn, "--output", "json" },
+                cancellationToken,
+                accountId));
+            if (!findingsDocument.RootElement.TryGetProperty("findings", out var analyzerFindings) || analyzerFindings.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var finding in analyzerFindings.EnumerateArray())
+            {
+                if (!string.Equals(ReadString(finding, "status"), "ACTIVE", StringComparison.OrdinalIgnoreCase)) continue;
+                var resource = ReadString(finding, "resource") ?? "Unknown AWS resource";
+                var findingType = ReadString(finding, "findingType") ?? "Access Analyzer finding";
+                var principal = finding.TryGetProperty("principal", out var principalValue) ? principalValue.ToString() : "External or unspecified principal";
+                var createdAt = DateTime.TryParse(ReadString(finding, "createdAt"), out var created) ? created.ToUniversalTime() : DateTime.UtcNow;
+                findings.Add(new RiskFinding
+                {
+                    Id = Guid.NewGuid(),
+                    RuleId = Guid.NewGuid(),
+                    CloudProvider = CloudProviderType.Aws,
+                    CloudAccountId = accountId,
+                    Severity = findingType.Contains("Unused", StringComparison.OrdinalIgnoreCase) ? RiskSeverity.Medium : RiskSeverity.High,
+                    Title = $"AWS Access Analyzer: {findingType}",
+                    Description = $"Access Analyzer reported active access for {resource}.",
+                    Principal = principal,
+                    Resource = resource,
+                    Permission = ReadString(finding, "action") ?? findingType,
+                    Evidence = finding.GetRawText(),
+                    Recommendation = "Review the Access Analyzer finding and confirm the resource policy is intentional.",
+                    CreatedAt = createdAt,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+        return findings;
+    }
+
+    private static string? ReadString(JsonElement element, string propertyName)
+        => element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var value)
+            && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+
     public Task<IReadOnlyList<CloudPrincipal>> GetPrincipalsAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverIdentitiesAsync(accountId, cancellationToken);
     public Task<IReadOnlyList<CloudPermission>> GetPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverPermissionsAsync(accountId, cancellationToken);
     public Task<IReadOnlyList<CloudRole>> GetRolesAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverRolesAsync(accountId, cancellationToken);
@@ -141,7 +373,7 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     public async Task<IReadOnlyList<CloudGroup>> DiscoverGroupsAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
         if (!_useLiveDiscovery) return new[] { new CloudGroup { Id = Guid.NewGuid(), AccountId = accountId, Name = "AWS Demo Security Group", GroupId = "demo-group" } };
-        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-groups", "--output", "json" }, cancellationToken));
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-groups", "--output", "json" }, cancellationToken, accountId));
         return document.RootElement.GetProperty("Groups").EnumerateArray().Select(group => new CloudGroup
         {
             Id = Guid.NewGuid(), AccountId = accountId, Name = group.TryGetProperty("GroupName", out var name) ? name.GetString() ?? "AWS group" : "AWS group", GroupId = group.TryGetProperty("GroupId", out var id) ? id.GetString() : null, ProviderPath = group.TryGetProperty("Path", out var path) ? path.GetString() : null
@@ -151,22 +383,50 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     public async Task<IReadOnlyList<CloudPolicy>> DiscoverPoliciesAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
         if (!_useLiveDiscovery) return new[] { new CloudPolicy { Id = Guid.NewGuid(), AccountId = accountId, Name = "AWS Demo Policy", ExternalId = "demo-policy", PolicyType = "CustomerManaged", Document = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}" } };
-        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-policies", "--scope", "Local", "--output", "json" }, cancellationToken));
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-policies", "--scope", "Local", "--output", "json" }, cancellationToken, accountId));
         return document.RootElement.GetProperty("Policies").EnumerateArray().Select(policy => new CloudPolicy
         {
             Id = Guid.NewGuid(), AccountId = accountId, Name = policy.TryGetProperty("PolicyName", out var name) ? name.GetString() ?? "AWS policy" : "AWS policy", ExternalId = policy.TryGetProperty("Arn", out var arn) ? arn.GetString() : null, PolicyType = policy.TryGetProperty("PolicyType", out var type) ? type.GetString() : "CustomerManaged", Document = policy.TryGetProperty("Document", out var document) ? document.GetString() : null, DocumentVersion = policy.TryGetProperty("DefaultVersionId", out var version) ? version.GetString() : null, IsManaged = true
         }).ToArray();
     }
 
-    private async Task<string> GetAwsOutputAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    private async Task<string> GetAwsOutputAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, Guid? accountId = null)
     {
-        var result = await RunAwsAsync(arguments, cancellationToken);
+        var profile = accountId.HasValue && _accountProfiles.TryGetValue(accountId.Value, out var configuredProfile) ? configuredProfile : null;
+        var result = await RunAwsAsync(arguments, cancellationToken, profile);
         if (!result.IsSuccess) throw new InvalidOperationException($"AWS CLI command failed: {result.StandardError}");
         return result.StandardOutput;
     }
 
-    private Task<CloudCommandResult> RunAwsAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
-        => RunAwsWithRetryAsync(arguments, cancellationToken);
+    private Task<CloudCommandResult> RunAwsAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, string? profile = null)
+    {
+        var profiledArguments = string.IsNullOrWhiteSpace(profile)
+            ? arguments
+            : new[] { "--profile", profile }.Concat(arguments).ToArray();
+        return RunAwsWithRetryAsync(profiledArguments, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<string?>> GetConfiguredProfilesAsync(CancellationToken cancellationToken)
+    {
+        var result = await _commandRunner!.RunAsync("aws", new[] { "configure", "list-profiles" }, cancellationToken);
+        if (!result.IsSuccess)
+        {
+            return new string?[] { null };
+        }
+
+        var profiles = result.StandardOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal)
+            .Cast<string?>()
+            .ToArray();
+        return profiles.Length == 0 ? new string?[] { null } : profiles;
+    }
+
+    private static string ExtractRoleName(string? arn)
+    {
+        const string assumedRoleMarker = ":assumed-role/";
+        var markerIndex = arn?.LastIndexOf(assumedRoleMarker, StringComparison.OrdinalIgnoreCase) ?? -1;
+        return markerIndex < 0 ? string.Empty : arn![(markerIndex + assumedRoleMarker.Length)..].Split('/')[0];
+    }
 
     public async Task<AwsScanResult> ScanAsync(Guid? accountId = null, CancellationToken cancellationToken = default)
     {
@@ -218,7 +478,7 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
 
     private async Task<string> GetRoleTrustPolicyAsync(CloudAccount account, CloudRole role, CancellationToken cancellationToken)
     {
-        var result = await GetAwsOutputAsync(new[] { "iam", "get-role", "--role-name", role.Name, "--output", "json" }, cancellationToken);
+        var result = await GetAwsOutputAsync(new[] { "iam", "get-role", "--role-name", role.Name, "--output", "json" }, cancellationToken, account.Id);
         using var document = JsonDocument.Parse(result);
         return document.RootElement.TryGetProperty("Role", out var roleElement) && roleElement.TryGetProperty("AssumeRolePolicyDocument", out var policy) ? policy.GetString() ?? "{}" : "{}";
     }

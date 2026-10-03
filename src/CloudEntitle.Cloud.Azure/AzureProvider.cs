@@ -7,11 +7,12 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Cloud.Azure.Services;
 using CloudEntitle.Cloud.Azure.Mappers;
 
-public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider, IEntraDirectoryProvider
+public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider, IEntraDirectoryProvider, ICloudProviderDiagnostics
 {
     private readonly ICloudCommandRunner? _commandRunner;
     private readonly bool _useLiveDiscovery;
     private readonly Dictionary<Guid, CloudAccount> _accounts = new();
+    private readonly List<string> _providerMessages = new();
 
     public AzureProvider(ICloudCommandRunner? commandRunner = null, bool useLiveDiscovery = false)
     {
@@ -20,6 +21,12 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
     }
 
     public CloudProviderType ProviderType => CloudProviderType.Azure;
+    public IReadOnlyList<string> DrainProviderMessages()
+    {
+        var messages = _providerMessages.ToArray();
+        _providerMessages.Clear();
+        return messages;
+    }
 
     public async Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default)
     {
@@ -152,25 +159,85 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
             return Array.Empty<CloudEffectiveAccessAssignment>();
         }
 
-        return (await GetAssignmentsAsync(accountId, cancellationToken))
+        var assignments = await GetAssignmentsAsync(accountId, cancellationToken);
+        var lastChanged = await GetAzureRoleAssignmentChangeTimesAsync(accountId, cancellationToken);
+        return assignments
             .Where(assignment => assignment.TryGetProperty("principalId", out _))
             .Select(assignment =>
             {
                 var roleName = assignment.TryGetProperty("roleDefinitionName", out var role) ? role.GetString() ?? "Unknown role" : "Unknown role";
+                var roleId = assignment.TryGetProperty("roleDefinitionId", out var roleDefinitionId) ? roleDefinitionId.GetString() : null;
                 var principal = assignment.TryGetProperty("principalName", out var name) ? name.GetString() : null;
-                if (string.IsNullOrWhiteSpace(principal) && assignment.TryGetProperty("principalId", out var principalId))
+                var principalId = assignment.TryGetProperty("principalId", out var principalIdValue) ? principalIdValue.GetString() : null;
+                if (string.IsNullOrWhiteSpace(principal) && !string.IsNullOrWhiteSpace(principalId))
                 {
-                    principal = principalId.GetString();
+                    principal = principalId;
                 }
                 var scope = assignment.TryGetProperty("scope", out var scopeValue) ? scopeValue.GetString() ?? "Subscription" : "Subscription";
+                DateTime? lastChangedAt = principalId is not null && roleId is not null
+                    && lastChanged.TryGetValue(AzureAuditKey(principalId, roleId, scope), out var auditTimestamp)
+                    ? auditTimestamp
+                    : null;
                 return new CloudEffectiveAccessAssignment(
                     principal ?? "Unknown principal",
                     roleName,
                     scope,
-                    "Azure RBAC role assignment",
-                    roleName.Contains("Owner", StringComparison.OrdinalIgnoreCase) || roleName.Contains("Administrator", StringComparison.OrdinalIgnoreCase));
+                    lastChangedAt.HasValue ? "Azure RBAC role assignment; Activity Log" : "Azure RBAC role assignment",
+                    roleName.Contains("Owner", StringComparison.OrdinalIgnoreCase) || roleName.Contains("Administrator", StringComparison.OrdinalIgnoreCase),
+                    LastChangedAt: lastChangedAt);
             })
             .ToArray();
+    }
+
+    private async Task<Dictionary<string, DateTime>> GetAzureRoleAssignmentChangeTimesAsync(Guid accountId, CancellationToken cancellationToken)
+    {
+        if (!_accounts.TryGetValue(accountId, out var account) || string.IsNullOrWhiteSpace(account.SubscriptionId)) return new Dictionary<string, DateTime>();
+        var result = await RunAzAsync(new[]
+        {
+            "monitor", "activity-log", "list", "--offset", "90d", "--max-events", "1000",
+            "--subscription", account.SubscriptionId, "--output", "json"
+        }, cancellationToken);
+        if (!result.IsSuccess)
+        {
+            _providerMessages.Add($"Azure role-assignment change history unavailable: {result.StandardError.Trim()}");
+            return new Dictionary<string, DateTime>();
+        }
+
+        using var document = JsonDocument.Parse(result.StandardOutput);
+        if (document.RootElement.ValueKind != JsonValueKind.Array) return new Dictionary<string, DateTime>();
+        var changes = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        foreach (var activity in document.RootElement.EnumerateArray())
+        {
+            var action = ReadNestedString(activity, "authorization", "action");
+            if (action is null || !action.Contains("roleAssignments/write", StringComparison.OrdinalIgnoreCase)
+                || !activity.TryGetProperty("eventTimestamp", out var timestamp)
+                || !DateTime.TryParse(timestamp.GetString(), out var changedAt)) continue;
+            var principalId = ReadNestedString(activity, "properties", "responseBody", "properties", "principalId");
+            var roleId = ReadNestedString(activity, "properties", "responseBody", "properties", "roleDefinitionId");
+            var scope = ReadNestedString(activity, "properties", "responseBody", "properties", "scope")
+                ?? ReadNestedString(activity, "authorization", "scope");
+            if (principalId is null || roleId is null || scope is null) continue;
+            var key = AzureAuditKey(principalId, roleId, scope);
+            if (!changes.TryGetValue(key, out var existing) || changedAt > existing) changes[key] = changedAt.ToUniversalTime();
+        }
+        return changes;
+    }
+
+    private static string AzureAuditKey(string principalId, string roleId, string scope)
+        => $"{principalId}|{roleId}|{scope.TrimEnd('/')}";
+
+    private static string? ReadNestedString(JsonElement element, params string[] path)
+    {
+        for (var index = 0; index < path.Length; index++)
+        {
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                using var nestedDocument = JsonDocument.Parse(element.GetString()!);
+                return ReadNestedString(nestedDocument.RootElement, path.Skip(index).ToArray());
+            }
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(path[index], out element)) return null;
+        }
+        return element.ValueKind == JsonValueKind.String ? element.GetString() : null;
     }
 
     public async Task<EntraDirectoryScanResult> DiscoverEntraDirectoryAsync(Guid accountId, CancellationToken cancellationToken = default)

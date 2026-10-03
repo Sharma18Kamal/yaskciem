@@ -56,6 +56,19 @@ public class AzureProviderTests
         Assert.Equal("owner@example.com", assignment.Principal);
         Assert.Equal("Owner", assignment.Role);
         Assert.True(assignment.IsPrivileged);
+        Assert.True(assignment.LastChangedAt.HasValue);
+        Assert.Contains("Activity Log", assignment.Source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AzureProvider_ShouldReportWhenActivityLogAccessIsDenied()
+    {
+        var provider = new AzureProvider(new FakeCommandRunner(denyActivityLog: true), useLiveDiscovery: true);
+        var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+        await provider.DiscoverEffectiveAccessAsync(account.Id);
+
+        Assert.Contains(((ICloudProviderDiagnostics)provider).DrainProviderMessages(), message => message.Contains("change history", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -113,10 +126,29 @@ public class AzureProviderTests
         Assert.Equal(ScanStatus.Cancelled, result.Scan.Status);
     }
 
-    private sealed class FakeCommandRunner(bool denyPim = false) : ICloudCommandRunner
+    private sealed class FakeCommandRunner(bool denyPim = false, bool denyActivityLog = false) : ICloudCommandRunner
     {
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
+            if (arguments.Contains("activity-log"))
+            {
+                if (denyActivityLog) return Task.FromResult(new CloudCommandResult(1, string.Empty, "Authorization failed."));
+                var responseBody = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    properties = new { principalId = "principal-001", roleDefinitionId = "role-001", scope = "/subscriptions/subscription-001" }
+                });
+                var activityLog = System.Text.Json.JsonSerializer.Serialize(new[]
+                {
+                    new
+                    {
+                        eventTimestamp = "2026-10-01T08:00:00Z",
+                        authorization = new { action = "Microsoft.Authorization/roleAssignments/write", scope = "/subscriptions/subscription-001" },
+                        properties = new { responseBody }
+                    }
+                });
+                return Task.FromResult(new CloudCommandResult(0, activityLog, string.Empty));
+            }
+
             if (arguments.Contains("rest"))
             {
                 var urlIndex = Array.IndexOf(arguments.ToArray(), "--url");
