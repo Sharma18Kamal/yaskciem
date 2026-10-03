@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restricted"
+         IgnorableNamespaces="uap rescap">
+  <Identity Name="Sharma18Kamal.YASKCIEM" Publisher="CN=YASK-CIEM" Version="1.0.0.26" />
+  <Properties>
+    <DisplayName>YASK-CIEM</DisplayName>
+    <PublisherDisplayName>Sharma18Kamal</PublisherDisplayName>
+    <Description>Read-only multi-cloud entitlement visibility and risk analysis.</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Applications>
+    <Application Id="YASKCIEM" Executable="CloudEntitle.Desktop.exe" EntryPoint="windows.fullTrustApplication">
+      <uap:VisualElements AppListEntry="default" DisplayName="YASK-CIEM" Description="Cloud entitlement visibility and risk analysis" BackgroundColor="#0F172A" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+</Package>
+

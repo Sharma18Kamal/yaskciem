@@ -97,6 +97,9 @@ public class AzureProviderTests
         Assert.NotEmpty(result.Principals);
         Assert.Empty(result.AccessAssignments);
         Assert.Contains(result.ProviderMessages, message => message.Contains("PIM", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.ProviderMessages, message => message.Contains("RoleAssignmentSchedule.Read.Directory", StringComparison.Ordinal) && message.Contains("admin consent", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.ProviderMessages, message => message.Contains("RoleEligibilitySchedule.Read.Directory", StringComparison.Ordinal) && message.Contains("admin consent", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.ProviderMessages, message => message.Contains("PermissionScopeNotGranted", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -155,7 +158,7 @@ public class AzureProviderTests
                 var url = urlIndex >= 0 && urlIndex + 1 < arguments.Count ? arguments[urlIndex + 1] : string.Empty;
                 if (denyPim && url.Contains("roleManagement", StringComparison.Ordinal))
                 {
-                    return Task.FromResult(new CloudCommandResult(1, string.Empty, "Insufficient privileges to complete the operation."));
+                    return Task.FromResult(new CloudCommandResult(1, string.Empty, "ERROR: Forbidden({\"error\":{\"code\":\"UnknownError\",\"message\":\"PermissionScopeNotGranted: missing RoleAssignmentSchedule.Read.Directory and RoleEligibilitySchedule.Read.Directory\"}})"));
                 }
                 var graphOutput = url.Contains("/users?", StringComparison.Ordinal)
                     ? "{\"value\":[{\"id\":\"user-1\",\"displayName\":\"Entra User\",\"userPrincipalName\":\"entra@example.com\",\"accountEnabled\":true}]}"

@@ -41,6 +41,8 @@ The engine trusts `EffectiveAccess.Decision` and `EvaluationStatus`. Denied and 
 
 Azure paths can include group membership, role assignment, role definition, action/data action, scope, and resource. AWS paths preserve identity/resource policy and AssumeRole/trust relationships as distinct relationships. GCP paths preserve groups, IAM bindings, roles, conditions, and organization/folder/project inheritance.
 
+Kubernetes workload traces add Pod/Deployment → ServiceAccount → Kubernetes RBAC → cloud identity edges. EKS, GKE, and AKS federation checks retain their evidence and status on the cloud-identity edge. Trust verification does not claim that a runtime token was exchanged or that downstream cloud permissions allow an action.
+
 ## Persistence and Performance
 
 `AccessPath`, `AccessPathNode`, and `AccessPathEdge` are relationally persisted with provider, principal, resource, permission, effective-access, status, and path-type indexes. Evidence and diagnostics are retained as JSON/text metadata. The engine builds adjacency lookups in memory and does not access cloud APIs.

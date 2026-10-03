@@ -463,7 +463,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         try
         {
             _liveScan = await _liveCloudScanService.ScanAsync(cancellation.Token);
-            ScanStatusMessage = string.Join("  |  ", _liveScan.ProviderMessages);
+            ScanStatusMessage = FormatScanSummary(_liveScan);
             await RefreshAsync();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -486,6 +486,17 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     }
 
     private void StopScan() => _scanCancellation?.Cancel();
+
+    private static string FormatScanSummary(LiveCloudScanResult scan)
+    {
+        var providers = string.Join(", ", scan.AccountRecords.Select(account => account.Provider).Distinct(StringComparer.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(providers)) providers = "connected providers";
+        var totals = $"{scan.AccountCount} account(s), {scan.IdentityCount} identities, {scan.ResourceCount} resources, {scan.EffectiveAccessRecords.Count} effective-access assignments";
+        var attentionCount = scan.Coverage.Count(item => item.Status is ScanCoverageStatus.Partial or ScanCoverageStatus.Denied or ScanCoverageStatus.Unavailable or ScanCoverageStatus.Unsupported or ScanCoverageStatus.Skipped);
+        return attentionCount > 0
+            ? $"Scan complete: {providers}; {totals}. {attentionCount} source(s) need attention. See Scan History for coverage details."
+            : $"Scan complete: {providers}; {totals}. See Scan History for coverage details.";
+    }
 
     private async Task RefreshAsync()
     {
@@ -825,6 +836,7 @@ public sealed record RiskFindingGridRow(string Provider, string Severity, string
 public sealed record RecommendationGridRow(RecommendationModel? Model, string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority, string Impact, string Reason, string Evidence);
 public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings, int EffectiveAccess);
 public sealed record AccessChangeTimelineRow(string Provider, string Change, DateTime DetectedAt, DateTime? ProviderChangedAt, string ChangedBy, string Principal, string Assignment, string Scope, string PreviousState, string CurrentState, string Source);
+public sealed record ScanCoverageGridRow(string Provider, string DataSource, string Status, int Records, string Details);
 
 public sealed class EntitlementsViewModel : WorkspaceViewModel
 {
@@ -1359,7 +1371,7 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
 
     public override string Title => "Scan History";
     public override string Subtitle => "Review scan history and access changes observed across retained live scans.";
-    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Scans)); OnPropertyChanged(nameof(HasResults)); OnPropertyChanged(nameof(AccessChanges)); OnPropertyChanged(nameof(HasAccessChanges)); } } }
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Scans)); OnPropertyChanged(nameof(HasResults)); OnPropertyChanged(nameof(AccessChanges)); OnPropertyChanged(nameof(HasAccessChanges)); OnPropertyChanged(nameof(Coverage)); OnPropertyChanged(nameof(HasCoverage)); } } }
     public IReadOnlyList<ScanHistoryGridRow> Scans
     {
         get
@@ -1383,6 +1395,23 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
     public string AccessChangeCoverageMessage => "Local scan history is retained for seven days. Provider audit retention and permissions also limit attribution. Scan completion is the detection time; provider change time, actor, and audit source appear only when matching audit data is available. Empty provider results are not treated as proof of removal.";
     public IReadOnlyList<AccessChangeTimelineRow> AccessChanges => BuildAccessChanges();
     public bool HasAccessChanges => AccessChanges.Count > 0;
+    public IReadOnlyList<ScanCoverageGridRow> Coverage
+    {
+        get
+        {
+            var latest = _liveHistory.OrderByDescending(scan => scan.CompletedAt).FirstOrDefault();
+            return (latest?.Coverage ?? Array.Empty<ScanCoverageRecord>())
+                .Select(item => new ScanCoverageGridRow(item.Provider, item.DataSource, item.Status.ToString(), item.Records, item.Details))
+                .Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.DataSource, row.Status, row.Details))
+                .ToArray();
+        }
+    }
+    public bool HasCoverage => Coverage.Count > 0;
+    public string CoverageMessage => _liveHistory.Count == 0
+        ? "Scan coverage is available after a live provider scan."
+        : _liveHistory.OrderByDescending(scan => scan.CompletedAt).First().Coverage.Count == 0
+            ? "This retained scan predates detailed coverage reporting. Run a new scan to see source permissions and gaps."
+            : "Collected and NoData mean the source query succeeded. Denied, Unavailable, Unsupported, and Skipped identify gaps; zero findings alone do not prove complete coverage.";
 
     private IReadOnlyList<AccessChangeTimelineRow> BuildAccessChanges()
     {
@@ -1449,6 +1478,9 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
             OnPropertyChanged(nameof(AccessChanges));
             OnPropertyChanged(nameof(HasAccessChanges));
             OnPropertyChanged(nameof(AccessChangeCoverageMessage));
+            OnPropertyChanged(nameof(Coverage));
+            OnPropertyChanged(nameof(HasCoverage));
+            OnPropertyChanged(nameof(CoverageMessage));
         }
         catch (Exception exception)
         {

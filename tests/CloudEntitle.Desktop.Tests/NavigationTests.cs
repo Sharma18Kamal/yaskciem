@@ -304,7 +304,9 @@ public sealed class NavigationTests
         Assert.Equal(1, dashboard.PrivilegedIdentities);
         Assert.Equal(1, dashboard.RiskFindings);
         Assert.Equal(1, dashboard.HighFindings);
-        Assert.Contains("Aws: no active CLI sign-in", dashboard.ScanStatusMessage);
+        Assert.Contains("Scan complete", dashboard.ScanStatusMessage, StringComparison.Ordinal);
+        Assert.Contains("Scan History", dashboard.ScanStatusMessage, StringComparison.Ordinal);
+        Assert.Contains(scanService.CurrentResult!.Coverage, item => item.Provider == "Aws" && item.DataSource == "CLI sign-in" && item.Status == ScanCoverageStatus.Unavailable);
         Assert.NotEqual("No scans yet", dashboard.LastScan);
     }
 
@@ -544,6 +546,7 @@ public sealed class NavigationTests
         await dashboard.RunScanAsync();
         await Task.WhenAll(entitlements.RefreshAsync(), effectiveAccess.RefreshAsync(), riskFindings.RefreshAsync(), recommendations.RefreshAsync(), history.RefreshAsync());
 
+        Assert.Contains("Scan History", dashboard.ScanStatusMessage, StringComparison.Ordinal);
         Assert.True(entitlements.HasResults);
         Assert.True(entitlements.Entitlements.Count >= 3);
         Assert.Contains(entitlements.Entitlements, row => row.Provider == "Azure" && row.Subject == "test-principal" && row.Grant == "Owner" && row.Source == "Test assignment");

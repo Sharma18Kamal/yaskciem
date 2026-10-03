@@ -29,7 +29,11 @@ public sealed record LiveCloudScanResult(
     IReadOnlyList<DiscoveredCloudPermission> PermissionRecords,
     DateTime StartedAt,
     IReadOnlyList<LiveEffectiveAccessRecord> EffectiveAccessRecords,
-    IReadOnlyList<LiveScanAccountRecord> AccountRecords);
+    IReadOnlyList<LiveScanAccountRecord> AccountRecords)
+{
+    public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
+    public IReadOnlyList<KubernetesWorkloadTrace> WorkloadTraces { get; init; } = Array.Empty<KubernetesWorkloadTrace>();
+}
 
 public sealed record DiscoveredCloudRole(CloudProviderType Provider, CloudRole Role);
 public sealed record DiscoveredCloudPermission(CloudProviderType Provider, CloudPermission Permission);
@@ -71,6 +75,8 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var effectiveAccessRecords = new List<LiveEffectiveAccessRecord>();
         var findings = new List<RiskFinding>();
         var messages = new List<string>();
+        var coverage = new List<ScanCoverageRecord>();
+        var workloadTraces = new List<KubernetesWorkloadTrace>();
         var connectedProviders = _cloudConnectionState?.ConnectedProviders ?? new HashSet<CloudProviderType>();
         var selectedProvider = connectedProviders.Count == 1 ? connectedProviders.Single() : (CloudProviderType?)null;
         var multipleConnectedProviders = connectedProviders.Count > 1;
@@ -81,6 +87,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         else if (multipleConnectedProviders)
         {
             messages.Add("Multiple cloud CLIs are signed in. Disconnect all but one provider before scanning to avoid mixed-provider results.");
+            coverage.AddRange(_providers.Select(provider => new ScanCoverageRecord(provider.ProviderType.ToString(), "Provider scan", ScanCoverageStatus.Skipped, 0, "Disconnect all but one provider to run a provider-scoped scan.")));
         }
 
         foreach (var provider in _providers.Where(provider => !multipleConnectedProviders && (!selectedProvider.HasValue || provider.ProviderType == selectedProvider.Value)))
@@ -91,10 +98,11 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                 if (!await provider.TestConnectionAsync(cancellationToken))
                 {
                     messages.Add($"{provider.ProviderType}: no active CLI sign-in. Use Connect Cloud first.");
+                    coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "CLI sign-in", ScanCoverageStatus.Unavailable, 0, "No active CLI sign-in was detected."));
                     continue;
                 }
 
-                var accounts = await provider.DiscoverAccountsAsync(cancellationToken);
+                var accounts = await CollectAsync(provider.ProviderType.ToString(), string.Empty, "Cloud accounts", () => provider.DiscoverAccountsAsync(cancellationToken), coverage, messages, cancellationToken);
                 accountsScanned += accounts.Count;
                 accountRecords.AddRange(accounts.Select(account => new LiveScanAccountRecord(
                     provider.ProviderType.ToString(),
@@ -105,59 +113,51 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                 foreach (var account in accounts)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    try
+                    var scanScope = $"{account.Name} ({account.ExternalAccountId ?? account.SubscriptionId ?? account.ProjectId ?? account.Id.ToString()})";
+                    var identities = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Identities", () => provider.DiscoverIdentitiesAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
+                    identitiesScanned += identities.Count;
+                    identityRecords.AddRange(identities);
+                    privilegedIdentities += identities.Count(identity => identity.IsPrivileged);
+
+                    var roles = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Roles", () => provider.DiscoverRolesAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
+                    rolesScanned += roles.Count;
+                    roleRecords.AddRange(roles.Select(role => new DiscoveredCloudRole(provider.ProviderType, role)));
+
+                    var permissions = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Permissions", () => provider.DiscoverPermissionsAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
+                    permissionsScanned += permissions.Count;
+                    permissionRecords.AddRange(permissions.Select(permission => new DiscoveredCloudPermission(provider.ProviderType, permission)));
+                    findings.AddRange(await _riskEngine.EvaluateAsync(permissions, provider.ProviderType, cancellationToken));
+
+                    if (provider is IResourceProvider resourceProvider)
                     {
-                        var identities = await provider.DiscoverIdentitiesAsync(account.Id, cancellationToken);
-                        identitiesScanned += identities.Count;
-                        identityRecords.AddRange(identities);
-                        privilegedIdentities += identities.Count(identity => identity.IsPrivileged);
-
-                        var roles = await provider.DiscoverRolesAsync(account.Id, cancellationToken);
-                        rolesScanned += roles.Count;
-                        roleRecords.AddRange(roles.Select(role => new DiscoveredCloudRole(provider.ProviderType, role)));
-
-                        var permissions = await provider.DiscoverPermissionsAsync(account.Id, cancellationToken);
-                        permissionsScanned += permissions.Count;
-                        permissionRecords.AddRange(permissions.Select(permission => new DiscoveredCloudPermission(provider.ProviderType, permission)));
-                        findings.AddRange(await _riskEngine.EvaluateAsync(permissions, provider.ProviderType, cancellationToken));
-
-                        if (provider is IResourceProvider resourceProvider)
-                        {
-                            try
-                            {
-                                var resources = await resourceProvider.GetResourcesAsync(account.Id, cancellationToken);
-                                resourcesScanned += resources.Count;
-                                resourceRecords.AddRange(resources);
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                throw;
-                            }
-                            catch (Exception exception)
-                            {
-                                messages.Add($"{provider.ProviderType}/{account.Name} resource inventory: {exception.Message}");
-                            }
-                        }
-
-                        if (provider is ICloudEffectiveAccessProvider accessProvider)
-                        {
-                            var access = await accessProvider.DiscoverEffectiveAccessAsync(account.Id, cancellationToken);
-                            effectiveAccessRecords.AddRange(access.Select(item => new LiveEffectiveAccessRecord(
-                                provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
-                        }
-
-                        if (provider is IAccessAnalyzerFindingsProvider analyzerProvider)
-                        {
-                            findings.AddRange(await analyzerProvider.DiscoverAccessAnalyzerFindingsAsync(account.Id, cancellationToken));
-                        }
+                        var resources = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Resources", () => resourceProvider.GetResourcesAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
+                        resourcesScanned += resources.Count;
+                        resourceRecords.AddRange(resources);
                     }
-                    catch (OperationCanceledException)
+                    else
                     {
-                        throw;
+                        coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), $"{scanScope}: Resources", ScanCoverageStatus.Unsupported, 0, "This provider adapter does not expose resource inventory."));
                     }
-                    catch (Exception exception)
+
+                    if (provider is ICloudEffectiveAccessProvider accessProvider)
                     {
-                        messages.Add($"{provider.ProviderType}/{account.Name}: {exception.Message}");
+                        var access = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Effective access", () => accessProvider.DiscoverEffectiveAccessAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
+                        effectiveAccessRecords.AddRange(access.Select(item => new LiveEffectiveAccessRecord(
+                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
+                    }
+                    else
+                    {
+                        coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), $"{scanScope}: Effective access", ScanCoverageStatus.Unsupported, 0, "This provider adapter does not expose effective-access assignments."));
+                    }
+
+                    if (provider is IAccessAnalyzerFindingsProvider analyzerProvider)
+                    {
+                        var analyzerFindings = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Access analyzer", () => analyzerProvider.DiscoverAccessAnalyzerFindingsAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
+                        findings.AddRange(analyzerFindings);
+                    }
+                    else if (provider.ProviderType == CloudProviderType.Aws)
+                    {
+                        coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), $"{scanScope}: Access analyzer", ScanCoverageStatus.Unsupported, 0, "This AWS adapter does not expose Access Analyzer findings."));
                     }
                 }
 
@@ -168,45 +168,79 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
 
                 if (provider is IEntraDirectoryProvider entraProvider)
                 {
-                    var entraResult = await entraProvider.DiscoverEntraDirectoryAsync(accounts.FirstOrDefault()?.Id ?? Guid.Empty, cancellationToken);
-                    var knownPrincipalIds = identityRecords.Select(identity => identity.PrincipalId).Where(id => id is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    var newPrincipals = entraResult.Principals.Where(principal => principal.PrincipalId is null || knownPrincipalIds.Add(principal.PrincipalId)).ToArray();
-                    identityRecords.AddRange(newPrincipals);
-                    identitiesScanned += newPrincipals.Length;
-                    privilegedIdentities += newPrincipals.Count(identity => identity.IsPrivileged);
-                    effectiveAccessRecords.AddRange(entraResult.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
-                        provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
-                    messages.AddRange(entraResult.ProviderMessages);
+                    try
+                    {
+                        var entraResult = await entraProvider.DiscoverEntraDirectoryAsync(accounts.FirstOrDefault()?.Id ?? Guid.Empty, cancellationToken);
+                        var knownPrincipalIds = identityRecords.Select(identity => identity.PrincipalId).Where(id => id is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        var newPrincipals = entraResult.Principals.Where(principal => principal.PrincipalId is null || knownPrincipalIds.Add(principal.PrincipalId)).ToArray();
+                        identityRecords.AddRange(newPrincipals);
+                        identitiesScanned += newPrincipals.Length;
+                        privilegedIdentities += newPrincipals.Count(identity => identity.IsPrivileged);
+                        effectiveAccessRecords.AddRange(entraResult.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
+                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
+                        var partial = entraResult.ProviderMessages.Count > 0;
+                        coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra directory", entraResult.Principals.Count > 0 ? partial ? ScanCoverageStatus.Partial : ScanCoverageStatus.Collected : partial ? ScanCoverageStatus.Denied : ScanCoverageStatus.NoData, entraResult.Principals.Count, string.Join("; ", entraResult.ProviderMessages.DefaultIfEmpty("Users, groups, service principals, and managed identities."))));
+                        coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra PIM", entraResult.AccessAssignments.Count > 0 ? partial ? ScanCoverageStatus.Partial : ScanCoverageStatus.Collected : partial ? ScanCoverageStatus.Denied : ScanCoverageStatus.NoData, entraResult.AccessAssignments.Count, string.Join("; ", entraResult.ProviderMessages.DefaultIfEmpty("Active and eligible directory-role assignments."))));
+                        messages.AddRange(entraResult.ProviderMessages);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception exception)
+                    {
+                        var status = StatusForException(exception);
+                        coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra directory and PIM", status, 0, exception.Message));
+                        messages.Add($"{provider.ProviderType}: Entra directory and PIM: {exception.Message}");
+                    }
+                }
+                else if (provider.ProviderType == CloudProviderType.Azure)
+                {
+                    coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra directory and PIM", ScanCoverageStatus.Unsupported, 0, "This Azure provider adapter does not expose Entra directory or PIM discovery."));
                 }
 
                 if (provider is ICloudOrganizationProvider organizationProvider)
                 {
-                    var organizationResult = await organizationProvider.DiscoverOrganizationAccountsAsync(cancellationToken);
-                    messages.AddRange(organizationResult.ProviderMessages);
-                    foreach (var organizationAccount in organizationResult.Accounts)
+                    try
                     {
-                        var accountId = organizationAccount.ExternalAccountId ?? string.Empty;
-                        var profileRecords = accountRecords.Where(item => item.Provider == provider.ProviderType.ToString() && item.AccountId == accountId).ToArray();
-                        if (profileRecords.Length > 0)
+                        var organizationResult = await organizationProvider.DiscoverOrganizationAccountsAsync(cancellationToken);
+                        var hierarchyStatus = organizationResult.Accounts.Count > 0
+                            ? organizationResult.ProviderMessages.Count > 0 ? ScanCoverageStatus.Partial : ScanCoverageStatus.Collected
+                            : organizationResult.ProviderMessages.Count > 0 ? StatusForException(new InvalidOperationException(string.Join(";", organizationResult.ProviderMessages))) : ScanCoverageStatus.NoData;
+                        coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Organization hierarchy", hierarchyStatus, organizationResult.Accounts.Count, string.Join("; ", organizationResult.ProviderMessages.DefaultIfEmpty("Organization account discovery."))));
+                        messages.AddRange(organizationResult.ProviderMessages);
+                        foreach (var organizationAccount in organizationResult.Accounts)
                         {
-                            for (var index = 0; index < accountRecords.Count; index++)
+                            var accountId = organizationAccount.ExternalAccountId ?? string.Empty;
+                            var profileRecords = accountRecords.Where(item => item.Provider == provider.ProviderType.ToString() && item.AccountId == accountId).ToArray();
+                            if (profileRecords.Length > 0)
                             {
-                                if (accountRecords[index].Provider == provider.ProviderType.ToString() && accountRecords[index].AccountId == accountId)
+                                for (var index = 0; index < accountRecords.Count; index++)
                                 {
-                                    accountRecords[index] = accountRecords[index] with { AccountName = organizationAccount.Name };
+                                    if (accountRecords[index].Provider == provider.ProviderType.ToString() && accountRecords[index].AccountId == accountId)
+                                    {
+                                        accountRecords[index] = accountRecords[index] with { AccountName = organizationAccount.Name };
+                                    }
                                 }
                             }
-                        }
-                        else
-                        {
-                            var scanAccess = provider.ProviderType == CloudProviderType.Aws
-                                ? "Organization roster only; no configured CLI profile"
-                                : "Hierarchy only; project scans are listed separately";
-                            accountRecords.Add(new LiveScanAccountRecord(
-                                provider.ProviderType.ToString(), organizationAccount.Name, accountId, string.Empty, string.Empty,
-                                scanAccess));
+                            else
+                            {
+                                var scanAccess = provider.ProviderType == CloudProviderType.Aws
+                                    ? "Organization roster only; no configured CLI profile"
+                                    : "Hierarchy only; project scans are listed separately";
+                                accountRecords.Add(new LiveScanAccountRecord(
+                                    provider.ProviderType.ToString(), organizationAccount.Name, accountId, string.Empty, string.Empty,
+                                    scanAccess));
+                            }
                         }
                     }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception exception)
+                    {
+                        coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Organization hierarchy", StatusForException(exception), 0, exception.Message));
+                        messages.Add($"{provider.ProviderType}: organization hierarchy: {exception.Message}");
+                    }
+                }
+                else
+                {
+                    coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Organization hierarchy", ScanCoverageStatus.Unsupported, 0, "This provider adapter does not expose organization hierarchy discovery."));
                 }
 
                 messages.Add($"{provider.ProviderType}: discovered {accounts.Count} account(s).");
@@ -217,6 +251,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             }
             catch (Exception exception)
             {
+                coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Provider scan", StatusForException(exception), 0, exception.Message));
                 messages.Add($"{provider.ProviderType}: {exception.Message}");
             }
         }
@@ -227,6 +262,8 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             {
                 var kubernetesResult = await _kubernetesRbacProvider.ScanKubernetesRbacAsync(cancellationToken, selectedProvider);
                 messages.AddRange(kubernetesResult.ProviderMessages);
+                coverage.AddRange(kubernetesResult.Coverage);
+                workloadTraces.AddRange(kubernetesResult.Clusters.SelectMany(cluster => cluster.WorkloadTraces));
                 foreach (var cluster in kubernetesResult.Clusters.Where(cluster => !selectedProvider.HasValue || cluster.Cluster.CloudProvider == selectedProvider.Value))
                 {
                     var providerType = cluster.Cluster.CloudProvider;
@@ -277,7 +314,11 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             permissionRecords,
             startedAt,
             effectiveAccessRecords,
-            accountRecords);
+            accountRecords)
+        {
+            Coverage = coverage,
+            WorkloadTraces = workloadTraces
+        };
         if (_historyStore is not null)
         {
             var providers = string.Join(", ", messages.Select(message => message.Split(':')[0]).Distinct());
@@ -292,7 +333,11 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                 result.PermissionCount,
                 result.Findings.Count,
                 result.EffectiveAccessRecords,
-                result.AccountRecords);
+                result.AccountRecords)
+            {
+                Coverage = result.Coverage,
+                WorkloadTraces = result.WorkloadTraces
+            };
             try
             {
                 await _historyStore.RecordAsync(historyEntry, cancellationToken);
@@ -306,6 +351,51 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         CurrentResult = result;
         ScanCompleted?.Invoke(this, EventArgs.Empty);
         return CurrentResult;
+    }
+
+    private static async Task<IReadOnlyList<T>> CollectAsync<T>(
+        string provider,
+        string account,
+        string dataSource,
+        Func<Task<IReadOnlyList<T>>> discover,
+        ICollection<ScanCoverageRecord> coverage,
+        ICollection<string> messages,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var records = await discover();
+            coverage.Add(new ScanCoverageRecord(provider, CoverageName(account, dataSource), records.Count > 0 ? ScanCoverageStatus.Collected : ScanCoverageStatus.NoData, records.Count, records.Count > 0 ? $"{records.Count} record(s) collected." : "The source was queried successfully and returned no records."));
+            return records;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var status = StatusForException(exception);
+            coverage.Add(new ScanCoverageRecord(provider, CoverageName(account, dataSource), status, 0, exception.Message));
+            messages.Add($"{provider}/{account}: {dataSource}: {exception.Message}");
+            return Array.Empty<T>();
+        }
+    }
+
+    private static string CoverageName(string account, string dataSource)
+        => string.IsNullOrWhiteSpace(account) ? dataSource : $"{account}: {dataSource}";
+
+    private static ScanCoverageStatus StatusForException(Exception exception)
+    {
+        var message = exception.ToString();
+        if (message.Contains("forbidden", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("accessdenied", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("not authorized", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("insufficient privileges", StringComparison.OrdinalIgnoreCase)) return ScanCoverageStatus.Denied;
+        if (message.Contains("not supported", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("unsupported", StringComparison.OrdinalIgnoreCase)) return ScanCoverageStatus.Unsupported;
+        return ScanCoverageStatus.Unavailable;
     }
 
     private static string ExtractAwsProfile(string? accountDescription, CloudProviderType provider)

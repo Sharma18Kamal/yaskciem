@@ -351,9 +351,49 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
             }
             catch (Exception exception)
             {
-                messages.Add($"Azure Entra {label} unavailable: {exception.Message}");
+                messages.Add(FormatPimFailure(label, assignmentType, exception));
             }
         }
+    }
+
+    private static string FormatPimFailure(string label, string assignmentType, Exception exception)
+    {
+        var requiredPermission = assignmentType == "Active (PIM)"
+            ? "RoleAssignmentSchedule.Read.Directory"
+            : "RoleEligibilitySchedule.Read.Directory";
+        var message = exception.ToString();
+        var permissionDenied = message.Contains("PermissionScopeNotGranted", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Insufficient privileges", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Authorization_RequestDenied", StringComparison.OrdinalIgnoreCase);
+        if (permissionDenied)
+        {
+            return $"Azure Entra {label} unavailable: Microsoft Graph denied the read permission '{requiredPermission}'. An Entra tenant administrator must grant admin consent for this delegated permission to the Microsoft Azure CLI enterprise application. Then refresh the Azure CLI sign-in. Azure RBAC and successfully discovered directory identities are retained; this PIM data is omitted.";
+        }
+
+        return $"Azure Entra {label} unavailable: {ExtractCliErrorDetail(exception.Message)}";
+    }
+
+    private static string ExtractCliErrorDetail(string message)
+    {
+        var jsonStart = message.IndexOf('{');
+        if (jsonStart >= 0)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(message[jsonStart..]);
+                var error = document.RootElement.TryGetProperty("error", out var nestedError) ? nestedError : document.RootElement;
+                var code = ReadString(error, "code");
+                var detail = ReadString(error, "message");
+                if (!string.IsNullOrWhiteSpace(detail)) return string.IsNullOrWhiteSpace(code) ? detail : $"{code}: {detail}";
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        var singleLine = string.Join(" ", message.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)).Trim();
+        return singleLine.Length <= 240 ? singleLine : singleLine[..237] + "...";
     }
 
     private async Task<IReadOnlyList<JsonElement>> GetGraphCollectionAsync(string url, CancellationToken cancellationToken)

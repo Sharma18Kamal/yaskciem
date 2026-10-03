@@ -30,6 +30,23 @@ public sealed record CloudCommandResult(int ExitCode, string StandardOutput, str
     public bool IsSuccess => ExitCode == 0;
 }
 
+public enum ScanCoverageStatus { Collected, NoData, Partial, Denied, Unavailable, Unsupported, Skipped }
+public sealed record ScanCoverageRecord(string Provider, string DataSource, ScanCoverageStatus Status, int Records, string Details);
+
+public enum WorkloadTrustStatus { Verified, Mismatch, Denied, Unavailable, Unsupported, NotConfigured }
+public sealed record WorkloadIdentityVerification(WorkloadTrustStatus Status, string Details);
+public sealed record KubernetesWorkloadTrace(
+    CloudProviderType Provider,
+    string Cluster,
+    string Namespace,
+    string WorkloadKind,
+    string WorkloadName,
+    string ServiceAccount,
+    string? CloudIdentity,
+    IReadOnlyList<string> KubernetesRoles,
+    bool TokenInjectionEnabled,
+    WorkloadIdentityVerification Trust);
+
 public interface IIdentityProvider
 {
     Task<IReadOnlyList<CloudPrincipal>> GetPrincipalsAsync(Guid accountId, CancellationToken cancellationToken = default);
@@ -64,7 +81,10 @@ public interface IKubernetesRbacProvider
     Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default, CloudProviderType? providerFilter = null);
 }
 
-public sealed record KubernetesRbacScanResult(IReadOnlyList<KubernetesClusterScan> Clusters, IReadOnlyList<string> ProviderMessages);
+public sealed record KubernetesRbacScanResult(IReadOnlyList<KubernetesClusterScan> Clusters, IReadOnlyList<string> ProviderMessages)
+{
+    public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
+}
 
 public sealed record KubernetesClusterScan(
     CloudAccount Cluster,
@@ -72,7 +92,11 @@ public sealed record KubernetesClusterScan(
     IReadOnlyList<CloudRole> Roles,
     IReadOnlyList<CloudPermission> Permissions,
     IReadOnlyList<CloudEffectiveAccessAssignment> AccessAssignments,
-    IReadOnlyList<CloudResource> Resources);
+    IReadOnlyList<CloudResource> Resources)
+{
+    public IReadOnlyList<KubernetesWorkloadTrace> WorkloadTraces { get; init; } = Array.Empty<KubernetesWorkloadTrace>();
+    public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
+}
 
 public interface IEntraDirectoryProvider
 {

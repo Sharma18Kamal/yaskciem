@@ -25,6 +25,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
     private readonly ILiveScanHistoryStore? _liveScanHistoryStore;
     private readonly CloudConnectionState? _cloudConnectionState;
     private IReadOnlyList<LiveEffectiveAccessRecord> _records = Array.Empty<LiveEffectiveAccessRecord>();
+    private IReadOnlyList<KubernetesWorkloadTrace> _workloadTraces = Array.Empty<KubernetesWorkloadTrace>();
     private string _searchText = string.Empty;
     private AccessPathExplorerRow? _selectedPath;
 
@@ -69,6 +70,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
     public IReadOnlyList<AccessPathExplorerRow> Paths => _records
         .Where(record => !record.AssignmentType.Equals("Role usage", StringComparison.OrdinalIgnoreCase))
         .Select(CreatePath)
+        .Concat(_workloadTraces.Select(CreateWorkloadPath))
         .Where(path => string.IsNullOrWhiteSpace(SearchText)
             || new[] { path.Provider, path.Principal, path.Role, path.Scope, path.PathType, path.Evidence }
                 .Any(value => value.Contains(SearchText, StringComparison.OrdinalIgnoreCase)))
@@ -77,7 +79,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
     public IReadOnlyList<AccessPathNodeRow> SelectedNodes => SelectedPath?.Nodes ?? Array.Empty<AccessPathNodeRow>();
     public IReadOnlyList<AccessPathEdgeRow> SelectedEdges => SelectedPath?.Edges ?? Array.Empty<AccessPathEdgeRow>();
     public bool HasResults => Paths.Count > 0;
-    public string CoverageMessage => "Paths connect provider-reported assignments to their stated scope. Workload identity annotations are configured links, not proof of cloud trust or permission evaluation.";
+    public string CoverageMessage => "Paths include provider assignments and scanned Pod/Deployment-to-ServiceAccount traces. Cloud federation status is verified only when the provider CLI confirms issuer, subject, and audience; unavailable checks remain explicit.";
 
     public async Task RefreshAsync()
     {
@@ -87,6 +89,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
             if (currentAccess is not null)
             {
                 _records = FilterConnectedProvider(currentAccess).ToArray();
+                _workloadTraces = FilterConnectedWorkloads(_liveCloudScanService?.CurrentResult?.WorkloadTraces ?? Array.Empty<KubernetesWorkloadTrace>()).ToArray();
             }
             else if (_liveScanHistoryStore is not null)
             {
@@ -97,10 +100,12 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
                     : history;
                 var latest = relevantHistory.OrderByDescending(scan => scan.StartedAt).FirstOrDefault();
                 _records = latest is null ? Array.Empty<LiveEffectiveAccessRecord>() : FilterConnectedProvider(latest.EffectiveAccess).ToArray();
+                _workloadTraces = latest is null ? Array.Empty<KubernetesWorkloadTrace>() : FilterConnectedWorkloads(latest.WorkloadTraces).ToArray();
             }
             else
             {
                 _records = Array.Empty<LiveEffectiveAccessRecord>();
+                _workloadTraces = Array.Empty<KubernetesWorkloadTrace>();
             }
 
             SelectedPath = Paths.FirstOrDefault();
@@ -119,6 +124,44 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
         return connected.Count == 1
             ? records.Where(record => record.Provider.Equals(connected.Single().ToString(), StringComparison.OrdinalIgnoreCase))
             : records;
+    }
+
+    private IEnumerable<KubernetesWorkloadTrace> FilterConnectedWorkloads(IEnumerable<KubernetesWorkloadTrace> traces)
+    {
+        var connected = _cloudConnectionState?.ConnectedProviders ?? new HashSet<CloudProviderType>();
+        return connected.Count == 1
+            ? traces.Where(trace => trace.Provider == connected.Single())
+            : traces;
+    }
+
+    private static AccessPathExplorerRow CreateWorkloadPath(KubernetesWorkloadTrace trace)
+    {
+        var serviceAccount = $"serviceaccount:{trace.Namespace}:{trace.ServiceAccount}";
+        var roleText = trace.KubernetesRoles.Count == 0 ? "No scanned Kubernetes role binding" : string.Join(", ", trace.KubernetesRoles);
+        var scope = $"clusters/{trace.Cluster}/namespaces/{trace.Namespace}";
+        var trust = trace.Trust.Status switch
+        {
+            WorkloadTrustStatus.Verified => $"Cloud trust verified: {trace.Trust.Details}",
+            WorkloadTrustStatus.NotConfigured => $"No cloud identity configured: {trace.Trust.Details}",
+            _ => $"Cloud trust {trace.Trust.Status}: {trace.Trust.Details}"
+        };
+        var nodes = new List<AccessPathNodeRow>
+        {
+            new(1, trace.WorkloadKind, trace.WorkloadName, $"Kubernetes context {trace.Cluster}"),
+            new(2, "Kubernetes ServiceAccount", serviceAccount, $"Token injection {(trace.TokenInjectionEnabled ? "enabled" : "not observed")}"),
+            new(3, "Kubernetes RBAC", roleText, "Resolved from current RoleBinding and ClusterRoleBinding scan")
+        };
+        var edges = new List<AccessPathEdgeRow>
+        {
+            new($"{trace.WorkloadKind}/{trace.WorkloadName}", "uses ServiceAccount", serviceAccount, "Pod or Deployment spec"),
+            new(serviceAccount, "receives Kubernetes roles", roleText, "Current RBAC bindings")
+        };
+        if (!string.IsNullOrWhiteSpace(trace.CloudIdentity))
+        {
+            nodes.Add(new AccessPathNodeRow(4, "Cloud identity", trace.CloudIdentity, trust));
+            edges.Add(new AccessPathEdgeRow(serviceAccount, "federates to", trace.CloudIdentity, trust));
+        }
+        return new AccessPathExplorerRow(trace.Provider.ToString(), serviceAccount, roleText, scope, $"Kubernetes {trace.WorkloadKind}", trace.Trust.Details, trust, trace.KubernetesRoles.Any(role => role.Contains("cluster-admin", StringComparison.OrdinalIgnoreCase)), nodes, edges);
     }
 
     private static AccessPathExplorerRow CreatePath(LiveEffectiveAccessRecord record)

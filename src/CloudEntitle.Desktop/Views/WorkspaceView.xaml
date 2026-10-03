@@ -394,6 +394,24 @@
                         </TextBlock>
                     </StackPanel>
                 </Border>
+                <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                    <StackPanel>
+                        <TextBlock Text="SCAN COVERAGE AND PERMISSIONS" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="{Binding CoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,12" TextWrapping="Wrap"/>
+                        <DataGrid ItemsSource="{Binding Coverage}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="110" MaxHeight="360" CanUserSortColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="100"/>
+                                <DataGridTextColumn Header="Data source" Binding="{Binding DataSource}" Width="190"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="110"/>
+                                <DataGridTextColumn Header="Records" Binding="{Binding Records}" Width="85"/>
+                                <DataGridTextColumn Header="Coverage details" Binding="{Binding Details}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="Run a live scan to see which sources were collected, empty, denied, unsupported, or unavailable." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasCoverage}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:WorkspaceViewModel}">

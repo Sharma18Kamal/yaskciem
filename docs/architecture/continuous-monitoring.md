@@ -16,3 +16,5 @@ Each event retains current/previous scan IDs, provider, stable entity key, summa
 The comparison is deterministic for stable entity keys and cancellation-aware. Future persistence can store reports alongside scan history for trend queries and the existing recommendation/remediation review workflow.
 
 The desktop access-change timeline separately compares comparable live scan snapshots retained locally for seven days. It shows scan detection time separately from provider-reported audit time and actor. Attribution depends on provider log permissions and retention; empty provider results are excluded rather than treated as proof of removal.
+
+The Scan History coverage report retains per-provider, per-source statuses (`Collected`, `NoData`, `Partial`, `Denied`, `Unavailable`, `Unsupported`, `Skipped`) for the same seven-day local retention period. A successful empty query is distinct from a denied or unsupported source, and one source failure does not prevent other sources for that account from being scanned.

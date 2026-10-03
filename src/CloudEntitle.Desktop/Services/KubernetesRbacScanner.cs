@@ -7,18 +7,27 @@ using CloudEntitle.Domain;
 public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
 {
     private sealed record RoleDefinition(string Kind, string Namespace, string Name, IReadOnlyList<CloudPermission> Permissions, bool IsPrivileged);
+    private sealed record WorkloadIdentityAnnotation(CloudProviderType Provider, string Identity);
 
     private readonly ICloudCommandRunner _commandRunner;
+    private readonly CloudWorkloadTrustVerifier _trustVerifier;
 
-    public KubernetesRbacScanner(ICloudCommandRunner commandRunner) => _commandRunner = commandRunner;
+    public KubernetesRbacScanner(ICloudCommandRunner commandRunner)
+    {
+        _commandRunner = commandRunner;
+        _trustVerifier = new CloudWorkloadTrustVerifier(commandRunner);
+    }
 
     public async Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default, CloudProviderType? providerFilter = null)
     {
         var messages = new List<string>();
+        var coverage = new List<ScanCoverageRecord>();
         var configResult = await RunKubectlAsync(new[] { "config", "view", "--output=json" }, cancellationToken);
         if (!configResult.IsSuccess)
         {
-            return new KubernetesRbacScanResult(Array.Empty<KubernetesClusterScan>(), new[] { $"kubectl context discovery failed: {configResult.StandardError.Trim()}" });
+            var details = configResult.StandardError.Trim();
+            coverage.Add(Coverage("Kubernetes", "kubeconfig contexts", StatusForError(details), 0, details));
+            return new KubernetesRbacScanResult(Array.Empty<KubernetesClusterScan>(), new[] { $"kubectl context discovery failed: {details}" }) { Coverage = coverage };
         }
 
         using var config = JsonDocument.Parse(configResult.StandardOutput);
@@ -26,8 +35,11 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
         var clusters = new List<KubernetesClusterScan>();
         if (!root.TryGetProperty("contexts", out var contexts) || contexts.ValueKind != JsonValueKind.Array)
         {
-            return new KubernetesRbacScanResult(clusters, new[] { "kubectl returned no configured contexts." });
+            coverage.Add(Coverage("Kubernetes", "kubeconfig contexts", ScanCoverageStatus.NoData, 0, "kubectl returned no configured contexts."));
+            return new KubernetesRbacScanResult(clusters, new[] { "kubectl returned no configured contexts." }) { Coverage = coverage };
         }
+
+        coverage.Add(Coverage("Kubernetes", "kubeconfig contexts", contexts.GetArrayLength() == 0 ? ScanCoverageStatus.NoData : ScanCoverageStatus.Collected, contexts.GetArrayLength(), "Contexts visible to the current kubectl configuration."));
 
         foreach (var contextEntry in contexts.EnumerateArray())
         {
@@ -57,15 +69,23 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
                 var namespacedResult = await RunContextCommandAsync(contextName, new[] { "get", "roles,rolebindings", "--all-namespaces", "--output=json" }, cancellationToken);
                 var clusterResult = await RunContextCommandAsync(contextName, new[] { "get", "clusterroles,clusterrolebindings", "--output=json" }, cancellationToken);
                 var serviceAccountResult = await RunContextCommandAsync(contextName, new[] { "get", "serviceaccounts", "--all-namespaces", "--output=json" }, cancellationToken);
+                var workloadResult = await RunContextCommandAsync(contextName, new[] { "get", "pods,deployments", "--all-namespaces", "--output=json" }, cancellationToken);
                 var parsedRoles = new List<RoleDefinition>();
                 var bindings = new List<JsonElement>();
+                var clusterCoverage = new List<ScanCoverageRecord>();
                 if (namespacedResult.IsSuccess)
                 {
                     using var document = JsonDocument.Parse(namespacedResult.StandardOutput);
                     parsedRoles.AddRange(ParseRoles(cluster.Id, document.RootElement, "Role"));
                     bindings.AddRange(ParseItems(document.RootElement, "RoleBinding"));
+                    clusterCoverage.Add(Coverage(cloudProvider.ToString(), $"{contextName}: namespace RBAC", CoverageStatus(document.RootElement), ParseItems(document.RootElement, "Role").Count + ParseItems(document.RootElement, "RoleBinding").Count, "Roles and RoleBindings visible to the current kubectl identity."));
                 }
-                else messages.Add($"Kubernetes/{contextName}: namespace RBAC read failed: {namespacedResult.StandardError.Trim()}");
+                else
+                {
+                    var details = namespacedResult.StandardError.Trim();
+                    messages.Add($"Kubernetes/{contextName}: namespace RBAC read failed: {details}");
+                    clusterCoverage.Add(Coverage(cloudProvider.ToString(), $"{contextName}: namespace RBAC", StatusForError(details), 0, details));
+                }
 
                 if (clusterResult.IsSuccess)
                 {
@@ -73,12 +93,26 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
                     parsedRoles.AddRange(ParseRoles(cluster.Id, document.RootElement, "ClusterRole"));
                     bindings.AddRange(ParseItems(document.RootElement, "ClusterRoleBinding"));
                 }
-                else messages.Add($"Kubernetes/{contextName}: cluster RBAC read failed: {clusterResult.StandardError.Trim()}");
+                else
+                {
+                    var details = clusterResult.StandardError.Trim();
+                    messages.Add($"Kubernetes/{contextName}: cluster RBAC read failed: {details}");
+                }
+                clusterCoverage.Add(clusterResult.IsSuccess
+                    ? Coverage(cloudProvider.ToString(), $"{contextName}: cluster RBAC", CoverageStatus(clusterResult), CountItems(clusterResult.StandardOutput, "ClusterRole") + CountItems(clusterResult.StandardOutput, "ClusterRoleBinding"), "ClusterRoles and ClusterRoleBindings visible to the current kubectl identity.")
+                    : Coverage(cloudProvider.ToString(), $"{contextName}: cluster RBAC", StatusForError(clusterResult.StandardError), 0, clusterResult.StandardError.Trim()));
 
                 var workloadIdentities = serviceAccountResult.IsSuccess
                     ? ParseWorkloadIdentities(serviceAccountResult.StandardOutput)
-                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    : new Dictionary<string, WorkloadIdentityAnnotation>(StringComparer.OrdinalIgnoreCase);
                 if (!serviceAccountResult.IsSuccess) messages.Add($"Kubernetes/{contextName}: service-account read failed: {serviceAccountResult.StandardError.Trim()}");
+                clusterCoverage.Add(serviceAccountResult.IsSuccess
+                    ? Coverage(cloudProvider.ToString(), $"{contextName}: ServiceAccounts", CoverageStatus(serviceAccountResult), CountItems(serviceAccountResult.StandardOutput, "ServiceAccount"), "ServiceAccounts and identity annotations visible to the current kubectl identity.")
+                    : Coverage(cloudProvider.ToString(), $"{contextName}: ServiceAccounts", StatusForError(serviceAccountResult.StandardError), 0, serviceAccountResult.StandardError.Trim()));
+                if (!workloadResult.IsSuccess) messages.Add($"Kubernetes/{contextName}: Pod/Deployment read failed: {workloadResult.StandardError.Trim()}");
+                clusterCoverage.Add(workloadResult.IsSuccess
+                    ? Coverage(cloudProvider.ToString(), $"{contextName}: Pods and Deployments", CoverageStatus(workloadResult), CountItems(workloadResult.StandardOutput, "Pod") + CountItems(workloadResult.StandardOutput, "Deployment"), "Pods and Deployments visible to the current kubectl identity.")
+                    : Coverage(cloudProvider.ToString(), $"{contextName}: Pods and Deployments", StatusForError(workloadResult.StandardError), 0, workloadResult.StandardError.Trim()));
                 cluster.ConnectionStatus = namespacedResult.IsSuccess || clusterResult.IsSuccess ? ConnectionStatus.Connected : ConnectionStatus.Failed;
 
                 var roleLookup = parsedRoles.ToDictionary(role => RoleKey(role.Kind, role.Namespace, role.Name), StringComparer.OrdinalIgnoreCase);
@@ -120,9 +154,9 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
                         var accessRole = $"{roleKind}/{roleName}";
                         var source = $"Kubernetes {bindingKind} {GetString(metadata, "namespace") ?? "cluster"}/{GetString(metadata, "name") ?? "unknown"}";
                         assignments.Add(new CloudEffectiveAccessAssignment(principalId, accessRole, scope, source, privileged, "Kubernetes RBAC"));
-                        if (kind == "ServiceAccount" && workloadIdentities.TryGetValue($"{subjectNamespace}/{name}", out var cloudIdentity))
+                        if (kind == "ServiceAccount" && workloadIdentities.TryGetValue($"{subjectNamespace}/{name}", out var cloudIdentity) && cloudIdentity.Provider == cloudProvider)
                         {
-                            assignments.Add(new CloudEffectiveAccessAssignment(cloudIdentity, accessRole, scope, $"Kubernetes workload identity via {principalId}", privileged, "ServiceIdentity"));
+                            assignments.Add(new CloudEffectiveAccessAssignment(cloudIdentity.Identity, accessRole, scope, $"Kubernetes workload identity via {principalId}", privileged, "ServiceIdentity"));
                         }
                     }
                 }
@@ -137,7 +171,19 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
                     Id = Guid.NewGuid(), AccountId = cluster.Id, ExternalId = clusterName, Name = contextName,
                     Type = "Kubernetes Cluster", ResourceType = ResourceType.Resource, Scope = $"clusters/{clusterName}"
                 };
-                clusters.Add(new KubernetesClusterScan(cluster, principalRecords.Values.ToArray(), roles, permissions, assignments, new[] { resource }));
+                var traces = workloadResult.IsSuccess
+                    ? await BuildWorkloadTracesAsync(workloadResult.StandardOutput, contextName, clusterName, cloudProvider, server, workloadIdentities, assignments, cancellationToken)
+                    : Array.Empty<KubernetesWorkloadTrace>();
+                var configuredTraces = traces.Where(trace => !string.IsNullOrWhiteSpace(trace.CloudIdentity)).ToArray();
+                var trustStatus = configuredTraces.Length == 0 ? ScanCoverageStatus.NoData
+                    : configuredTraces.All(trace => trace.Trust.Status == WorkloadTrustStatus.Verified) ? ScanCoverageStatus.Collected
+                    : configuredTraces.Any(trace => trace.Trust.Status == WorkloadTrustStatus.Verified) ? ScanCoverageStatus.Partial
+                    : configuredTraces.Any(trace => trace.Trust.Status == WorkloadTrustStatus.Denied) ? ScanCoverageStatus.Denied
+                    : configuredTraces.Any(trace => trace.Trust.Status == WorkloadTrustStatus.Unavailable) ? ScanCoverageStatus.Unavailable
+                    : ScanCoverageStatus.Partial;
+                clusterCoverage.Add(Coverage(cloudProvider.ToString(), $"{contextName}: cloud workload trust", trustStatus, configuredTraces.Length, configuredTraces.Length == 0 ? "No cloud identity annotations were found on referenced ServiceAccounts." : $"{configuredTraces.Count(trace => trace.Trust.Status == WorkloadTrustStatus.Verified)} of {configuredTraces.Length} annotated workload identities verified."));
+                coverage.AddRange(clusterCoverage);
+                clusters.Add(new KubernetesClusterScan(cluster, principalRecords.Values.ToArray(), roles, permissions, assignments, new[] { resource }) { WorkloadTraces = traces, Coverage = clusterCoverage });
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -145,7 +191,44 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
             }
         }
 
-        return new KubernetesRbacScanResult(clusters, messages);
+        return new KubernetesRbacScanResult(clusters, messages) { Coverage = coverage };
+    }
+
+    private async Task<IReadOnlyList<KubernetesWorkloadTrace>> BuildWorkloadTracesAsync(
+        string output,
+        string contextName,
+        string clusterName,
+        CloudProviderType provider,
+        string? apiServer,
+        IReadOnlyDictionary<string, WorkloadIdentityAnnotation> identities,
+        IReadOnlyList<CloudEffectiveAccessAssignment> assignments,
+        CancellationToken cancellationToken)
+    {
+        using var document = JsonDocument.Parse(output);
+        var traces = new List<KubernetesWorkloadTrace>();
+        foreach (var workload in document.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array ? items.EnumerateArray() : Enumerable.Empty<JsonElement>())
+        {
+            var kind = GetString(workload, "kind");
+            if (kind is not ("Pod" or "Deployment") || !workload.TryGetProperty("metadata", out var metadata)) continue;
+            var ns = GetString(metadata, "namespace") ?? "default";
+            var workloadName = GetString(metadata, "name") ?? "unknown";
+            var spec = kind == "Pod"
+                ? ReadNestedElement(workload, "spec")
+                : ReadNestedElement(workload, "spec", "template", "spec");
+            var serviceAccount = GetString(spec, "serviceAccountName") ?? "default";
+            var identity = identities.GetValueOrDefault($"{ns}/{serviceAccount}");
+            var roles = assignments.Where(assignment => assignment.Principal.Equals($"serviceaccount:{ns}:{serviceAccount}", StringComparison.OrdinalIgnoreCase)
+                    && assignment.AssignmentType == "Kubernetes RBAC")
+                .Select(assignment => assignment.Role).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var tokenInjection = GetNestedString(kind == "Pod" ? workload : ReadNestedElement(workload, "spec", "template"), "metadata", "labels", "azure.workload.identity/use")?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+            var trust = identity is null
+                ? new WorkloadIdentityVerification(WorkloadTrustStatus.NotConfigured, "No supported cloud identity annotation is configured on the ServiceAccount.")
+                : identity.Provider != provider
+                    ? new WorkloadIdentityVerification(WorkloadTrustStatus.Mismatch, $"The ServiceAccount annotation targets {identity.Provider}, but this context was identified as {provider}.")
+                    : await _trustVerifier.VerifyAsync(provider, contextName, apiServer, ns, serviceAccount, identity.Identity, cancellationToken);
+            traces.Add(new KubernetesWorkloadTrace(provider, clusterName, ns, kind, workloadName, serviceAccount, identity?.Identity, roles, tokenInjection, trust));
+        }
+        return traces;
     }
 
     private async Task<CloudCommandResult> RunContextCommandAsync(string contextName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
@@ -207,10 +290,10 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
             ? items.EnumerateArray().Where(item => GetString(item, "kind") == kind).Select(item => item.Clone()).ToArray()
             : Array.Empty<JsonElement>();
 
-    private static Dictionary<string, string> ParseWorkloadIdentities(string output)
+    private static Dictionary<string, WorkloadIdentityAnnotation> ParseWorkloadIdentities(string output)
     {
         using var document = JsonDocument.Parse(output);
-        var identities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var identities = new Dictionary<string, WorkloadIdentityAnnotation>(StringComparer.OrdinalIgnoreCase);
         foreach (var serviceAccount in ParseItems(document.RootElement, "ServiceAccount"))
         {
             if (!serviceAccount.TryGetProperty("metadata", out var metadata)) continue;
@@ -226,12 +309,64 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
             {
                 if (annotations.TryGetProperty(key, out var identity) && !string.IsNullOrWhiteSpace(identity.GetString()))
                 {
-                    identities[$"{ns}/{name}"] = identity.GetString()!;
+                    identities[$"{ns}/{name}"] = new WorkloadIdentityAnnotation(provider, identity.GetString()!);
                     break;
                 }
             }
         }
         return identities;
+    }
+
+    private static ScanCoverageRecord Coverage(string provider, string dataSource, ScanCoverageStatus status, int records, string details)
+        => new(provider, dataSource, status, records, details);
+
+    private static ScanCoverageStatus CoverageStatus(JsonElement root)
+        => CountItems(root, "Role") + CountItems(root, "RoleBinding") + CountItems(root, "ClusterRole") + CountItems(root, "ClusterRoleBinding") == 0
+            ? ScanCoverageStatus.NoData
+            : ScanCoverageStatus.Collected;
+
+    private static ScanCoverageStatus CoverageStatus(CloudCommandResult result)
+    {
+        if (!result.IsSuccess) return StatusForError(result.StandardError);
+        using var document = JsonDocument.Parse(result.StandardOutput);
+        return document.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array && items.GetArrayLength() > 0
+            ? ScanCoverageStatus.Collected
+            : ScanCoverageStatus.NoData;
+    }
+
+    private static int CountItems(string output, string kind)
+    {
+        using var document = JsonDocument.Parse(output);
+        return CountItems(document.RootElement, kind);
+    }
+
+    private static int CountItems(JsonElement root, string kind)
+    {
+        return root.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array
+            ? items.EnumerateArray().Count(item => GetString(item, "kind") == kind)
+            : 0;
+    }
+
+    private static ScanCoverageStatus StatusForError(string message)
+        => message.Contains("forbidden", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
+            ? ScanCoverageStatus.Denied
+            : ScanCoverageStatus.Unavailable;
+
+    private static JsonElement ReadNestedElement(JsonElement element, params string[] path)
+    {
+        foreach (var property in path)
+        {
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(property, out element)) return default;
+        }
+        return element;
+    }
+
+    private static string? GetNestedString(JsonElement element, params string[] path)
+    {
+        var value = ReadNestedElement(element, path);
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     }
 
     private static CloudProviderType DetectCloudProvider(string context, string? server, string? execCommand)

@@ -27,7 +27,11 @@ public sealed record LiveScanHistoryEntry(
     int Permissions,
     int Findings,
     IReadOnlyList<LiveEffectiveAccessRecord> EffectiveAccess,
-    IReadOnlyList<LiveScanAccountRecord> AccountDetails);
+    IReadOnlyList<LiveScanAccountRecord> AccountDetails)
+{
+    public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
+    public IReadOnlyList<KubernetesWorkloadTrace> WorkloadTraces { get; init; } = Array.Empty<KubernetesWorkloadTrace>();
+}
 
 public interface ILiveScanHistoryStore
 {
