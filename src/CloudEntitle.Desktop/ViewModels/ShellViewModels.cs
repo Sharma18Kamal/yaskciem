@@ -29,21 +29,24 @@ public sealed class CloudConnectionState : ObservableObject
 {
     private string _status = "Checking cloud sign-ins";
     private bool _hasConnections;
+    private IReadOnlySet<CloudProviderType> _connectedProviders = new HashSet<CloudProviderType>();
 
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public bool HasConnections { get => _hasConnections; private set => SetProperty(ref _hasConnections, value); }
+    public IReadOnlySet<CloudProviderType> ConnectedProviders { get => _connectedProviders; private set => SetProperty(ref _connectedProviders, value); }
 
     public void Update(IEnumerable<CloudProviderType> connectedProviders, CloudProviderType? pendingProvider = null)
     {
-        var connected = connectedProviders.Distinct().ToArray();
-        HasConnections = connected.Length > 0 || pendingProvider.HasValue;
+        var connected = connectedProviders.ToHashSet();
+        ConnectedProviders = connected;
+        HasConnections = connected.Count > 0 || pendingProvider.HasValue;
         Status = pendingProvider.HasValue
             ? $"Connecting to {pendingProvider.Value}"
-            : connected.Length switch
+            : connected.Count switch
             {
                 0 => "No active CLI sign-in",
-                1 => $"{connected[0]} connected",
-                _ => $"{connected.Length} cloud CLIs signed in"
+                1 => $"{connected.Single()} connected",
+                _ => $"{connected.Count} cloud CLIs signed in"
             };
     }
 }
@@ -809,14 +812,18 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;
     private readonly ILiveScanHistoryStore? _liveScanHistoryStore;
+    private readonly ILiveCloudScanService? _liveCloudScanService;
+    private readonly CloudConnectionState? _cloudConnectionState;
     private DemoSnapshot? _snapshot;
     private IReadOnlyList<LiveScanHistoryEntry> _liveHistory = Array.Empty<LiveScanHistoryEntry>();
     private string _searchText = string.Empty;
 
-    public EffectiveAccessViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null, ILiveScanHistoryStore? liveScanHistoryStore = null) : base(demoData)
+    public EffectiveAccessViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null, ILiveScanHistoryStore? liveScanHistoryStore = null, CloudConnectionState? cloudConnectionState = null) : base(demoData)
     {
         _demoData = demoData;
         _liveScanHistoryStore = liveScanHistoryStore;
+        _liveCloudScanService = liveCloudScanService;
+        _cloudConnectionState = cloudConnectionState;
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
         if (liveCloudScanService is not null)
         {
@@ -850,7 +857,20 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 "Not recorded",
                 "Not recorded",
                 item.IsPrivileged));
-            var liveRows = _liveHistory.SelectMany(scan => scan.EffectiveAccess.Select(item => new EffectiveAccessGridRow(
+            var connectedProviders = _cloudConnectionState?.ConnectedProviders ?? new HashSet<CloudProviderType>();
+            var liveAccess = _liveCloudScanService?.CurrentResult?.EffectiveAccessRecords;
+            if (liveAccess is null)
+            {
+                var history = _liveHistory.AsEnumerable();
+                if (connectedProviders.Count == 1)
+                {
+                    var connectedProvider = connectedProviders.Single().ToString();
+                    history = history.Where(scan => scan.EffectiveAccess.Any(item => item.Provider.Equals(connectedProvider, StringComparison.OrdinalIgnoreCase)));
+                }
+                liveAccess = history.OrderByDescending(scan => scan.StartedAt).FirstOrDefault()?.EffectiveAccess ?? Array.Empty<LiveEffectiveAccessRecord>();
+            }
+
+            var liveRows = liveAccess.Select(item => new EffectiveAccessGridRow(
                 item.Provider,
                 item.Principal,
                 item.Role,
@@ -861,8 +881,14 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 item.Source,
                 item.LastUsedAt?.ToLocalTime().ToString("g") ?? "Not reported",
                 item.LastChangedAt?.ToLocalTime().ToString("g") ?? "Not reported",
-                item.IsPrivileged)));
-            return demoRows.Concat(liveRows)
+                item.IsPrivileged));
+            var rows = demoRows.Concat(liveRows);
+            if (connectedProviders.Count == 1)
+            {
+                var connectedProvider = connectedProviders.Single().ToString();
+                rows = rows.Where(row => row.Provider.Equals(connectedProvider, StringComparison.OrdinalIgnoreCase));
+            }
+            return rows
                 .Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Principal, row.Role, row.Permission, row.Resource, row.Decision, row.Path))
                 .ToArray();
         }

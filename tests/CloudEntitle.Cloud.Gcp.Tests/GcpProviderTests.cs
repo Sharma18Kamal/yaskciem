@@ -77,6 +77,18 @@ public class GcpProviderTests
     }
 
     [Fact]
+    public async Task GcpProvider_ShouldReuseAncestorPolicyResultsAcrossProjectsInOneScan()
+    {
+        var runner = new FakeGcloudRunner(multipleProjects: true);
+        var provider = new GcpProvider(runner, useLiveDiscovery: true);
+
+        var result = await provider.ScanAsync();
+
+        Assert.Equal(2, result.Accounts.Count);
+        Assert.Equal(2, runner.AncestorPolicySearchCalls);
+    }
+
+    [Fact]
     public async Task GcpProvider_ShouldMapCloudAssetInventoryResourceMetadata()
     {
         var provider = new GcpProvider(new FakeGcloudRunner(), useLiveDiscovery: true);
@@ -119,13 +131,21 @@ public class GcpProviderTests
     private sealed class FakeGcloudRunner : ICloudCommandRunner
     {
         private readonly bool _denyInheritedPolicySearch;
+        private readonly bool _multipleProjects;
 
-        public FakeGcloudRunner(bool denyInheritedPolicySearch = false) => _denyInheritedPolicySearch = denyInheritedPolicySearch;
+        public FakeGcloudRunner(bool denyInheritedPolicySearch = false, bool multipleProjects = false)
+        {
+            _denyInheritedPolicySearch = denyInheritedPolicySearch;
+            _multipleProjects = multipleProjects;
+        }
+
+        public int AncestorPolicySearchCalls { get; private set; }
 
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
             if (arguments.Contains("search-all-iam-policies"))
             {
+                AncestorPolicySearchCalls++;
                 if (_denyInheritedPolicySearch) return Task.FromResult(new CloudCommandResult(1, string.Empty, "permission denied"));
                 var scope = arguments.First(argument => argument.StartsWith("--scope=", StringComparison.Ordinal))["--scope=".Length..];
                 var policy = scope.StartsWith("folders/", StringComparison.Ordinal)
@@ -138,7 +158,9 @@ public class GcpProviderTests
                 return Task.FromResult(new CloudCommandResult(0, "[{\"timestamp\":\"2026-10-01T09:00:00Z\",\"protoPayload\":{\"methodName\":\"SetIamPolicy\",\"request\":{\"policy\":{\"bindings\":[{\"role\":\"roles/owner\",\"members\":[\"user:demo@example.invalid\"]}]}}}}]", string.Empty));
 
             var output = arguments.Contains("projects") && arguments.Contains("list")
-                ? "[{\"projectId\":\"demo-production\",\"name\":\"Demo Production\",\"projectNumber\":\"123\"}]"
+                ? _multipleProjects
+                    ? "[{\"projectId\":\"demo-production\",\"name\":\"Demo Production\",\"projectNumber\":\"123\"},{\"projectId\":\"demo-staging\",\"name\":\"Demo Staging\",\"projectNumber\":\"124\"}]"
+                    : "[{\"projectId\":\"demo-production\",\"name\":\"Demo Production\",\"projectNumber\":\"123\"}]"
                 : arguments.Contains("get-ancestors")
                     ? "[{\"type\":\"project\",\"id\":\"123\"},{\"type\":\"folder\",\"id\":\"456\"},{\"type\":\"organization\",\"id\":\"789\"}]"
                     : arguments.Contains("asset") && arguments.Contains("search-all-resources")

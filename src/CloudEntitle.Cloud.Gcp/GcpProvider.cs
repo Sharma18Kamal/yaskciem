@@ -13,6 +13,7 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     private readonly bool _useLiveDiscovery;
     private readonly Dictionary<Guid, CloudAccount> _accounts = new();
     private readonly Dictionary<string, IReadOnlyList<GcpResourceAncestor>> _projectAncestors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IReadOnlyList<GcpBinding>> _ancestorBindingsByScope = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, IReadOnlyList<GcpBinding>> _bindingsByAccount = new();
     private readonly List<string> _providerMessages = new();
 
@@ -30,6 +31,11 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     public async Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
     {
         if (!_useLiveDiscovery) return MockAccounts();
+        _accounts.Clear();
+        _projectAncestors.Clear();
+        _ancestorBindingsByScope.Clear();
+        _bindingsByAccount.Clear();
+        _providerMessages.Clear();
         using var document = JsonDocument.Parse(await GetGcloudOutputAsync(new[] { "projects", "list", "--format=json" }, cancellationToken));
         var accounts = document.RootElement.EnumerateArray().Select(project => new CloudAccount
         {
@@ -185,21 +191,39 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
             foreach (var ancestor in ancestors.Where(item => item.Type is "folder" or "organization"))
             {
                 var scope = $"{ancestor.Type}s/{ancestor.Id}";
+                if (_ancestorBindingsByScope.TryGetValue(scope, out var cachedAncestorBindings))
+                {
+                    bindings.AddRange(cachedAncestorBindings);
+                    continue;
+                }
+
                 var query = $"resource:{scope}";
                 var result = await RunGcloudAsync(new[] { "asset", "search-all-iam-policies", $"--scope={scope}", $"--query={query}", "--format=json" }, cancellationToken);
-                if (!result.IsSuccess) throw new InvalidOperationException(result.StandardError.Trim());
+                if (!result.IsSuccess)
+                {
+                    _ancestorBindingsByScope[scope] = Array.Empty<GcpBinding>();
+                    _providerMessages.Add($"GCP inherited IAM policy discovery for {scope} was unavailable: {result.StandardError.Trim()}");
+                    continue;
+                }
 
                 using var document = JsonDocument.Parse(result.StandardOutput);
-                if (!document.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array) continue;
+                var ancestorBindings = new List<GcpBinding>();
+                if (!document.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+                {
+                    _ancestorBindingsByScope[scope] = ancestorBindings;
+                    continue;
+                }
                 var expectedResource = $"//cloudresourcemanager.googleapis.com/{scope}";
                 foreach (var policyResult in results.EnumerateArray())
                 {
                     if (!policyResult.TryGetProperty("resource", out var resource) || resource.GetString() != expectedResource) continue;
                     if (policyResult.TryGetProperty("policy", out var policy) && policy.ValueKind == JsonValueKind.Object)
                     {
-                        bindings.AddRange(GcpIamPolicyMapper.MapBindings(policy, scope, isInherited: true));
+                        ancestorBindings.AddRange(GcpIamPolicyMapper.MapBindings(policy, scope, isInherited: true));
                     }
                 }
+                _ancestorBindingsByScope[scope] = ancestorBindings;
+                bindings.AddRange(ancestorBindings);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

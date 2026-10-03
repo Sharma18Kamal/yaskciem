@@ -390,6 +390,46 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task EffectiveAccess_ShouldShowOnlyConnectedProviderAndNewestMatchingHistory()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var historyStore = new LocalLiveScanHistoryStore(Path.Combine(directory, "scans.jsonl"));
+        var now = DateTime.UtcNow;
+        LiveScanHistoryEntry CreateEntry(string provider, string principal, DateTime completedAt)
+            => new(completedAt.AddMinutes(-1), completedAt, provider, 1, 1, 0, 1, 1, 0,
+                new[] { new LiveEffectiveAccessRecord(provider, principal, "Reader", "project", "Test", false) },
+                Array.Empty<LiveScanAccountRecord>());
+
+        await historyStore.RecordAsync(CreateEntry("Gcp", "older-gcp", now.AddMinutes(-10)));
+        await historyStore.RecordAsync(CreateEntry("Azure", "newer-azure", now.AddMinutes(-2)));
+        await historyStore.RecordAsync(CreateEntry("Gcp", "newest-gcp", now.AddMinutes(-1)));
+        var connectionState = new CloudConnectionState();
+        connectionState.Update(new[] { CloudProviderType.Gcp });
+        var historyViewModel = new EffectiveAccessViewModel(
+            new NoopDemoDataService(), liveScanHistoryStore: historyStore, cloudConnectionState: connectionState);
+
+        await historyViewModel.RefreshAsync();
+
+        var historicalRow = Assert.Single(historyViewModel.AccessRecords);
+        Assert.Equal("Gcp", historicalRow.Provider);
+        Assert.Equal("newest-gcp", historicalRow.Principal);
+
+        var liveScan = new LiveCloudScanService(new ICloudProvider[]
+        {
+            new FakeCloudProvider(CloudProviderType.Azure, connected: true),
+            new FakeCloudProvider(CloudProviderType.Gcp, connected: true)
+        }, historyStore);
+        var liveViewModel = new EffectiveAccessViewModel(
+            new NoopDemoDataService(), liveScan, historyStore, connectionState);
+        await liveScan.ScanAsync();
+        await liveViewModel.RefreshAsync();
+
+        Assert.NotEmpty(liveViewModel.AccessRecords);
+        Assert.All(liveViewModel.AccessRecords, row => Assert.Equal("Gcp", row.Provider));
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
     public async Task DataScreens_ShouldShowDemoRecordsAndLiveScanResults()
     {
         var accountId = Guid.NewGuid();
