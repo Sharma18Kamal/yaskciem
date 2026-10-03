@@ -30,15 +30,18 @@ public sealed class CloudConnectionState : ObservableObject
     private string _status = "Checking cloud sign-ins";
     private bool _hasConnections;
     private IReadOnlySet<CloudProviderType> _connectedProviders = new HashSet<CloudProviderType>();
+    private CloudProviderType? _pendingProvider;
 
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public bool HasConnections { get => _hasConnections; private set => SetProperty(ref _hasConnections, value); }
     public IReadOnlySet<CloudProviderType> ConnectedProviders { get => _connectedProviders; private set => SetProperty(ref _connectedProviders, value); }
+    public CloudProviderType? PendingProvider { get => _pendingProvider; private set => SetProperty(ref _pendingProvider, value); }
 
     public void Update(IEnumerable<CloudProviderType> connectedProviders, CloudProviderType? pendingProvider = null)
     {
         var connected = connectedProviders.ToHashSet();
         ConnectedProviders = connected;
+        PendingProvider = pendingProvider;
         HasConnections = connected.Count > 0 || pendingProvider.HasValue;
         Status = pendingProvider.HasValue
             ? $"Connecting to {pendingProvider.Value}"
@@ -83,6 +86,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (args.PropertyName == nameof(CloudConnectionState.Status)) OnPropertyChanged(nameof(CloudConnectionStatus));
             if (args.PropertyName == nameof(CloudConnectionState.HasConnections)) OnPropertyChanged(nameof(CanDisconnectCloud));
+            if (args.PropertyName == nameof(CloudConnectionState.PendingProvider)) OnPropertyChanged(nameof(DisconnectCloudButtonLabel));
         };
         _navigation.CurrentViewModelChanged += (_, _) =>
         {
@@ -126,6 +130,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public DateTime? TrialExpiresAtUtc { get => _trialExpiresAtUtc; private set => SetProperty(ref _trialExpiresAtUtc, value); }
     public string CloudConnectionStatus => _cloudConnectionState.Status;
     public bool CanDisconnectCloud => IsTrialActive && _cloudConnectionState.HasConnections;
+    public string DisconnectCloudButtonLabel => _cloudConnectionState.PendingProvider.HasValue ? "Cancel Sign-in" : "Disconnect Cloud";
     public IReadOnlyList<NavigationItem> NavigationItems { get; }
     public NavigationItem CloudAccountsNavigationItem => NavigationItems[1];
     public NavigationItem SettingsNavigationItem => NavigationItems[^1];
@@ -210,6 +215,15 @@ public sealed class MainWindowViewModel : ObservableObject
         Navigate(CloudAccountsNavigationItem);
         if (_navigation.CurrentViewModel is CloudAccountsViewModel cloudAccounts)
         {
+            if (_cloudConnectionState.PendingProvider.HasValue)
+            {
+                var canceled = await cloudAccounts.CancelPendingConnectionAsync();
+                StatusMessage = canceled
+                    ? "Sign-in wait canceled. Close the provider terminal to stop its sign-in flow."
+                    : cloudAccounts.ConnectionGuidance;
+                return;
+            }
+
             var disconnected = await cloudAccounts.DisconnectActiveCloudAsync();
             StatusMessage = disconnected ? "Cloud CLI session disconnected" : cloudAccounts.ConnectionGuidance;
         }
@@ -339,6 +353,8 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private AnalyticsSnapshot _analyticsSnapshot = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
     private LiveCloudScanResult? _liveScan;
     private string _scanStatusMessage = "Run a scan to refresh signed-in cloud providers.";
+    private CancellationTokenSource? _scanCancellation;
+    private bool _isScanning;
 
     public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null, IReportService? reportService = null, IDialogService? dialogService = null)
     {
@@ -348,6 +364,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         _reportService = reportService;
         _dialogService = dialogService;
         ScanCommand = new AsyncRelayCommand(RunScanAsync);
+        StopScanCommand = new RelayCommand(StopScan, () => IsScanning);
         GenerateReportCommand = new AsyncRelayCommand(GenerateReportAsync);
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
         _ = RefreshAsync();
@@ -356,7 +373,16 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public override string Title => "Dashboard";
     public override string Subtitle => "A clear view of your cloud entitlement posture.";
     public AsyncRelayCommand ScanCommand { get; }
+    public RelayCommand StopScanCommand { get; }
     public AsyncRelayCommand GenerateReportCommand { get; }
+    public bool IsScanning
+    {
+        get => _isScanning;
+        private set
+        {
+            if (SetProperty(ref _isScanning, value)) StopScanCommand.Refresh();
+        }
+    }
     public string ScanStatusMessage { get => _scanStatusMessage; private set => SetProperty(ref _scanStatusMessage, value); }
     public int CloudAccounts => _analyticsSnapshot.CloudAccounts + (_liveScan?.AccountCount ?? 0);
     public int Identities => _analyticsSnapshot.Identities + (_liveScan?.IdentityCount ?? 0);
@@ -415,20 +441,28 @@ public sealed class DashboardViewModel : WorkspaceViewModel
 
     public async Task RunScanAsync()
     {
+        if (_scanCancellation is not null) return;
         if (_liveCloudScanService is null)
         {
             ScanStatusMessage = "Live cloud scanning is not configured.";
             return;
         }
 
+        var cancellation = new CancellationTokenSource();
+        _scanCancellation = cancellation;
+        IsScanning = true;
         IsLoading = true;
         ErrorMessage = null;
         ScanStatusMessage = "Checking provider sign-ins and scanning available accounts...";
         try
         {
-            _liveScan = await _liveCloudScanService.ScanAsync();
+            _liveScan = await _liveCloudScanService.ScanAsync(cancellation.Token);
             ScanStatusMessage = string.Join("  |  ", _liveScan.ProviderMessages);
             await RefreshAsync();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            ScanStatusMessage = "Scan stopped. Results from the previous completed scan are retained.";
         }
         catch (Exception exception)
         {
@@ -437,10 +471,15 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         }
         finally
         {
+            _scanCancellation = null;
+            cancellation.Dispose();
+            IsScanning = false;
             IsLoading = false;
             OnPropertyChanged(nameof(ScanStatusMessage));
         }
     }
+
+    private void StopScan() => _scanCancellation?.Cancel();
 
     private async Task RefreshAsync()
     {
@@ -470,6 +509,8 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
     private readonly CloudConnectionState _cloudConnectionState;
     private readonly ILiveCloudScanService? _liveCloudScanService;
     private CloudProviderType? _pendingProvider;
+    private CancellationTokenSource? _pendingConnectCancellation;
+    private TaskCompletionSource? _pendingConnectCompletion;
 
     public CloudAccountsViewModel(IDemoDataService demoData, ICloudAuthenticationLauncher? authenticationLauncher = null, IDialogService? dialogService = null, CloudConnectionState? cloudConnectionState = null, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
     {
@@ -487,7 +528,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure sso", "Set up an AWS IAM Identity Center profile.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
             new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
         ];
-        RefreshConnectionsCommand = new AsyncRelayCommand(RefreshConnectionsAsync);
+        RefreshConnectionsCommand = new AsyncRelayCommand(() => RefreshConnectionsAsync());
         if (_liveCloudScanService is not null)
         {
             _liveCloudScanService.ScanCompleted += (_, _) => OnPropertyChanged(nameof(DiscoveredAccounts));
@@ -525,6 +566,17 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         return !connected[0].IsConnected;
     }
 
+    public async Task<bool> CancelPendingConnectionAsync()
+    {
+        var cancellation = _pendingConnectCancellation;
+        var completion = _pendingConnectCompletion;
+        if (_pendingProvider is null || cancellation is null || completion is null) return false;
+
+        cancellation.Cancel();
+        await completion.Task;
+        return true;
+    }
+
     public async Task ConnectAsync(CloudProviderType provider)
     {
         if (_pendingProvider.HasValue && _pendingProvider != provider)
@@ -534,21 +586,29 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             return;
         }
 
+        var cancellation = new CancellationTokenSource();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingProvider = provider;
-        UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
-        await RefreshConnectionsAsync();
-        if (Providers.Any(option => option.Provider != provider && option.IsConnected))
-        {
-            _pendingProvider = null;
-            await RefreshConnectionsAsync();
-            ConnectionGuidance = "Disconnect the active provider before signing in to another cloud.";
-            OnPropertyChanged(nameof(ConnectionGuidance));
-            return;
-        }
-
-        UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
+        _pendingConnectCancellation = cancellation;
+        _pendingConnectCompletion = completion;
         try
         {
+            UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
+            await RefreshConnectionsAsync(cancellation.Token);
+            if (Providers.Any(option => option.Provider == provider && option.IsConnected))
+            {
+                ConnectionGuidance = $"{provider} is already connected. Disconnect it before selecting another provider.";
+                OnPropertyChanged(nameof(ConnectionGuidance));
+                return;
+            }
+            if (Providers.Any(option => option.Provider != provider && option.IsConnected))
+            {
+                ConnectionGuidance = "Disconnect the active provider before signing in to another cloud.";
+                OnPropertyChanged(nameof(ConnectionGuidance));
+                return;
+            }
+
+            UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
             _authenticationLauncher.LaunchAuthentication(provider);
             ConnectionGuidance = $"Complete {provider} sign-in in the terminal. Other providers stay disabled until sign-in is verified.";
             ErrorMessage = null;
@@ -556,30 +616,43 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
 
             for (var attempt = 0; attempt < 90; attempt++)
             {
-                if (await _authenticationLauncher.IsConnectedAsync(provider))
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (await _authenticationLauncher.IsConnectedAsync(provider, cancellation.Token))
                 {
-                    _pendingProvider = null;
                     await RefreshConnectionsAsync();
                     ConnectionGuidance = $"{provider} is connected. Disconnect it before selecting another provider. YASK-CIEM does not receive or store cloud credentials.";
                     OnPropertyChanged(nameof(ConnectionGuidance));
                     return;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(2));
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellation.Token);
             }
 
-            _pendingProvider = null;
-            await RefreshConnectionsAsync();
             ConnectionGuidance = "Sign-in was not detected. Check the provider terminal and try again.";
+            OnPropertyChanged(nameof(ConnectionGuidance));
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            ConnectionGuidance = "Sign-in wait canceled. Close the provider terminal to stop its sign-in flow.";
             OnPropertyChanged(nameof(ConnectionGuidance));
         }
         catch (Exception exception)
         {
-            _pendingProvider = null;
-            await RefreshConnectionsAsync();
             ErrorMessage = $"Unable to connect to {provider}: {exception.Message}";
             ConnectionGuidance = "The provider sign-in could not be verified.";
             OnPropertyChanged(nameof(ConnectionGuidance));
+        }
+        finally
+        {
+            if (ReferenceEquals(_pendingConnectCancellation, cancellation))
+            {
+                _pendingProvider = null;
+                _pendingConnectCancellation = null;
+                _pendingConnectCompletion = null;
+                cancellation.Dispose();
+                await RefreshConnectionsAsync();
+                completion.TrySetResult();
+            }
         }
     }
 
@@ -607,13 +680,17 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         OnPropertyChanged(nameof(ConnectionGuidance));
     }
 
-    private async Task RefreshConnectionsAsync()
+    private async Task RefreshConnectionsAsync(CancellationToken cancellationToken = default)
     {
         var states = await Task.WhenAll(Providers.Select(async option =>
         {
             try
             {
-                return (option.Provider, IsConnected: await _authenticationLauncher.IsConnectedAsync(option.Provider));
+                return (option.Provider, IsConnected: await _authenticationLauncher.IsConnectedAsync(option.Provider, cancellationToken));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch
             {

@@ -55,9 +55,29 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
             return new CloudCommandResult(-1, string.Empty, exception.Message);
         }
 
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            }
+
+            await process.WaitForExitAsync(CancellationToken.None);
+            await Task.WhenAll(outputTask, errorTask);
+            throw;
+        }
 
         return new CloudCommandResult(
             process.ExitCode,

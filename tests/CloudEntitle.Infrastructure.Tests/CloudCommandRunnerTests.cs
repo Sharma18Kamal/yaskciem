@@ -46,4 +46,29 @@ public sealed class CloudCommandRunnerTests
         using var document = System.Text.Json.JsonDocument.Parse(result.StandardOutput);
         Assert.Equal(System.Text.Json.JsonValueKind.Array, document.RootElement.ValueKind);
     }
+
+    [Fact]
+    public async Task ProcessCloudCommandRunner_ShouldTerminateCliProcessWhenCanceled()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var directory = Path.Combine(Path.GetTempPath(), $"CloudEntitle CLI {Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var commandPath = Path.Combine(directory, "slow-cloud-cli.cmd");
+        await File.WriteAllTextAsync(commandPath, "@echo off\r\nping 127.0.0.1 -n 60 > nul\r\n");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", directory + Path.PathSeparator + originalPath);
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new ProcessCloudCommandRunner().RunAsync("slow-cloud-cli", Array.Empty<string>(), cancellation.Token));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

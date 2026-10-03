@@ -187,6 +187,42 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task CloudAccountsViewModel_ShouldCancelPendingSignInWithoutSigningOut()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher { NeverConnect = true };
+        var connectionState = new CloudConnectionState();
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, cloudConnectionState: connectionState);
+
+        var connectTask = viewModel.ConnectAsync(CloudProviderType.Aws);
+        Assert.Equal(CloudProviderType.Aws, connectionState.PendingProvider);
+        Assert.Equal("Cancel Sign-in", new MainWindowViewModel(new TestNavigationService(viewModel), connectionState).DisconnectCloudButtonLabel);
+
+        Assert.True(await viewModel.CancelPendingConnectionAsync());
+        await connectTask;
+
+        Assert.Null(connectionState.PendingProvider);
+        Assert.Empty(launcher.DisconnectedProviders);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).CanConnect);
+        Assert.Contains("Sign-in wait canceled", viewModel.ConnectionGuidance);
+    }
+
+    [Fact]
+    public async Task DashboardViewModel_ShouldStopActiveScanAndRetainCompletedState()
+    {
+        var liveScan = new LiveCloudScanService(new ICloudProvider[] { new CancellationBlockingCloudProvider() });
+        var dashboard = new DashboardViewModel(new NoopDemoDataService(), new NoopAnalyticsService(), liveScan);
+
+        var scanTask = dashboard.RunScanAsync();
+        Assert.True(dashboard.IsScanning);
+        dashboard.StopScanCommand.Execute(null);
+        await scanTask;
+
+        Assert.False(dashboard.IsScanning);
+        Assert.False(dashboard.IsLoading);
+        Assert.Contains("Scan stopped", dashboard.ScanStatusMessage);
+    }
+
+    [Fact]
     public async Task CloudAccountsViewModel_ShouldRequireConfirmationBeforeDisconnecting()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
@@ -540,6 +576,7 @@ public sealed class NavigationTests
         public List<CloudProviderType> LaunchedProviders { get; } = new();
         public List<CloudProviderType> DisconnectedProviders { get; } = new();
         public Exception? LaunchFailure { get; set; }
+        public bool NeverConnect { get; set; }
         public void LaunchAuthentication(CloudProviderType provider)
         {
             if (LaunchFailure is not null) throw LaunchFailure;
@@ -547,7 +584,7 @@ public sealed class NavigationTests
         }
         public void LaunchDisconnection(CloudProviderType provider) => DisconnectedProviders.Add(provider);
         public Task<bool> IsConnectedAsync(CloudProviderType provider, CancellationToken cancellationToken = default)
-            => Task.FromResult(LaunchedProviders.Contains(provider) && !DisconnectedProviders.Contains(provider));
+            => Task.FromResult(!NeverConnect && LaunchedProviders.Contains(provider) && !DisconnectedProviders.Contains(provider));
         public Task DisconnectAsync(CloudProviderType provider, CancellationToken cancellationToken = default)
         {
             DisconnectedProviders.Add(provider);
@@ -645,6 +682,20 @@ public sealed class NavigationTests
             {
                 new CloudEffectiveAccessAssignment("test-principal", "Owner", "test-scope", "Test assignment", true)
             });
+    }
+
+    private sealed class CancellationBlockingCloudProvider : ICloudProvider
+    {
+        public CloudProviderType ProviderType => CloudProviderType.Gcp;
+        public async Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return true;
+        }
+        public Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudAccount>>(Array.Empty<CloudAccount>());
+        public Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudPrincipal>>(Array.Empty<CloudPrincipal>());
+        public Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudRole>>(Array.Empty<CloudRole>());
+        public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudPermission>>(Array.Empty<CloudPermission>());
     }
 
     private sealed class FakeEntraCloudProvider : ICloudProvider, IEntraDirectoryProvider
