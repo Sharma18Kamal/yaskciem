@@ -103,6 +103,7 @@ public sealed class MainWindowViewModel : ObservableObject
             new("Resources", "◇", typeof(ResourcesViewModel)),
             new("Entitlements", "◆", typeof(EntitlementsViewModel)),
             new("Effective Access", "↳", typeof(EffectiveAccessViewModel)),
+            new("Access Paths", "⇢", typeof(AccessPathExplorerViewModel)),
             new("Risk Findings", "!", typeof(RiskFindingsViewModel)),
             new("Recommendations", "✓", typeof(RecommendationsViewModel)),
             new("Scan History", "◷", typeof(ScanHistoryViewModel)),

@@ -63,6 +63,7 @@ public partial class App : System.Windows.Application
 		services.AddTransient<ResourcesViewModel>();
 		services.AddTransient<EntitlementsViewModel>();
 		services.AddTransient<EffectiveAccessViewModel>();
+		services.AddTransient<AccessPathExplorerViewModel>();
 		services.AddTransient<RiskFindingsViewModel>();
 		services.AddTransient<RecommendationsViewModel>();
 		services.AddTransient<ScanHistoryViewModel>();

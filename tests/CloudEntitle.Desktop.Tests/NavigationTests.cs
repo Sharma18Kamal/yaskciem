@@ -26,6 +26,7 @@ public sealed class NavigationTests
         services.AddTransient<ResourcesViewModel>();
         services.AddTransient<EntitlementsViewModel>();
         services.AddTransient<EffectiveAccessViewModel>();
+        services.AddTransient<AccessPathExplorerViewModel>();
         services.AddTransient<RiskFindingsViewModel>();
         services.AddTransient<RecommendationsViewModel>();
         services.AddTransient<ScanHistoryViewModel>();
@@ -55,14 +56,16 @@ public sealed class NavigationTests
         services.AddSingleton<IDemoDataService, NoopDemoDataService>();
         services.AddSingleton<IAnalyticsService, NoopAnalyticsService>();
         services.AddTransient<DashboardViewModel>();
+        services.AddTransient<AccessPathExplorerViewModel>();
         services.AddSingleton<INavigationService, NavigationService>();
         using var provider = services.BuildServiceProvider();
         var navigation = provider.GetRequiredService<INavigationService>();
         var viewModel = new MainWindowViewModel(navigation);
 
-        Assert.Equal(11, viewModel.NavigationItems.Count);
+        Assert.Equal(12, viewModel.NavigationItems.Count);
         Assert.Equal("Dashboard", viewModel.CurrentNavigationItem.Title);
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Effective Access");
+        Assert.Contains(viewModel.NavigationItems, item => item.Title == "Access Paths");
         Assert.Equal("YASK-CIEM", viewModel.ApplicationName);
         Assert.Equal("Cloud Accounts", viewModel.CloudAccountsNavigationItem.Title);
         Assert.Equal("0.1.0", viewModel.ApplicationVersion);
@@ -302,6 +305,40 @@ public sealed class NavigationTests
         Assert.Equal(1, dashboard.HighFindings);
         Assert.Contains("Aws: no active CLI sign-in", dashboard.ScanStatusMessage);
         Assert.NotEqual("No scans yet", dashboard.LastScan);
+    }
+
+    [Fact]
+    public async Task LiveCloudScan_ShouldOnlyScanTheSingleConnectedProvider()
+    {
+        var azure = new FakeCloudProvider(CloudProviderType.Azure, connected: true);
+        var gcp = new FakeCloudProvider(CloudProviderType.Gcp, connected: true);
+        var connectionState = new CloudConnectionState();
+        connectionState.Update(new[] { CloudProviderType.Gcp });
+        var scanner = new LiveCloudScanService(new ICloudProvider[] { azure, gcp }, cloudConnectionState: connectionState);
+
+        var result = await scanner.ScanAsync();
+
+        Assert.Equal(1, result.AccountCount);
+        Assert.All(result.AccountRecords, account => Assert.Equal(nameof(CloudProviderType.Gcp), account.Provider));
+        Assert.All(result.IdentityRecords, identity => Assert.Equal(CloudProviderType.Gcp, identity.CloudProvider));
+        Assert.DoesNotContain(result.ProviderMessages, message => message.StartsWith("Azure:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LiveCloudScan_ShouldRefuseToMixMultipleConnectedProviders()
+    {
+        var connectionState = new CloudConnectionState();
+        connectionState.Update(new[] { CloudProviderType.Azure, CloudProviderType.Gcp });
+        var scanner = new LiveCloudScanService(new ICloudProvider[]
+        {
+            new FakeCloudProvider(CloudProviderType.Azure, connected: true),
+            new FakeCloudProvider(CloudProviderType.Gcp, connected: true)
+        }, cloudConnectionState: connectionState);
+
+        var result = await scanner.ScanAsync();
+
+        Assert.Equal(0, result.AccountCount);
+        Assert.Contains(result.ProviderMessages, message => message.Contains("Multiple cloud CLIs are signed in", StringComparison.Ordinal));
     }
 
     [Fact]

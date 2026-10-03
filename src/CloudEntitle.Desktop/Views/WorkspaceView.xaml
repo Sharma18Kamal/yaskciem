@@ -5,12 +5,13 @@
     <UserControl.Resources>
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
             <StackPanel>
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                <Button Content="Scan Now" Command="{Binding ScanCommand}" Style="{StaticResource PrimaryButton}" ToolTip="Scan signed-in cloud providers using read-only CLI access"/>
-                <Button Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
-                <Button Content="Generate Report" Command="{Binding GenerateReportCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Choose a folder and save findings as JSON or CSV"/>
-                <TextBlock Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
-            </StackPanel>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Button Grid.Column="0" Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" ToolTip="Scan the connected cloud provider using read-only CLI access"/>
+                <Button Grid.Column="1" Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" MinWidth="100" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
+                <Button Grid.Column="2" Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Choose a folder and save findings as JSON or CSV"/>
+                <TextBlock Grid.Column="3" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
+            </Grid>
             <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
             <UniformGrid Columns="2" Rows="4">
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CLOUD ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CloudAccounts}" Style="{StaticResource CardValue}"/></StackPanel></Border>
@@ -122,6 +123,54 @@
                     </DataGrid.Columns>
                 </DataGrid>
                 <TextBlock Text="No modeled effective-access records match this search." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:AccessPathExplorerViewModel}">
+            <StackPanel>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search access paths"/>
+                <TextBlock Text="{Binding CoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.1*"/><ColumnDefinition Width="0.9*"/></Grid.ColumnDefinitions>
+                    <DataGrid Grid.Column="0" ItemsSource="{Binding Paths}" SelectedItem="{Binding SelectedPath, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="220" MaxHeight="520" CanUserSortColumns="True" Margin="0,0,10,0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="90"/>
+                            <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="*"/>
+                            <DataGridTextColumn Header="Role" Binding="{Binding Role}" Width="150"/>
+                            <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="170"/>
+                            <DataGridTextColumn Header="Path type" Binding="{Binding PathType}" Width="150"/>
+                            <DataGridCheckBoxColumn Header="Privileged" Binding="{Binding Privileged}" Width="85"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="PATH EVIDENCE" Style="{StaticResource CardLabel}" Margin="0,0,0,8"/>
+                        <TextBlock Text="{Binding SelectedPath.Confidence}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <ItemsControl ItemsSource="{Binding SelectedNodes}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel Margin="0,4">
+                                        <TextBlock Text="{Binding Sequence}" Width="28" Foreground="{StaticResource MutedBrush}"/>
+                                        <TextBlock Text="{Binding Type}" Width="140" Foreground="{StaticResource AccentBrush}"/>
+                                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap"/>
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding SelectedEdges}" Margin="28,4,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,3">
+                                        <TextBlock Text="{Binding Relationship}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding Confidence}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding SelectedPath.Evidence}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+                <TextBlock Text="No provider-reported access paths match this search." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                 </TextBlock>
             </StackPanel>

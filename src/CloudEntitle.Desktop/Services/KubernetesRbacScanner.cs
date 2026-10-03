@@ -12,7 +12,7 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
 
     public KubernetesRbacScanner(ICloudCommandRunner commandRunner) => _commandRunner = commandRunner;
 
-    public async Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default)
+    public async Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default, CloudProviderType? providerFilter = null)
     {
         var messages = new List<string>();
         var configResult = await RunKubectlAsync(new[] { "config", "view", "--output=json" }, cancellationToken);
@@ -39,6 +39,7 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
             var server = FindNamedEntry(root, "clusters", clusterName, "cluster", "server");
             var execCommand = string.IsNullOrWhiteSpace(userName) ? null : FindNamedEntry(root, "users", userName, "user", "exec", "command");
             var cloudProvider = DetectCloudProvider(contextName, server, execCommand);
+            if (providerFilter.HasValue && cloudProvider != providerFilter.Value) continue;
             var cluster = new CloudAccount
             {
                 Id = Guid.NewGuid(),

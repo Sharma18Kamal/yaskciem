@@ -2,6 +2,7 @@ using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Application.Services;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.Desktop.ViewModels;
 
 namespace CloudEntitle.Desktop.Services;
 
@@ -39,16 +40,18 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
     private readonly IReadOnlyList<ICloudProvider> _providers;
     private readonly ILiveScanHistoryStore? _historyStore;
     private readonly IKubernetesRbacProvider? _kubernetesRbacProvider;
+    private readonly CloudConnectionState? _cloudConnectionState;
     private readonly RiskEngine _riskEngine = new();
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
     public event EventHandler? ScanCompleted;
 
-    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null)
+    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null)
     {
         _providers = providers.ToArray();
         _historyStore = historyStore;
         _kubernetesRbacProvider = kubernetesRbacProvider;
+        _cloudConnectionState = cloudConnectionState;
     }
 
     public async Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default)
@@ -68,8 +71,19 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var effectiveAccessRecords = new List<LiveEffectiveAccessRecord>();
         var findings = new List<RiskFinding>();
         var messages = new List<string>();
+        var connectedProviders = _cloudConnectionState?.ConnectedProviders ?? new HashSet<CloudProviderType>();
+        var selectedProvider = connectedProviders.Count == 1 ? connectedProviders.Single() : (CloudProviderType?)null;
+        var multipleConnectedProviders = connectedProviders.Count > 1;
+        if (selectedProvider.HasValue)
+        {
+            messages.Add($"{selectedProvider.Value}: scan is restricted to the connected provider.");
+        }
+        else if (multipleConnectedProviders)
+        {
+            messages.Add("Multiple cloud CLIs are signed in. Disconnect all but one provider before scanning to avoid mixed-provider results.");
+        }
 
-        foreach (var provider in _providers)
+        foreach (var provider in _providers.Where(provider => !multipleConnectedProviders && (!selectedProvider.HasValue || provider.ProviderType == selectedProvider.Value)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
@@ -207,13 +221,13 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             }
         }
 
-        if (_kubernetesRbacProvider is not null)
+        if (_kubernetesRbacProvider is not null && !multipleConnectedProviders)
         {
             try
             {
-                var kubernetesResult = await _kubernetesRbacProvider.ScanKubernetesRbacAsync(cancellationToken);
+                var kubernetesResult = await _kubernetesRbacProvider.ScanKubernetesRbacAsync(cancellationToken, selectedProvider);
                 messages.AddRange(kubernetesResult.ProviderMessages);
-                foreach (var cluster in kubernetesResult.Clusters)
+                foreach (var cluster in kubernetesResult.Clusters.Where(cluster => !selectedProvider.HasValue || cluster.Cluster.CloudProvider == selectedProvider.Value))
                 {
                     var providerType = cluster.Cluster.CloudProvider;
                     accountsScanned++;

@@ -61,7 +61,7 @@ public sealed record CloudOrganizationScanResult(IReadOnlyList<CloudAccount> Acc
 
 public interface IKubernetesRbacProvider
 {
-    Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default);
+    Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default, CloudProviderType? providerFilter = null);
 }
 
 public sealed record KubernetesRbacScanResult(IReadOnlyList<KubernetesClusterScan> Clusters, IReadOnlyList<string> ProviderMessages);

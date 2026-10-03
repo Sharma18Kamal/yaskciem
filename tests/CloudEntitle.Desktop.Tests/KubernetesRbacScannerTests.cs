@@ -37,6 +37,19 @@ public sealed class KubernetesRbacScannerTests
     }
 
     [Fact]
+    public async Task Scanner_ShouldOnlyReadContextsMatchingConnectedProvider()
+    {
+        var scanner = new KubernetesRbacScanner(new FakeKubectlRunner(includeAllProviders: true));
+
+        var result = await scanner.ScanKubernetesRbacAsync(providerFilter: CloudProviderType.Gcp);
+
+        var cluster = Assert.Single(result.Clusters);
+        Assert.Equal(CloudProviderType.Gcp, cluster.Cluster.CloudProvider);
+        Assert.DoesNotContain(result.ProviderMessages, message => message.Contains("eks", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.ProviderMessages, message => message.Contains("aks", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task LiveScan_ShouldIncludeKubernetesClusterAndAccessPaths()
     {
         var scanner = new KubernetesRbacScanner(new FakeKubectlRunner());
