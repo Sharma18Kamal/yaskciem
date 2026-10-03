@@ -17,6 +17,8 @@
     <ProjectReference Include="..\CloudEntitle.Cloud.Aws\CloudEntitle.Cloud.Aws.csproj" />
     <ProjectReference Include="..\CloudEntitle.Cloud.Gcp\CloudEntitle.Cloud.Gcp.csproj" />
     <ProjectReference Include="..\CloudEntitle.Analytics\CloudEntitle.Analytics.csproj" />
+    <ProjectReference Include="..\CloudEntitle.EffectiveAccess\CloudEntitle.EffectiveAccess.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Normalization\CloudEntitle.Normalization.csproj" />
   </ItemGroup>
 
   <ItemGroup>

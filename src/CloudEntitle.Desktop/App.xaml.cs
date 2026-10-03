@@ -11,6 +11,8 @@ using CloudEntitle.Cloud.Gcp;
 using CloudEntitle.Infrastructure;
 using CloudEntitle.Infrastructure.Persistence;
 using CloudEntitle.Licensing;
+using CloudEntitle.EffectiveAccess.Abstractions;
+using CloudEntitle.EffectiveAccess.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -40,6 +42,7 @@ public partial class App : System.Windows.Application
 		await new DbInitializer(databaseConfiguration).InitializeAsync();
 		services.AddDbContextFactory<CloudEntitleDbContext>(options => options.UseSqlite(databaseConfiguration.ConnectionString));
 		services.AddSingleton<IDemoDataService, DemoDataService>();
+		services.AddSingleton<IEffectiveAccessEngine, EffectiveAccessEngine>();
 		services.AddSingleton<IAnalyticsService, AnalyticsService>();
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<IReportService, SqliteReportService>();

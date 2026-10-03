@@ -511,7 +511,7 @@ public sealed class NavigationTests
         var permission = new CloudPermission { Id = Guid.NewGuid(), AccountId = accountId, Name = "Read resources", Action = "resource/read" };
         var resource = new CloudResource { Id = Guid.NewGuid(), AccountId = accountId, Name = "Demo vault", Type = "Vault" };
         var entitlement = new Entitlement { Id = Guid.NewGuid(), PrincipalId = principal.Id, RoleId = role.Id, PermissionId = permission.Id, CloudAccountId = accountId, ResourceId = resource.Id, AssignmentType = AssignmentType.Direct };
-        var access = new EffectiveAccess { Id = Guid.NewGuid(), PrincipalId = principal.Id, CloudAccountId = accountId, ResourceId = resource.Id, PermissionId = permission.Id, RoleId = role.Id, Provider = CloudProvider.Azure, IsDirect = true };
+        var access = new CloudEntitle.Domain.Entities.EffectiveAccess { Id = Guid.NewGuid(), PrincipalId = principal.Id, CloudAccountId = accountId, ResourceId = resource.Id, PermissionId = permission.Id, RoleId = role.Id, Provider = CloudProvider.Azure, IsDirect = true };
         var finding = new RiskFindingModel { Id = Guid.NewGuid(), RuleId = Guid.NewGuid(), CloudProvider = CloudProvider.Azure, CloudAccountId = accountId, PrincipalId = principal.Id, Severity = RiskSeverity.High, Title = "Demo finding", Evidence = new RiskEvidence("Demo evidence") };
         var recommendation = new RecommendationModel { Id = Guid.NewGuid(), RiskFindingId = finding.Id, Title = "Review demo role", CurrentState = "Reader at account scope", SuggestedState = "Narrow resource access", Provider = CloudProvider.Azure };
         var scan = new Scan { Id = Guid.NewGuid(), CloudAccountId = accountId, StartedAt = DateTime.UtcNow.AddMinutes(-2), CompletedAt = DateTime.UtcNow, Status = ScanStatus.Completed };
@@ -557,7 +557,7 @@ public sealed class NavigationTests
         public bool IsDemoMode => false;
         public Task<DemoStatistics> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DemoStatistics(0, 0, 0, 0, 0, 0, 0, null));
         public Task ResetAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<DemoSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DemoSnapshot(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(), Array.Empty<Entitlement>(), Array.Empty<EffectiveAccess>(), Array.Empty<RiskFindingModel>(), Array.Empty<RecommendationModel>(), Array.Empty<Scan>()));
+        public Task<DemoSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DemoSnapshot(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(), Array.Empty<Entitlement>(), Array.Empty<CloudEntitle.Domain.Entities.EffectiveAccess>(), Array.Empty<RiskFindingModel>(), Array.Empty<RecommendationModel>(), Array.Empty<Scan>()));
     }
 
     private sealed class NoopAnalyticsService : IAnalyticsService

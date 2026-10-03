@@ -125,6 +125,59 @@
                 <TextBlock Text="No modeled effective-access records match this search." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                 </TextBlock>
+                <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                    <StackPanel>
+                        <TextBlock Text="PERMISSION SIMULATOR" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="{Binding SimulatorCoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,12" TextWrapping="Wrap"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                <TextBlock Text="Principal" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                                <ComboBox ItemsSource="{Binding SimulatorPrincipals}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorPrincipalId, Mode=TwoWay}"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="4,0,4,0">
+                                <TextBlock Text="Resource" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                                <ComboBox ItemsSource="{Binding SimulatorResources}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorResourceId, Mode=TwoWay}"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Margin="8,0,0,0">
+                                <TextBlock Text="Permission" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                                <ComboBox ItemsSource="{Binding SimulatorPermissions}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorPermissionId, Mode=TwoWay}"/>
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Evaluate" Command="{Binding SimulatePermissionCommand}" IsEnabled="{Binding CanSimulatePermission}" Style="{StaticResource PrimaryButton}"/>
+                            <TextBlock Text="{Binding SimulationStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Grid Margin="0,12,0,0">
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasSimulationResult}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{Binding SimulationResult.Decision}" Foreground="{StaticResource PrimaryBrush}" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SimulationResult.EvaluationStatus}" Foreground="{StaticResource AccentBrush}" Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding SimulationResult.Provider}" Foreground="{StaticResource PrimaryBrush}"/>
+                                    <TextBlock Text="  |  " Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBlock Text="{Binding SimulationResult.Principal}" Foreground="{StaticResource PrimaryBrush}"/>
+                                    <TextBlock Text="  |  " Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBlock Text="{Binding SimulationResult.Resource}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding SimulationResult.Permission}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SimulationResult.Source}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SimulationResult.Evidence}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SimulationResult.Diagnostics}" Foreground="{StaticResource CriticalBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:AccessPathExplorerViewModel}">

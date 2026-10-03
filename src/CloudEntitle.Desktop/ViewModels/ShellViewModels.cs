@@ -5,6 +5,10 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Analytics.Models;
 using CloudEntitle.Analytics.Services;
 using CloudEntitle.Domain;
+using CloudEntitle.EffectiveAccess.Abstractions;
+using CloudEntitle.EffectiveAccess.Models;
+using CloudEntitle.EffectiveAccess.Services;
+using CloudEntitle.Normalization.Models;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
@@ -814,6 +818,8 @@ public sealed class ResourcesViewModel : WorkspaceViewModel
 }
 public sealed record EntitlementGridRow(string Provider, string Subject, string Grant, string Scope, string Assignment, string Source);
 public sealed record EffectiveAccessGridRow(string Provider, string Principal, string Role, string Permission, string Resource, string Decision, string Path, string Source, string LastUsed, string LastChanged, bool Privileged);
+public sealed record PermissionSimulatorOption(Guid Id, string Label);
+public sealed record PermissionSimulationRow(string Provider, string Principal, string Resource, string Permission, string Decision, string EvaluationStatus, string Source, string Evidence, string Diagnostics);
 public sealed record RiskFindingGridRow(string Provider, string Severity, string Title, string Principal, string Resource, string Evidence, string Recommendation);
 public sealed record RecommendationGridRow(string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority);
 public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings, int EffectiveAccess);
@@ -892,16 +898,25 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
     private readonly ILiveScanHistoryStore? _liveScanHistoryStore;
     private readonly ILiveCloudScanService? _liveCloudScanService;
     private readonly CloudConnectionState? _cloudConnectionState;
+    private readonly IEffectiveAccessEngine _effectiveAccessEngine;
     private DemoSnapshot? _snapshot;
     private IReadOnlyList<LiveScanHistoryEntry> _liveHistory = Array.Empty<LiveScanHistoryEntry>();
     private string _searchText = string.Empty;
+    private Guid? _simulatorPrincipalId;
+    private Guid? _simulatorResourceId;
+    private Guid? _simulatorPermissionId;
+    private PermissionSimulationRow? _simulationResult;
+    private string _simulationStatus = "Load normalized data to run a permission simulation.";
+    private bool _isSimulating;
 
-    public EffectiveAccessViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null, ILiveScanHistoryStore? liveScanHistoryStore = null, CloudConnectionState? cloudConnectionState = null) : base(demoData)
+    public EffectiveAccessViewModel(IDemoDataService demoData, ILiveCloudScanService? liveCloudScanService = null, ILiveScanHistoryStore? liveScanHistoryStore = null, CloudConnectionState? cloudConnectionState = null, IEffectiveAccessEngine? effectiveAccessEngine = null) : base(demoData)
     {
         _demoData = demoData;
         _liveScanHistoryStore = liveScanHistoryStore;
         _liveCloudScanService = liveCloudScanService;
         _cloudConnectionState = cloudConnectionState;
+        _effectiveAccessEngine = effectiveAccessEngine ?? new EffectiveAccessEngine();
+        SimulatePermissionCommand = new AsyncRelayCommand(SimulatePermissionAsync);
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
         if (liveCloudScanService is not null)
         {
@@ -913,6 +928,30 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
     public override string Title => "Effective Access";
     public override string Subtitle => "Trace modeled direct and inherited access paths.";
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(AccessRecords)); OnPropertyChanged(nameof(HasResults)); } } }
+    public Guid? SimulatorPrincipalId { get => _simulatorPrincipalId; set { if (SetProperty(ref _simulatorPrincipalId, value)) { OnPropertyChanged(nameof(SimulatorResources)); OnPropertyChanged(nameof(SimulatorPermissions)); OnPropertyChanged(nameof(CanSimulatePermission)); SimulationResult = null; } } }
+    public Guid? SimulatorResourceId { get => _simulatorResourceId; set { if (SetProperty(ref _simulatorResourceId, value)) { OnPropertyChanged(nameof(CanSimulatePermission)); SimulationResult = null; } } }
+    public Guid? SimulatorPermissionId { get => _simulatorPermissionId; set { if (SetProperty(ref _simulatorPermissionId, value)) { OnPropertyChanged(nameof(CanSimulatePermission)); SimulationResult = null; } } }
+    public PermissionSimulationRow? SimulationResult { get => _simulationResult; private set { if (SetProperty(ref _simulationResult, value)) OnPropertyChanged(nameof(HasSimulationResult)); } }
+    public string SimulationStatus { get => _simulationStatus; private set => SetProperty(ref _simulationStatus, value); }
+    public bool IsSimulating { get => _isSimulating; private set { if (SetProperty(ref _isSimulating, value)) OnPropertyChanged(nameof(CanSimulatePermission)); } }
+    public bool CanSimulatePermission => !IsSimulating && _demoData.IsDemoMode && _snapshot is { Entitlements.Count: > 0 } && SimulatorPrincipalId.HasValue && SimulatorResourceId.HasValue && SimulatorPermissionId.HasValue;
+    public bool HasSimulationResult => SimulationResult is not null;
+    public string SimulatorCoverageMessage => _demoData.IsDemoMode
+        ? "Evaluates the normalized local snapshot. Conditional grants return Conditional unless their runtime condition is evaluable."
+        : "Live CLI scans currently report assignments but do not provide normalized principal-to-permission grants. Load Demo Mode data to try the simulator; live simulation is unavailable until provider normalization is connected.";
+    public IReadOnlyList<PermissionSimulatorOption> SimulatorPrincipals => (_snapshot?.Principals ?? Array.Empty<CloudPrincipal>())
+        .Where(principal => _snapshot?.Entitlements.Any(entitlement => entitlement.PrincipalId == principal.Id) == true)
+        .Select(principal => new PermissionSimulatorOption(principal.Id, $"{principal.CloudProvider}: {principal.Name}"))
+        .ToArray();
+    public IReadOnlyList<PermissionSimulatorOption> SimulatorResources => (_snapshot?.Resources ?? Array.Empty<CloudResource>())
+        .Where(resource => !SimulatorPrincipalId.HasValue || resource.AccountId == _snapshot?.Principals.FirstOrDefault(principal => principal.Id == SimulatorPrincipalId.Value)?.AccountId)
+        .Select(resource => new PermissionSimulatorOption(resource.Id, resource.Name))
+        .ToArray();
+    public IReadOnlyList<PermissionSimulatorOption> SimulatorPermissions => (_snapshot?.Permissions ?? Array.Empty<CloudPermission>())
+        .Where(permission => !SimulatorPrincipalId.HasValue || permission.AccountId == _snapshot?.Principals.FirstOrDefault(principal => principal.Id == SimulatorPrincipalId.Value)?.AccountId)
+        .Select(permission => new PermissionSimulatorOption(permission.Id, $"{permission.Name} ({permission.Action ?? "action not supplied"})"))
+        .ToArray();
+    public AsyncRelayCommand SimulatePermissionCommand { get; }
     public string DataCoverageMessage => "Last used and last changed are separate provider-reported signals. Missing audit data remains unknown; conditional inheritance and explicit-deny evaluation are not simulated.";
     public IReadOnlyList<EffectiveAccessGridRow> AccessRecords
     {
@@ -923,7 +962,7 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
             var roles = snapshot?.Roles.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudRole>();
             var permissions = snapshot?.Permissions.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudPermission>();
             var resources = snapshot?.Resources.ToDictionary(item => item.Id) ?? new Dictionary<Guid, CloudResource>();
-            var demoRows = (snapshot?.EffectiveAccess ?? Array.Empty<EffectiveAccess>()).Select(item => new EffectiveAccessGridRow(
+            var demoRows = (snapshot?.EffectiveAccess ?? Array.Empty<CloudEntitle.Domain.Entities.EffectiveAccess>()).Select(item => new EffectiveAccessGridRow(
                 item.Provider.ToString(),
                 principals.GetValueOrDefault(item.PrincipalId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PrincipalId),
                 item.RoleId is Guid roleId ? roles.GetValueOrDefault(roleId)?.Name ?? WorkspaceDataFormatting.ShortId(roleId) : "Direct permission",
@@ -979,13 +1018,124 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
         {
             _snapshot = await _demoData.GetSnapshotAsync();
             _liveHistory = _liveScanHistoryStore is null ? Array.Empty<LiveScanHistoryEntry>() : await _liveScanHistoryStore.GetRecentAsync();
+            if (_snapshot.Entitlements.Count > 0)
+            {
+                SimulatorPrincipalId ??= SimulatorPrincipals.FirstOrDefault()?.Id;
+                SimulatorResourceId ??= SimulatorResources.FirstOrDefault()?.Id;
+                SimulatorPermissionId ??= SimulatorPermissions.FirstOrDefault()?.Id;
+                SimulationStatus = $"Normalized snapshot ready: {_snapshot.Entitlements.Count} entitlement(s).";
+            }
+            else
+            {
+                SimulatorStatusForUnavailableSnapshot();
+            }
             OnPropertyChanged(nameof(AccessRecords));
             OnPropertyChanged(nameof(HasResults));
+            OnPropertyChanged(nameof(SimulatorPrincipals));
+            OnPropertyChanged(nameof(SimulatorResources));
+            OnPropertyChanged(nameof(SimulatorPermissions));
+            OnPropertyChanged(nameof(SimulatorCoverageMessage));
+            OnPropertyChanged(nameof(CanSimulatePermission));
         }
         catch (Exception exception)
         {
             ErrorMessage = $"Unable to load effective access: {exception.Message}";
         }
+    }
+
+    public async Task SimulatePermissionAsync()
+    {
+        if (!CanSimulatePermission || _snapshot is null) return;
+        var account = _snapshot.Accounts.FirstOrDefault(item => item.Id == _snapshot.Principals.First(principal => principal.Id == SimulatorPrincipalId).AccountId);
+        if (account is null)
+        {
+            SimulationStatus = "The selected principal has no account in the normalized snapshot.";
+            SimulationResult = null;
+            return;
+        }
+
+        IsSimulating = true;
+        SimulationResult = null;
+        try
+        {
+            var normalized = BuildNormalizedSnapshot(_snapshot);
+            var request = new AccessEvaluationRequest(normalized, _snapshot.Resources, Array.Empty<GroupMembership>(), _snapshot.Principals,
+                SimulatorPrincipalId, SimulatorResourceId, SimulatorPermissionId);
+            var result = await _effectiveAccessEngine.ExplainAsync(request, SimulatorPrincipalId!.Value, SimulatorResourceId!.Value, SimulatorPermissionId!.Value);
+            var principal = _snapshot.Principals.First(item => item.Id == SimulatorPrincipalId.Value);
+            var resource = _snapshot.Resources.First(item => item.Id == SimulatorResourceId.Value);
+            var permission = _snapshot.Permissions.First(item => item.Id == SimulatorPermissionId.Value);
+            SimulationResult = new PermissionSimulationRow(
+                account.CloudProvider.ToString(), principal.Name, resource.Name, permission.Name,
+                result.Decision.ToString(), result.EvaluationStatus.ToString(), result.AccessSource,
+                string.Join(" | ", result.Evidence.Select(evidence => $"{evidence.SourceType}: {evidence.SourceName ?? evidence.SourceId}")),
+                string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+            SimulationStatus = result.Decision == AccessDecision.NotApplicable
+                ? "No applicable normalized grant was found; this is not a provider-side access denial."
+                : $"Evaluated {result.ApplicableEntitlements.Count} normalized entitlement(s).";
+        }
+        catch (Exception exception)
+        {
+            SimulationStatus = $"Simulation failed: {exception.Message}";
+        }
+        finally
+        {
+            IsSimulating = false;
+        }
+    }
+
+    private void SimulatorStatusForUnavailableSnapshot()
+    {
+        SimulationStatus = _demoData.IsDemoMode
+            ? "No normalized entitlements are available in the current snapshot."
+            : "No normalized entitlement dataset is loaded.";
+    }
+
+    private static NormalizationResult BuildNormalizedSnapshot(DemoSnapshot snapshot)
+    {
+        var accounts = snapshot.Accounts.ToDictionary(account => account.Id);
+        var normalizedPermissions = snapshot.Permissions.Select(permission =>
+        {
+            var provider = GetProvider(permission.AccountId);
+            var evidence = new ProviderEvidence(provider, "SnapshotPermission", permission.Id.ToString(), permission.Name, null, permission.Description, permission.Scope, permission.Action, DateTime.UtcNow, new Dictionary<string, string>());
+            var pattern = permission.Resource ?? "*";
+            var patternType = pattern == "*" ? ResourcePatternType.Global : pattern.Contains('*') ? ResourcePatternType.Pattern : ResourcePatternType.Exact;
+            return new NormalizedPermission(permission.Id, provider, permission.AccountId, permission.Service ?? "unknown", permission.Action ?? permission.Name, pattern, permission.AccessType, permission.Name, PermissionCategory.Unknown, patternType, new Dictionary<string, string>(), evidence);
+        }).ToArray();
+
+        var normalizedEntitlements = snapshot.Entitlements.Select(entitlement =>
+        {
+            var provider = GetProvider(entitlement.CloudAccountId);
+            var account = accounts[entitlement.CloudAccountId];
+            var permission = normalizedPermissions.FirstOrDefault(item => item.Id == entitlement.PermissionId);
+            var scopeText = entitlement.Scope ?? account.ExternalId ?? account.Name;
+            var inherited = entitlement.AssignmentType == AssignmentType.Inherited;
+            var conditional = entitlement.AssignmentType == AssignmentType.Conditional;
+            var unresolvedGroupGrant = entitlement.AssignmentType == AssignmentType.Group;
+            var accessType = conditional ? NormalizedAccessType.Conditional
+                : unresolvedGroupGrant ? NormalizedAccessType.Unknown
+                : permission?.AccessType == AccessType.Deny ? NormalizedAccessType.Deny
+                : permission?.AccessType == AccessType.Allow ? NormalizedAccessType.Allow
+                : NormalizedAccessType.Unknown;
+            var sourceId = entitlement.Id.ToString();
+            var evidence = new ProviderEvidence(provider, "SnapshotEntitlement", sourceId, entitlement.Source, null, null, scopeText, entitlement.AssignmentType.ToString(), entitlement.GrantedAt, new Dictionary<string, string>());
+            var scopeType = scopeText.Contains("project", StringComparison.OrdinalIgnoreCase) ? NormalizedScopeType.Project
+                : scopeText.Contains("subscription", StringComparison.OrdinalIgnoreCase) ? NormalizedScopeType.Subscription
+                : NormalizedScopeType.Unknown;
+            var condition = conditional ? new NormalizedCondition("Runtime condition", "Condition details are not present in this snapshot.", "Unknown", null) : null;
+            return new NormalizedEntitlement(entitlement.Id, provider, entitlement.CloudAccountId, entitlement.PrincipalId, entitlement.ResourceId,
+                entitlement.RoleId, entitlement.PolicyId, entitlement.PermissionId,
+                new NormalizedScope(provider, scopeType, scopeText, null, null, inherited), entitlement.AssignmentType, accessType,
+                entitlement.AssignmentType == AssignmentType.Direct, inherited, conditional, condition,
+                unresolvedGroupGrant ? NormalizationStatus.PartiallyNormalized : conditional ? NormalizationStatus.PartiallyNormalized : NormalizationStatus.Normalized,
+                evidence, entitlement.GrantedAt, entitlement.ExpiresAt, permission?.ResourcePattern);
+        }).ToArray();
+
+            return new NormalizationResult(snapshot.Principals, snapshot.Roles, Array.Empty<CloudPolicy>(), snapshot.Permissions, normalizedEntitlements,
+            Array.Empty<NormalizationWarning>(), Array.Empty<string>(), new(normalizedEntitlements.Length, normalizedEntitlements.Length,
+                normalizedEntitlements.Count(item => item.Status == NormalizationStatus.PartiallyNormalized), 0, 0));
+
+        CloudProvider GetProvider(Guid accountId) => accounts.TryGetValue(accountId, out var account) ? account.Provider : CloudProvider.Kubernetes;
     }
 }
 
