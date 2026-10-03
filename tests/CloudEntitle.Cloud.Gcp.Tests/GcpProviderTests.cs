@@ -58,7 +58,7 @@ public class GcpProviderTests
         var access = await provider.DiscoverEffectiveAccessAsync(account.Id);
 
         Assert.Contains(access, assignment => assignment.Principal == "user:demo@example.invalid" && assignment.Role == "roles/owner");
-        Assert.Contains(access, assignment => assignment.Principal == "user:demo@example.invalid" && assignment.LastChangedAt.HasValue && assignment.Source.Contains("Cloud Audit Logs", StringComparison.Ordinal));
+        Assert.Contains(access, assignment => assignment.Principal == "user:demo@example.invalid" && assignment.LastChangedAt.HasValue && assignment.LastChangedBy == "audit@example.invalid" && assignment.Source.Contains("Cloud Audit Logs", StringComparison.Ordinal));
         Assert.Contains(access, assignment => assignment.Principal == "user:folder@example.invalid" && assignment.Scope == "folders/456" && assignment.AssignmentType == "Inherited");
         Assert.Contains(access, assignment => assignment.Principal == "user:organization@example.invalid" && assignment.Scope == "organizations/789" && assignment.AssignmentType == "Inherited");
     }
@@ -155,7 +155,7 @@ public class GcpProviderTests
             }
 
             if (arguments.Contains("logging") && arguments.Contains("read"))
-                return Task.FromResult(new CloudCommandResult(0, "[{\"timestamp\":\"2026-10-01T09:00:00Z\",\"protoPayload\":{\"methodName\":\"SetIamPolicy\",\"request\":{\"policy\":{\"bindings\":[{\"role\":\"roles/owner\",\"members\":[\"user:demo@example.invalid\"]}]}}}}]", string.Empty));
+                return Task.FromResult(new CloudCommandResult(0, "[{\"timestamp\":\"2026-10-01T09:00:00Z\",\"protoPayload\":{\"methodName\":\"SetIamPolicy\",\"authenticationInfo\":{\"principalEmail\":\"audit@example.invalid\"},\"request\":{\"policy\":{\"bindings\":[{\"role\":\"roles/owner\",\"members\":[\"user:demo@example.invalid\"]}]}}}}]", string.Empty));
 
             var output = arguments.Contains("projects") && arguments.Contains("list")
                 ? _multipleProjects

@@ -250,7 +250,7 @@
         <DataTemplate DataType="{x:Type vm:CloudAccountsViewModel}">
             <StackPanel>
                 <TextBlock Text="CONNECT A CLOUD PROVIDER" Style="{StaticResource CardLabel}"/>
-                <TextBlock Text="Sign-in opens in the provider's CLI. Use organization-approved read-only identities; credentials stay with the CLI and are never entered into YASK-CIEM. Azure Entra/PIM enrichment needs tenant-approved Microsoft Graph read consent. Disconnect signs out of the shared CLI session and may affect other tools." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
+                <TextBlock Text="Sign-in opens in the provider's CLI. Connecting authenticates only; go to Dashboard and select Scan Now to fetch cloud data. Use organization-approved read-only identities; credentials stay with the CLI. Azure Entra/PIM enrichment needs tenant-approved Microsoft Graph read consent. Disconnect signs out of the shared CLI session and may affect other tools." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
                     <Button Content="Refresh sign-in status" Command="{Binding RefreshConnectionsCommand}" Style="{StaticResource QuietButton}"/>
                     <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
@@ -304,7 +304,7 @@
                     <StackPanel>
                         <TextBlock Text="EVIDENCE-BACKED PROPOSALS" Style="{StaticResource CardLabel}"/>
                         <TextBlock Text="Recommendations are review-only. Approved does not mean implemented." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,12" TextWrapping="Wrap"/>
-                        <DataGrid ItemsSource="{Binding Recommendations}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180">
+                        <DataGrid ItemsSource="{Binding Recommendations}" SelectedItem="{Binding SelectedRecommendation, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" MaxHeight="300" SelectionMode="Single">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="150"/>
                                 <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="200"/>
@@ -319,6 +319,34 @@
                         <TextBlock Text="No recommendations are stored or generated from the latest scan." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
                             <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                         </TextBlock>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock Text="POLICY DRAFT WORKBENCH" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="{Binding SelectedRecommendation.Title}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold" Margin="0,8,0,10" TextWrapping="Wrap"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Text="CURRENT POLICY" Style="{StaticResource CardLabel}"/>
+                                        <TextBlock Text="{Binding SelectedRecommendation.Current}" Foreground="{StaticResource PrimaryBrush}" Margin="0,5,0,12" TextWrapping="Wrap"/>
+                                        <TextBlock Text="RATIONALE" Style="{StaticResource CardLabel}"/>
+                                        <TextBlock Text="{Binding SelectedRecommendation.Reason}" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                        <TextBlock Text="PROPOSED POLICY" Style="{StaticResource CardLabel}"/>
+                                        <TextBlock Text="{Binding SelectedRecommendation.Suggested}" Foreground="{StaticResource PrimaryBrush}" Margin="0,5,0,12" TextWrapping="Wrap"/>
+                                        <TextBlock Text="IMPACT ASSESSMENT" Style="{StaticResource CardLabel}"/>
+                                        <TextBlock Text="{Binding SelectedRecommendation.Impact}" Foreground="{StaticResource AccentBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="EVIDENCE" Style="{StaticResource CardLabel}" Margin="0,12,0,0"/>
+                                <TextBlock Text="{Binding SelectedRecommendation.Evidence}" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                    <Button Content="Export Review Draft" Command="{Binding ExportDraftCommand}" IsEnabled="{Binding CanExportDraft}" Style="{StaticResource PrimaryButton}"/>
+                                    <TextBlock Text="{Binding ExportStatusMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Border>
             </StackPanel>
@@ -342,6 +370,30 @@
                 <TextBlock Text="No completed scans are available." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                 </TextBlock>
+                <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                    <StackPanel>
+                        <TextBlock Text="ACCESS-CHANGE TIMELINE" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="{Binding AccessChangeCoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,12" TextWrapping="Wrap"/>
+                        <DataGrid ItemsSource="{Binding AccessChanges}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" MaxHeight="360" CanUserSortColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="85"/>
+                                <DataGridTextColumn Header="Change" Binding="{Binding Change}" Width="85"/>
+                                <DataGridTextColumn Header="Detected" Binding="{Binding DetectedAt, StringFormat=g}" Width="150"/>
+                                <DataGridTextColumn Header="Provider change time" Binding="{Binding ProviderChangedAt, StringFormat=g}" Width="155"/>
+                                <DataGridTextColumn Header="Changed by" Binding="{Binding ChangedBy}" Width="180"/>
+                                <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="180"/>
+                                <DataGridTextColumn Header="Assignment" Binding="{Binding Assignment}" Width="170"/>
+                                <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="220"/>
+                                <DataGridTextColumn Header="Before" Binding="{Binding PreviousState}" Width="240"/>
+                                <DataGridTextColumn Header="After" Binding="{Binding CurrentState}" Width="240"/>
+                                <DataGridTextColumn Header="Evidence source" Binding="{Binding Source}" Width="220"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="No access changes between comparable scans." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasAccessChanges}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:WorkspaceViewModel}">

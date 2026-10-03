@@ -143,7 +143,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                         {
                             var access = await accessProvider.DiscoverEffectiveAccessAsync(account.Id, cancellationToken);
                             effectiveAccessRecords.AddRange(access.Select(item => new LiveEffectiveAccessRecord(
-                                provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt)));
+                                provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
                         }
 
                         if (provider is IAccessAnalyzerFindingsProvider analyzerProvider)
@@ -175,7 +175,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     identitiesScanned += newPrincipals.Length;
                     privilegedIdentities += newPrincipals.Count(identity => identity.IsPrivileged);
                     effectiveAccessRecords.AddRange(entraResult.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
-                        provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt)));
+                        provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
                     messages.AddRange(entraResult.ProviderMessages);
                 }
 
@@ -243,7 +243,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     permissionRecords.AddRange(cluster.Permissions.Select(permission => new DiscoveredCloudPermission(providerType, permission)));
                     findings.AddRange(await _riskEngine.EvaluateAsync(cluster.Permissions, providerType, cancellationToken));
                     effectiveAccessRecords.AddRange(cluster.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
-                        providerType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt)));
+                        providerType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
                 }
             }
             catch (OperationCanceledException)

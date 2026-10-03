@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain.Entities;
@@ -357,7 +358,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private readonly IDialogService? _dialogService;
     private AnalyticsSnapshot _analyticsSnapshot = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
     private LiveCloudScanResult? _liveScan;
-    private string _scanStatusMessage = "Run a scan to refresh signed-in cloud providers.";
+    private string _scanStatusMessage = "Connect a provider, then select Scan Now to fetch its data.";
     private CancellationTokenSource? _scanCancellation;
     private bool _isScanning;
 
@@ -392,7 +393,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public int CloudAccounts => _analyticsSnapshot.CloudAccounts + (_liveScan?.AccountCount ?? 0);
     public int Identities => _analyticsSnapshot.Identities + (_liveScan?.IdentityCount ?? 0);
     public int Resources => _analyticsSnapshot.Resources + (_liveScan?.ResourceCount ?? 0);
-    public int Entitlements => _analyticsSnapshot.Entitlements;
+    public int Entitlements => _analyticsSnapshot.Entitlements + (_liveScan?.EffectiveAccessRecords.Count ?? 0);
     public int PrivilegedIdentities => _analyticsSnapshot.PrivilegedIdentities + (_liveScan?.PrivilegedIdentityCount ?? 0);
     public int RiskFindings => _analyticsSnapshot.RiskFindings + (_liveScan?.Findings.Count ?? 0);
     public int CriticalFindings => _analyticsSnapshot.CriticalFindings + (_liveScan?.Findings.Count(finding => finding.Severity == RiskSeverity.Critical) ?? 0);
@@ -625,7 +626,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
                 if (await _authenticationLauncher.IsConnectedAsync(provider, cancellation.Token))
                 {
                     await RefreshConnectionsAsync();
-                    ConnectionGuidance = $"{provider} is connected. Disconnect it before selecting another provider. YASK-CIEM does not receive or store cloud credentials.";
+                    ConnectionGuidance = $"{provider} is connected. Go to Dashboard and select Scan Now to fetch resources, assignments, and findings. Disconnect it before selecting another provider. YASK-CIEM does not receive or store cloud credentials.";
                     OnPropertyChanged(nameof(ConnectionGuidance));
                     return;
                 }
@@ -821,8 +822,9 @@ public sealed record EffectiveAccessGridRow(string Provider, string Principal, s
 public sealed record PermissionSimulatorOption(Guid Id, string Label);
 public sealed record PermissionSimulationRow(string Provider, string Principal, string Resource, string Permission, string Decision, string EvaluationStatus, string Source, string Evidence, string Diagnostics);
 public sealed record RiskFindingGridRow(string Provider, string Severity, string Title, string Principal, string Resource, string Evidence, string Recommendation);
-public sealed record RecommendationGridRow(string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority);
+public sealed record RecommendationGridRow(RecommendationModel? Model, string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority, string Impact, string Reason, string Evidence);
 public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings, int EffectiveAccess);
+public sealed record AccessChangeTimelineRow(string Provider, string Change, DateTime DetectedAt, DateTime? ProviderChangedAt, string ChangedBy, string Principal, string Assignment, string Scope, string PreviousState, string CurrentState, string Source);
 
 public sealed class EntitlementsViewModel : WorkspaceViewModel
 {
@@ -868,6 +870,8 @@ public sealed class EntitlementsViewModel : WorkspaceViewModel
                 item.AssignmentType.ToString(),
                 "Demo Mode"));
             var live = _liveCloudScanService?.CurrentResult;
+            rows = rows.Concat((live?.EffectiveAccessRecords ?? Array.Empty<LiveEffectiveAccessRecord>()).Select(item => new EntitlementGridRow(
+                item.Provider, item.Principal, item.Role, item.Scope, item.AssignmentType, item.Source)));
             rows = rows.Concat((live?.RoleRecords ?? Array.Empty<DiscoveredCloudRole>()).Select(item => new EntitlementGridRow(
                 item.Provider.ToString(), "Not mapped by provider scan", $"Role: {item.Role.Name}", item.Role.Scope ?? "Provider scope", "Inventory only", "Live scan")));
             rows = rows.Concat((live?.PermissionRecords ?? Array.Empty<DiscoveredCloudPermission>()).Select(item => new EntitlementGridRow(
@@ -940,7 +944,7 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
         ? "Evaluates the normalized local snapshot. Conditional grants return Conditional unless their runtime condition is evaluable."
         : "Live CLI scans currently report assignments but do not provide normalized principal-to-permission grants. Load Demo Mode data to try the simulator; live simulation is unavailable until provider normalization is connected.";
     public IReadOnlyList<PermissionSimulatorOption> SimulatorPrincipals => (_snapshot?.Principals ?? Array.Empty<CloudPrincipal>())
-        .Where(principal => _snapshot?.Entitlements.Any(entitlement => entitlement.PrincipalId == principal.Id) == true)
+        .Where(principal => principal.IdentityType != IdentityType.Group && HasSimulatorGrant(principal.Id))
         .Select(principal => new PermissionSimulatorOption(principal.Id, $"{principal.CloudProvider}: {principal.Name}"))
         .ToArray();
     public IReadOnlyList<PermissionSimulatorOption> SimulatorResources => (_snapshot?.Resources ?? Array.Empty<CloudResource>())
@@ -1059,7 +1063,7 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
         try
         {
             var normalized = BuildNormalizedSnapshot(_snapshot);
-            var request = new AccessEvaluationRequest(normalized, _snapshot.Resources, Array.Empty<GroupMembership>(), _snapshot.Principals,
+            var request = new AccessEvaluationRequest(normalized, _snapshot.Resources, _snapshot.GroupMemberships, _snapshot.Principals,
                 SimulatorPrincipalId, SimulatorResourceId, SimulatorPermissionId);
             var result = await _effectiveAccessEngine.ExplainAsync(request, SimulatorPrincipalId!.Value, SimulatorResourceId!.Value, SimulatorPermissionId!.Value);
             var principal = _snapshot.Principals.First(item => item.Id == SimulatorPrincipalId.Value);
@@ -1091,6 +1095,23 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
             : "No normalized entitlement dataset is loaded.";
     }
 
+    private bool HasSimulatorGrant(Guid principalId)
+    {
+        if (_snapshot is null) return false;
+        var reachablePrincipalIds = new HashSet<Guid> { principalId };
+        var pending = new Stack<Guid>();
+        pending.Push(principalId);
+        while (pending.Count > 0)
+        {
+            var memberId = pending.Pop();
+            foreach (var membership in _snapshot.GroupMemberships.Where(item => item.PrincipalId == memberId))
+            {
+                if (reachablePrincipalIds.Add(membership.GroupId)) pending.Push(membership.GroupId);
+            }
+        }
+        return _snapshot.Entitlements.Any(entitlement => reachablePrincipalIds.Contains(entitlement.PrincipalId));
+    }
+
     private static NormalizationResult BuildNormalizedSnapshot(DemoSnapshot snapshot)
     {
         var accounts = snapshot.Accounts.ToDictionary(account => account.Id);
@@ -1111,7 +1132,8 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
             var scopeText = entitlement.Scope ?? account.ExternalId ?? account.Name;
             var inherited = entitlement.AssignmentType == AssignmentType.Inherited;
             var conditional = entitlement.AssignmentType == AssignmentType.Conditional;
-            var unresolvedGroupGrant = entitlement.AssignmentType == AssignmentType.Group;
+            var unresolvedGroupGrant = entitlement.AssignmentType == AssignmentType.Group
+                && !snapshot.GroupMemberships.Any(membership => membership.GroupId == entitlement.PrincipalId);
             var accessType = conditional ? NormalizedAccessType.Conditional
                 : unresolvedGroupGrant ? NormalizedAccessType.Unknown
                 : permission?.AccessType == AccessType.Deny ? NormalizedAccessType.Deny
@@ -1199,12 +1221,17 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
 {
     private readonly IRecommendationStore _store;
     private readonly ILiveCloudScanService? _liveCloudScanService;
+    private readonly IDialogService? _dialogService;
     private string _searchText = string.Empty;
-    public RecommendationsViewModel(IDemoDataService demoData, IRecommendationStore store, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
+    private RecommendationGridRow? _selectedRecommendation;
+    private string _exportStatusMessage = string.Empty;
+    public RecommendationsViewModel(IDemoDataService demoData, IRecommendationStore store, ILiveCloudScanService? liveCloudScanService = null, IDialogService? dialogService = null) : base(demoData)
     {
         _store = store;
         _liveCloudScanService = liveCloudScanService;
+        _dialogService = dialogService;
         RefreshRecommendationsCommand = new AsyncRelayCommand(LoadAsync);
+        ExportDraftCommand = new AsyncRelayCommand(ExportDraftAsync);
         demoData.DataChanged += async (_, _) => await LoadAsync();
         if (_liveCloudScanService is not null)
         {
@@ -1217,8 +1244,64 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
     public IReadOnlyList<RecommendationGridRow> Recommendations { get; private set; } = Array.Empty<RecommendationGridRow>();
     public bool HasResults => Recommendations.Count > 0;
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) RefreshRecommendationsCommand.Execute(null); } }
+    public RecommendationGridRow? SelectedRecommendation
+    {
+        get => _selectedRecommendation;
+        set
+        {
+            if (SetProperty(ref _selectedRecommendation, value))
+            {
+                OnPropertyChanged(nameof(CanExportDraft));
+                ExportStatusMessage = string.Empty;
+            }
+        }
+    }
+    public bool CanExportDraft => _dialogService is not null && SelectedRecommendation?.Model is not null;
+    public string ExportStatusMessage { get => _exportStatusMessage; private set => SetProperty(ref _exportStatusMessage, value); }
     public AsyncRelayCommand RefreshRecommendationsCommand { get; }
+    public AsyncRelayCommand ExportDraftCommand { get; }
     public async Task RefreshAsync() => await LoadAsync();
+
+    public async Task ExportDraftAsync()
+    {
+        var recommendation = SelectedRecommendation?.Model;
+        if (recommendation is null || _dialogService is null) return;
+        var path = _dialogService.ChoosePolicyDraftPath();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            ExportStatusMessage = "Draft export canceled.";
+            return;
+        }
+
+        var draft = new
+        {
+            schemaVersion = 1,
+            generatedAtUtc = DateTime.UtcNow,
+            executable = false,
+            approvalRequired = true,
+            provider = recommendation.Provider.ToString(),
+            proposalType = recommendation.RecommendationType.ToString(),
+            title = recommendation.Title,
+            evaluationState = recommendation.EvaluationState.ToString(),
+            currentState = recommendation.CurrentState,
+            proposedState = recommendation.SuggestedState,
+            impactState = recommendation.ImpactState.ToString(),
+            impactAssessment = recommendation.Impact,
+            reason = recommendation.Reason,
+            evidence = recommendation.Evidence
+        };
+
+        try
+        {
+            var json = JsonSerializer.Serialize(draft, new JsonSerializerOptions { WriteIndented = true });
+            await File.WriteAllTextAsync(path, json);
+            ExportStatusMessage = $"Review draft exported to {path}";
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to export policy draft: {exception.Message}";
+        }
+    }
 
     private async Task LoadAsync()
     {
@@ -1228,14 +1311,16 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
         {
             var stored = await _store.GetAsync(SearchText);
             var rows = stored.Select(item => new RecommendationGridRow(
+                item,
                 item.RecommendationType.ToString(), item.Title, item.Provider.ToString(), item.EvaluationState.ToString(),
-                item.Status.ToString(), item.CurrentState, item.SuggestedState, item.Priority.ToString()));
+                item.Status.ToString(), item.CurrentState, item.SuggestedState, item.Priority.ToString(), item.Impact, item.Reason, item.Evidence ?? "No evidence recorded."));
             var live = (_liveCloudScanService?.CurrentResult?.Findings ?? Array.Empty<CloudEntitle.Domain.RiskFinding>())
                 .Where(item => WorkspaceDataFormatting.Matches(SearchText, item.Title, item.Permission, item.Recommendation, item.Evidence))
                 .Select(item => new RecommendationGridRow(
-                    "Risk remediation", item.Title, item.CloudProvider.ToString(), "Review required", "New",
-                    item.Permission, item.Recommendation, item.Severity.ToString()));
+                    null, "Risk remediation", item.Title, item.CloudProvider.ToString(), "Review required", "New",
+                    item.Permission, item.Recommendation, item.Severity.ToString(), "Impact not evaluated", "Live finding requires a normalized recommendation before policy review.", item.Evidence));
             Recommendations = rows.Concat(live).ToArray();
+            if (SelectedRecommendation is not null && !Recommendations.Contains(SelectedRecommendation)) SelectedRecommendation = null;
             OnPropertyChanged(nameof(Recommendations));
             OnPropertyChanged(nameof(HasResults));
         }
@@ -1273,8 +1358,8 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
     }
 
     public override string Title => "Scan History";
-    public override string Subtitle => "Review live and Demo Mode scans completed in the last seven days.";
-    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Scans)); OnPropertyChanged(nameof(HasResults)); } } }
+    public override string Subtitle => "Review scan history and access changes observed across retained live scans.";
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Scans)); OnPropertyChanged(nameof(HasResults)); OnPropertyChanged(nameof(AccessChanges)); OnPropertyChanged(nameof(HasAccessChanges)); } } }
     public IReadOnlyList<ScanHistoryGridRow> Scans
     {
         get
@@ -1295,6 +1380,63 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
         }
     }
     public bool HasResults => Scans.Count > 0;
+    public string AccessChangeCoverageMessage => "Local scan history is retained for seven days. Provider audit retention and permissions also limit attribution. Scan completion is the detection time; provider change time, actor, and audit source appear only when matching audit data is available. Empty provider results are not treated as proof of removal.";
+    public IReadOnlyList<AccessChangeTimelineRow> AccessChanges => BuildAccessChanges();
+    public bool HasAccessChanges => AccessChanges.Count > 0;
+
+    private IReadOnlyList<AccessChangeTimelineRow> BuildAccessChanges()
+    {
+        var rows = new List<AccessChangeTimelineRow>();
+        var providers = _liveHistory.SelectMany(scan => scan.EffectiveAccess).Select(item => item.Provider).Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var provider in providers)
+        {
+            var snapshots = _liveHistory
+                .Select(scan => (Scan: scan, Records: scan.EffectiveAccess.Where(item => item.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase)).ToArray()))
+                .Where(snapshot => snapshot.Records.Length > 0)
+                .OrderBy(snapshot => snapshot.Scan.CompletedAt)
+                .ToArray();
+            for (var index = 1; index < snapshots.Length; index++)
+            {
+                var previousScan = snapshots[index - 1];
+                var currentScan = snapshots[index];
+                var previous = previousScan.Records.GroupBy(AccessKey, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+                var current = currentScan.Records.GroupBy(AccessKey, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+                foreach (var item in current)
+                {
+                    if (!previous.TryGetValue(item.Key, out var old))
+                    {
+                        rows.Add(ToTimelineRow("Added", currentScan.Scan, item.Value, "No matching grant in preceding comparable scan", FormatAccess(item.Value), item.Value.LastChangedAt, item.Value.LastChangedBy ?? "Not reported", item.Value.Source));
+                    }
+                    else if (old.IsPrivileged != item.Value.IsPrivileged
+                        || old.Source != item.Value.Source
+                        || old.LastChangedAt != item.Value.LastChangedAt
+                        || old.LastChangedBy != item.Value.LastChangedBy)
+                    {
+                        rows.Add(ToTimelineRow("Changed", currentScan.Scan, item.Value, FormatAccess(old), FormatAccess(item.Value), item.Value.LastChangedAt, item.Value.LastChangedBy ?? "Not reported", item.Value.Source));
+                    }
+                }
+
+                foreach (var item in previous.Where(item => !current.ContainsKey(item.Key)))
+                {
+                    rows.Add(ToTimelineRow("Removed", currentScan.Scan, item.Value, FormatAccess(item.Value), "Not present in comparable scan", null, "Not reported", $"Scan comparison; prior source: {item.Value.Source}"));
+                }
+            }
+        }
+
+        return rows
+            .Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Change, row.Principal, row.Assignment, row.Scope, row.ChangedBy, row.Source, row.PreviousState, row.CurrentState))
+            .OrderByDescending(row => row.DetectedAt)
+            .ThenBy(row => row.Provider, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        static string AccessKey(LiveEffectiveAccessRecord item) => string.Join("\u001f", item.Provider, item.Principal, item.Role, item.Scope, item.AssignmentType);
+        static string FormatAccess(LiveEffectiveAccessRecord item) => $"{item.Role} ({item.AssignmentType}) at {item.Scope}";
+        static AccessChangeTimelineRow ToTimelineRow(string change, LiveScanHistoryEntry scan, LiveEffectiveAccessRecord item, string before, string after, DateTime? changedAt, string changedBy, string source)
+            => new(item.Provider, change, scan.CompletedAt, changedAt, changedBy, item.Principal, $"{item.Role} ({item.AssignmentType})", item.Scope, before, after, source);
+    }
 
     public async Task RefreshAsync()
     {
@@ -1304,6 +1446,9 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
             _liveHistory = _liveScanHistoryStore is null ? Array.Empty<LiveScanHistoryEntry>() : await _liveScanHistoryStore.GetRecentAsync();
             OnPropertyChanged(nameof(Scans));
             OnPropertyChanged(nameof(HasResults));
+            OnPropertyChanged(nameof(AccessChanges));
+            OnPropertyChanged(nameof(HasAccessChanges));
+            OnPropertyChanged(nameof(AccessChangeCoverageMessage));
         }
         catch (Exception exception)
         {

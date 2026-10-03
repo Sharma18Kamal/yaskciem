@@ -39,4 +39,6 @@ Azure scope ancestry and role assignment inheritance are retained. AWS explicit 
 
 `EffectiveAccess` stores decision, evaluation status, source, evidence, and evaluation details. EF Core indexes support principal/resource/permission and decision/status queries. No credentials, tokens, keys, or secrets are stored or logged.
 
-Complete access-path graph construction, runtime authorization simulation, risk scoring, and recommendations are intentionally deferred to later milestones.
+The Effective Access screen includes a read-only permission simulator for deterministic Demo Mode snapshots. It evaluates normalized grants, group membership, scope, explicit denies, and conditions through the same engine. Conditional access remains `Conditional` when runtime context is unavailable. Live CLI scans are not simulated because they do not yet provide a complete normalized entitlement and membership dataset. The generic normalized evaluator is not an exact provider authorization emulator and does not call cloud APIs.
+
+Provider-exact runtime authorization simulation, complete access-path graph construction, risk scoring, and recommendations remain separate capabilities; the simulator must continue to report incomplete evidence rather than infer an allow or deny.

@@ -34,6 +34,7 @@ public sealed record DemoSnapshot(
 {
     public IReadOnlyList<CloudRole> Roles { get; init; } = Array.Empty<CloudRole>();
     public IReadOnlyList<CloudPermission> Permissions { get; init; } = Array.Empty<CloudPermission>();
+    public IReadOnlyList<GroupMembership> GroupMemberships { get; init; } = Array.Empty<GroupMembership>();
 
     public DemoStatistics Statistics => new(
         Accounts.Count,

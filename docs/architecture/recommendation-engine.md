@@ -35,6 +35,8 @@ Each recommendation stores before/after state, impact state, provider, principal
 
 Provider proposal adapters produce non-executable Azure, AWS, and GCP review proposals. Approved is not Implemented; actual implementation belongs to a future remediation workflow with verification and user confirmation.
 
+The desktop Policy Draft Workbench presents the stored current/proposed state, impact assessment, rationale, and evidence. It can export a JSON review draft marked `executable=false` and `approvalRequired=true`. Live findings without a normalized recommendation are not exportable as policy drafts. The workbench does not apply changes or claim an exact provider authorization simulation.
+
 ## Persistence and Security
 
 The `AddRecommendationLifecycle` migration persists recommendation metadata and indexes for provider, type, status, evidence-chain references, and fingerprints. Flexible evidence is JSON/text; credentials, tokens, keys, and secrets are never stored or logged.

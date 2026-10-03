@@ -13,7 +13,8 @@ public sealed record LiveEffectiveAccessRecord(
     bool IsPrivileged,
     string AssignmentType = "Assigned",
     DateTime? LastUsedAt = null,
-    DateTime? LastChangedAt = null);
+    DateTime? LastChangedAt = null,
+    string? LastChangedBy = null);
 
 public sealed record LiveScanHistoryEntry(
     DateTime StartedAt,

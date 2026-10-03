@@ -29,6 +29,9 @@ public sealed class DemoDataServiceTests
         Assert.Contains(snapshot.Accounts, account => account.CloudProvider == CloudProviderType.Gcp);
         Assert.NotEmpty(snapshot.Principals);
         Assert.NotEmpty(snapshot.Entitlements);
+        var groupEntitlements = snapshot.Entitlements.Where(item => item.AssignmentType == AssignmentType.Group).ToArray();
+        Assert.Equal(3, groupEntitlements.Length);
+        Assert.All(groupEntitlements, entitlement => Assert.Contains(snapshot.GroupMemberships, membership => membership.GroupId == entitlement.PrincipalId));
         Assert.NotEmpty(snapshot.EffectiveAccess);
         Assert.NotEmpty(snapshot.RiskFindings);
         Assert.NotEmpty(snapshot.Recommendations);

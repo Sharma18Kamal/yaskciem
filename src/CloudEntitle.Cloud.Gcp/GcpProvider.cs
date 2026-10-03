@@ -143,7 +143,8 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
                 binding.IsInherited ? $"Inherited GCP IAM binding from {binding.Scope}" : binding.LastChangedAt.HasValue ? "GCP project IAM binding; Cloud Audit Logs" : "GCP project IAM binding",
                 binding.Role.Contains("owner", StringComparison.OrdinalIgnoreCase),
                 binding.IsInherited ? "Inherited" : "Direct",
-                LastChangedAt: binding.LastChangedAt))
+                LastChangedAt: binding.LastChangedAt,
+                LastChangedBy: binding.LastChangedBy))
             .ToArray();
     }
 
@@ -250,7 +251,7 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
 
         using var document = JsonDocument.Parse(result.StandardOutput);
         if (document.RootElement.ValueKind != JsonValueKind.Array) return;
-        var latestChanges = new Dictionary<(string Member, string Role), DateTime>();
+        var latestChanges = new Dictionary<(string Member, string Role), (DateTime ChangedAt, string? ChangedBy)>();
         foreach (var entry in document.RootElement.EnumerateArray())
         {
             if (!entry.TryGetProperty("timestamp", out var timestamp)
@@ -261,6 +262,14 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
                 || !policy.TryGetProperty("bindings", out var policyBindings)
                 || policyBindings.ValueKind != JsonValueKind.Array) continue;
 
+            string? changedBy = null;
+            if (payload.TryGetProperty("authenticationInfo", out var authenticationInfo) && authenticationInfo.ValueKind == JsonValueKind.Object)
+            {
+                changedBy = authenticationInfo.TryGetProperty("principalEmail", out var principalEmail) ? principalEmail.GetString()
+                    : authenticationInfo.TryGetProperty("principalSubject", out var principalSubject) ? principalSubject.GetString()
+                    : null;
+            }
+
             foreach (var binding in policyBindings.EnumerateArray())
             {
                 var role = binding.TryGetProperty("role", out var roleElement) ? roleElement.GetString() : null;
@@ -269,7 +278,7 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
                 {
                     if (member.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(member.GetString())) continue;
                     var key = (member.GetString()!, role);
-                    if (!latestChanges.TryGetValue(key, out var existing) || changedAt > existing) latestChanges[key] = changedAt.ToUniversalTime();
+                    if (!latestChanges.TryGetValue(key, out var existing) || changedAt > existing.ChangedAt) latestChanges[key] = (changedAt.ToUniversalTime(), changedBy);
                 }
             }
         }
@@ -277,8 +286,8 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
         for (var index = 0; index < bindings.Count; index++)
         {
             var binding = bindings[index];
-            if (binding.Scope != $"projects/{project}" || !latestChanges.TryGetValue((binding.Member, binding.Role), out var changedAt)) continue;
-            bindings[index] = binding with { LastChangedAt = changedAt };
+            if (binding.Scope != $"projects/{project}" || !latestChanges.TryGetValue((binding.Member, binding.Role), out var change)) continue;
+            bindings[index] = binding with { LastChangedAt = change.ChangedAt, LastChangedBy = change.ChangedBy };
         }
     }
 

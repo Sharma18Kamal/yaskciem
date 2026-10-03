@@ -14,3 +14,5 @@ The service reports Added, Removed, and Changed events for:
 Each event retains current/previous scan IDs, provider, stable entity key, summary, evidence, timestamp, and a review severity. Newly added effective access is elevated for review; first snapshots are treated as additions with no previous scan.
 
 The comparison is deterministic for stable entity keys and cancellation-aware. Future persistence can store reports alongside scan history for trend queries and the existing recommendation/remediation review workflow.
+
+The desktop access-change timeline separately compares comparable live scan snapshots retained locally for seven days. It shows scan detection time separately from provider-reported audit time and actor. Attribution depends on provider log permissions and retention; empty provider results are excluded rather than treated as proof of removal.

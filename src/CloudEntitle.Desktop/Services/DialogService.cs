@@ -40,4 +40,20 @@ public sealed class DialogService : IDialogService
             ? dialog.FileName
             : Path.ChangeExtension(dialog.FileName, extension);
     }
+
+    public string? ChoosePolicyDraftPath()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export policy review draft",
+            Filter = "JSON policy draft (*.json)|*.json",
+            DefaultExt = ".json",
+            AddExtension = true,
+            OverwritePrompt = true,
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            FileName = $"yask-ciem-policy-draft-{DateTime.Now:yyyyMMdd-HHmmss}.json"
+        };
+
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
 }

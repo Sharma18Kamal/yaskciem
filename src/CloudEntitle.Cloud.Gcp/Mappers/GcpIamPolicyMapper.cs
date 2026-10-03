@@ -3,7 +3,7 @@ using CloudEntitle.Domain;
 
 namespace CloudEntitle.Cloud.Gcp.Mappers;
 
-public sealed record GcpBinding(string Role, string Member, string? ConditionTitle, string? ConditionExpression, string? Scope = null, bool IsInherited = false, DateTime? LastChangedAt = null);
+public sealed record GcpBinding(string Role, string Member, string? ConditionTitle, string? ConditionExpression, string? Scope = null, bool IsInherited = false, DateTime? LastChangedAt = null, string? LastChangedBy = null);
 
 public static class GcpIamPolicyMapper
 {

@@ -193,7 +193,7 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
 
             using var eventsDocument = JsonDocument.Parse(result.StandardOutput);
             if (!eventsDocument.RootElement.TryGetProperty("Events", out var events) || events.ValueKind != JsonValueKind.Array) return;
-            var latestByTarget = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+            var latestByTarget = new Dictionary<string, (DateTime ChangedAt, string? ChangedBy)>(StringComparer.OrdinalIgnoreCase);
             foreach (var cloudTrailEvent in events.EnumerateArray())
             {
                 if (!cloudTrailEvent.TryGetProperty("EventName", out var eventName) || eventName.ValueKind != JsonValueKind.String) continue;
@@ -205,6 +205,13 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
                     || serializedEvent.ValueKind != JsonValueKind.String) continue;
 
                 using var eventDocument = JsonDocument.Parse(serializedEvent.GetString()!);
+                string? changedBy = null;
+                if (eventDocument.RootElement.TryGetProperty("userIdentity", out var userIdentity) && userIdentity.ValueKind == JsonValueKind.Object)
+                {
+                    changedBy = userIdentity.TryGetProperty("arn", out var actorArn) ? actorArn.GetString()
+                        : userIdentity.TryGetProperty("principalId", out var actorId) ? actorId.GetString()
+                        : null;
+                }
                 if (!eventDocument.RootElement.TryGetProperty("requestParameters", out var requestParameters)
                     || requestParameters.ValueKind != JsonValueKind.Object) continue;
                 foreach (var targetProperty in new[] { "roleName", "userName", "groupName", "policyName" })
@@ -212,9 +219,9 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
                     if (!requestParameters.TryGetProperty(targetProperty, out var target) || target.ValueKind != JsonValueKind.String) continue;
                     var targetName = target.GetString();
                     if (string.IsNullOrWhiteSpace(targetName)) continue;
-                    if (!latestByTarget.TryGetValue(targetName, out var existing) || changedAt > existing)
+                    if (!latestByTarget.TryGetValue(targetName, out var existing) || changedAt > existing.ChangedAt)
                     {
-                        latestByTarget[targetName] = changedAt.ToUniversalTime();
+                        latestByTarget[targetName] = (changedAt.ToUniversalTime(), changedBy);
                     }
                 }
             }
@@ -222,13 +229,14 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
             for (var index = 0; index < assignments.Count; index++)
             {
                 var assignment = assignments[index];
-                var changedAt = latestByTarget.Where(item => item.Key.Equals(assignment.Principal, StringComparison.OrdinalIgnoreCase)
+                var change = latestByTarget.Where(item => item.Key.Equals(assignment.Principal, StringComparison.OrdinalIgnoreCase)
                         || item.Key.Equals(assignment.Role, StringComparison.OrdinalIgnoreCase))
-                    .Select(item => (DateTime?)item.Value)
-                    .Max();
-                if (changedAt.HasValue)
+                    .Select(item => item.Value)
+                    .OrderByDescending(item => item.ChangedAt)
+                    .FirstOrDefault();
+                if (change.ChangedAt != default)
                 {
-                    assignments[index] = assignment with { LastChangedAt = changedAt, Source = $"{assignment.Source}; CloudTrail IAM change" };
+                    assignments[index] = assignment with { LastChangedAt = change.ChangedAt, LastChangedBy = change.ChangedBy, Source = $"{assignment.Source}; CloudTrail IAM change" };
                 }
             }
         }

@@ -61,6 +61,34 @@ public sealed class EffectivePermissionSimulatorTests
         Assert.Contains("No normalized entitlement dataset", viewModel.SimulationStatus, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Simulator_ShouldEvaluateGrantInheritedThroughGroupMembership()
+    {
+        var account = new CloudAccount { Id = Guid.NewGuid(), Name = "Demo Azure", CloudProvider = CloudProviderType.Azure, AccountType = AccountType.Subscription };
+        var principal = new CloudPrincipal { Id = Guid.NewGuid(), AccountId = account.Id, CloudProvider = CloudProviderType.Azure, Name = "group-member", PrincipalId = "group-member", IdentityType = IdentityType.User };
+        var groupId = Guid.NewGuid();
+        var resource = new CloudResource { Id = Guid.NewGuid(), AccountId = account.Id, Name = "production", ResourceId = "subscriptions/demo/resourceGroups/production" };
+        var permission = new CloudPermission { Id = Guid.NewGuid(), AccountId = account.Id, Name = "Read resource", Action = "resource.read", Resource = "*", AccessType = AccessType.Allow };
+        var entitlement = new Entitlement { Id = Guid.NewGuid(), PrincipalId = groupId, CloudAccountId = account.Id, PermissionId = permission.Id, ResourceId = resource.Id, Scope = resource.ResourceId, AssignmentType = AssignmentType.Group, Source = "group role assignment" };
+        var membership = new GroupMembership { Id = Guid.NewGuid(), GroupId = groupId, PrincipalId = principal.Id, CloudAccountId = account.Id };
+        var snapshot = new DemoSnapshot(
+            new[] { account }, new[] { principal }, new[] { resource }, new[] { entitlement },
+            Array.Empty<CloudEntitle.Domain.Entities.EffectiveAccess>(), Array.Empty<RiskFindingModel>(), Array.Empty<RecommendationModel>(), Array.Empty<Scan>())
+        {
+            Permissions = new[] { permission },
+            GroupMemberships = new[] { membership }
+        };
+        var viewModel = new EffectiveAccessViewModel(new SimulatorDemoDataService(snapshot));
+
+        await viewModel.RefreshAsync();
+        await viewModel.SimulatePermissionAsync();
+
+        Assert.Single(viewModel.SimulatorPrincipals);
+        Assert.NotNull(viewModel.SimulationResult);
+        Assert.Equal(AccessDecision.Allow.ToString(), viewModel.SimulationResult.Decision);
+        Assert.Equal(EvaluationStatus.FullyEvaluated.ToString(), viewModel.SimulationResult.EvaluationStatus);
+    }
+
     private sealed class SimulatorDemoDataService(DemoSnapshot snapshot, bool isDemoMode = true) : IDemoDataService
     {
         public event EventHandler? DataChanged { add { } remove { } }

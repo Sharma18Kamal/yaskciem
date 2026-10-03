@@ -28,10 +28,12 @@ public sealed class DemoDataService : IDemoDataService
         var generated = GenerateData();
         context.CloudAccounts.AddRange(generated.Accounts);
         context.CloudPrincipals.AddRange(generated.Principals);
+        context.CloudGroups.AddRange(generated.Groups);
         context.CloudResources.AddRange(generated.Resources);
         context.CloudRoles.AddRange(generated.Roles);
         context.CloudPolicies.AddRange(generated.Policies);
         context.CloudPermissions.AddRange(generated.Permissions);
+        context.GroupMemberships.AddRange(generated.GroupMemberships);
         context.Entitlements.AddRange(generated.Entitlements);
         context.EffectiveAccesses.AddRange(generated.EffectiveAccess);
         context.AccessPaths.AddRange(generated.AccessPaths);
@@ -59,6 +61,8 @@ public sealed class DemoDataService : IDemoDataService
         }
 
         var demoFindingIds = await context.NormalizedRiskFindings.Where(item => accountIds.Contains(item.CloudAccountId)).Select(item => item.Id).ToListAsync(cancellationToken);
+        context.GroupMemberships.RemoveRange(await context.GroupMemberships.Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
+        context.CloudGroups.RemoveRange(await context.CloudGroups.Where(item => accountIds.Contains(item.AccountId)).ToListAsync(cancellationToken));
         context.NormalizedRecommendations.RemoveRange(await context.NormalizedRecommendations.Where(item => demoFindingIds.Contains(item.RiskFindingId)).ToListAsync(cancellationToken));
         var demoPathIds = await context.AccessPaths.Where(item => accountIds.Contains(item.CloudAccountId)).Select(item => item.Id).ToListAsync(cancellationToken);
         context.AccessPathNodes.RemoveRange(await context.AccessPathNodes.Where(item => demoPathIds.Contains(item.AccessPathId)).ToListAsync(cancellationToken));
@@ -96,7 +100,8 @@ public sealed class DemoDataService : IDemoDataService
             await context.Scans.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken))
         {
             Roles = await context.CloudRoles.AsNoTracking().Where(item => ids.Contains(item.AccountId)).ToListAsync(cancellationToken),
-            Permissions = await context.CloudPermissions.AsNoTracking().Where(item => ids.Contains(item.AccountId)).ToListAsync(cancellationToken)
+            Permissions = await context.CloudPermissions.AsNoTracking().Where(item => ids.Contains(item.AccountId)).ToListAsync(cancellationToken),
+            GroupMemberships = await context.GroupMemberships.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken)
         };
     }
 
@@ -111,6 +116,8 @@ public sealed class DemoDataService : IDemoDataService
         var now = DateTime.UtcNow;
         var accounts = new List<CloudAccount>();
         var principals = new List<CloudPrincipal>();
+        var groups = new List<CloudGroup>();
+        var groupMemberships = new List<GroupMembership>();
         var resources = new List<CloudResource>();
         var roles = new List<CloudRole>();
         var policies = new List<CloudPolicy>();
@@ -133,6 +140,9 @@ public sealed class DemoDataService : IDemoDataService
             resources.Add(resource);
             var role = new CloudRole { Id = Stable(provider, "owner-role"), AccountId = account.Id, Name = provider == CloudProviderType.Aws ? "AdministratorAccess" : "Owner", RoleId = $"demo-{name.ToLowerInvariant()}-owner", Description = "Synthetic privileged demonstration role", IsPrivileged = true };
             roles.Add(role);
+            var group = new CloudGroup { Id = Stable(provider, "developers-group"), AccountId = account.Id, Name = $"{name} Demo Developers", GroupId = $"demo-{name.ToLowerInvariant()}-developers" };
+            groups.Add(group);
+            principals.Add(new CloudPrincipal { Id = group.Id, AccountId = account.Id, CloudProvider = provider, Name = group.Name, PrincipalId = group.GroupId, IdentityType = IdentityType.Group, IsActive = true });
             var policy = new CloudPolicy { Id = Stable(provider, "policy"), AccountId = account.Id, Name = $"{name} Demo Wildcard Policy", ExternalId = $"demo-{name.ToLowerInvariant()}-policy", PolicyType = "Synthetic", Document = "{\"Statement\":[{\"Action\":\"*\",\"Resource\":\"*\"}]}" };
             policies.Add(policy);
             var permission = new CloudPermission { Id = Stable(provider, "wildcard"), AccountId = account.Id, Name = "Demo wildcard permission", Action = "*", Resource = "*", Source = "Synthetic demo policy", AccessType = AccessType.Allow };
@@ -142,7 +152,12 @@ public sealed class DemoDataService : IDemoDataService
             {
                 var principal = new CloudPrincipal { Id = Stable(provider, $"principal-{index}"), AccountId = account.Id, CloudProvider = provider, Name = identityNames[index], PrincipalId = $"demo-{name.ToLowerInvariant()}-principal-{index}", IdentityType = index == 3 ? IdentityType.ServiceAccount : IdentityType.User, Email = $"{name.ToLowerInvariant()}.demo.{index}@example.invalid", IsActive = index != 2, IsPrivileged = index is 0 or 3, IsExternal = index == 2, LastActivityAt = index == 2 ? now.AddDays(-220) : now.AddDays(-2) };
                 principals.Add(principal);
-                var entitlement = new Entitlement { Id = Stable(provider, $"entitlement-{index}"), PrincipalId = principal.Id, RoleId = role.Id, PolicyId = policy.Id, PermissionId = permission.Id, CloudAccountId = account.Id, ResourceId = resource.Id, Scope = "demo-production", AssignmentType = index == 1 ? AssignmentType.Group : AssignmentType.Direct, GrantedAt = now.AddDays(-30), Source = "Synthetic Demo Mode" };
+                if (index == 1)
+                {
+                    group.MemberPrincipalIds.Add(principal.Id);
+                    groupMemberships.Add(new GroupMembership { Id = Stable(provider, "developers-membership"), GroupId = group.Id, PrincipalId = principal.Id, CloudAccountId = account.Id, CreatedAt = now.AddDays(-60) });
+                }
+                var entitlement = new Entitlement { Id = Stable(provider, $"entitlement-{index}"), PrincipalId = index == 1 ? group.Id : principal.Id, RoleId = role.Id, PolicyId = policy.Id, PermissionId = permission.Id, CloudAccountId = account.Id, ResourceId = resource.Id, Scope = "demo-production", AssignmentType = index == 1 ? AssignmentType.Group : AssignmentType.Direct, GrantedAt = now.AddDays(-30), Source = "Synthetic Demo Mode" };
                 entitlements.Add(entitlement);
                 var access = new EffectiveAccess { Id = Stable(provider, $"access-{index}"), PrincipalId = principal.Id, CloudAccountId = account.Id, ResourceId = resource.Id, PermissionId = permission.Id, RoleId = role.Id, PolicyId = policy.Id, Scope = "demo-production", AccessType = AccessType.Allow, AssignmentType = entitlement.AssignmentType, IsDirect = entitlement.AssignmentType == AssignmentType.Direct, IsInherited = entitlement.AssignmentType == AssignmentType.Group, IsPrivileged = principal.IsPrivileged, CalculatedAt = now };
                 effective.Add(access);
@@ -154,15 +169,15 @@ public sealed class DemoDataService : IDemoDataService
                 findings.Add(finding);
                 recommendations.Add(new RecommendationModel { Id = Stable(provider, $"recommendation-{index}"), RiskFindingId = finding.Id, Title = "Reduce demonstration privilege", Description = "Synthetic Demo Mode recommendation.", CurrentState = $"{role.Name} at demo-production", SuggestedState = "Narrow resource-scoped read access", Reason = "Reduce exposure and align with least privilege.", Priority = index + 1, CreatedAt = now });
             }
-            scans.Add(new Scan { Id = Stable(provider, "scan"), CloudAccountId = account.Id, StartedAt = now.AddMinutes(-12), CompletedAt = now.AddMinutes(-8), Status = ScanStatus.Completed, ItemsDiscovered = 12, IdentitiesDiscovered = 4, PermissionsDiscovered = 1, FindingsGenerated = 4 });
+            scans.Add(new Scan { Id = Stable(provider, "scan"), CloudAccountId = account.Id, StartedAt = now.AddMinutes(-12), CompletedAt = now.AddMinutes(-8), Status = ScanStatus.Completed, ItemsDiscovered = 13, IdentitiesDiscovered = 5, PermissionsDiscovered = 1, FindingsGenerated = 4 });
         }
 
-        return new GeneratedDemoData(accounts, principals, resources, roles, policies, permissions, entitlements, effective, paths, pathNodes, activity, findings, recommendations, scans);
+        return new GeneratedDemoData(accounts, principals, groups, groupMemberships, resources, roles, policies, permissions, entitlements, effective, paths, pathNodes, activity, findings, recommendations, scans);
     }
 
     private static Guid Stable(CloudProviderType provider, string key) => GuidUtility.Create(GuidUtility.Namespace, $"ciem-demo-{provider}-{key}");
 
-    private sealed record GeneratedDemoData(IReadOnlyList<CloudAccount> Accounts, IReadOnlyList<CloudPrincipal> Principals, IReadOnlyList<CloudResource> Resources, IReadOnlyList<CloudRole> Roles, IReadOnlyList<CloudPolicy> Policies, IReadOnlyList<CloudPermission> Permissions, IReadOnlyList<Entitlement> Entitlements, IReadOnlyList<EffectiveAccess> EffectiveAccess, IReadOnlyList<AccessPath> AccessPaths, IReadOnlyList<AccessPathNode> AccessPathNodes, IReadOnlyList<ActivityRecord> ActivityRecords, IReadOnlyList<RiskFindingModel> RiskFindings, IReadOnlyList<RecommendationModel> Recommendations, IReadOnlyList<Scan> Scans);
+    private sealed record GeneratedDemoData(IReadOnlyList<CloudAccount> Accounts, IReadOnlyList<CloudPrincipal> Principals, IReadOnlyList<CloudGroup> Groups, IReadOnlyList<GroupMembership> GroupMemberships, IReadOnlyList<CloudResource> Resources, IReadOnlyList<CloudRole> Roles, IReadOnlyList<CloudPolicy> Policies, IReadOnlyList<CloudPermission> Permissions, IReadOnlyList<Entitlement> Entitlements, IReadOnlyList<EffectiveAccess> EffectiveAccess, IReadOnlyList<AccessPath> AccessPaths, IReadOnlyList<AccessPathNode> AccessPathNodes, IReadOnlyList<ActivityRecord> ActivityRecords, IReadOnlyList<RiskFindingModel> RiskFindings, IReadOnlyList<RecommendationModel> Recommendations, IReadOnlyList<Scan> Scans);
 }
 
 internal static class GuidUtility

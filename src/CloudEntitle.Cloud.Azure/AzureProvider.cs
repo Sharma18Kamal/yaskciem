@@ -174,24 +174,26 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
                     principal = principalId;
                 }
                 var scope = assignment.TryGetProperty("scope", out var scopeValue) ? scopeValue.GetString() ?? "Subscription" : "Subscription";
-                DateTime? lastChangedAt = principalId is not null && roleId is not null
-                    && lastChanged.TryGetValue(AzureAuditKey(principalId, roleId, scope), out var auditTimestamp)
-                    ? auditTimestamp
+                (DateTime ChangedAt, string? ChangedBy)? audit = principalId is not null && roleId is not null
+                    && lastChanged.TryGetValue(AzureAuditKey(principalId, roleId, scope), out var auditChange)
+                    ? auditChange
                     : null;
+                var lastChangedAt = audit?.ChangedAt;
                 return new CloudEffectiveAccessAssignment(
                     principal ?? "Unknown principal",
                     roleName,
                     scope,
                     lastChangedAt.HasValue ? "Azure RBAC role assignment; Activity Log" : "Azure RBAC role assignment",
                     roleName.Contains("Owner", StringComparison.OrdinalIgnoreCase) || roleName.Contains("Administrator", StringComparison.OrdinalIgnoreCase),
-                    LastChangedAt: lastChangedAt);
+                    LastChangedAt: lastChangedAt,
+                    LastChangedBy: audit?.ChangedBy);
             })
             .ToArray();
     }
 
-    private async Task<Dictionary<string, DateTime>> GetAzureRoleAssignmentChangeTimesAsync(Guid accountId, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, (DateTime ChangedAt, string? ChangedBy)>> GetAzureRoleAssignmentChangeTimesAsync(Guid accountId, CancellationToken cancellationToken)
     {
-        if (!_accounts.TryGetValue(accountId, out var account) || string.IsNullOrWhiteSpace(account.SubscriptionId)) return new Dictionary<string, DateTime>();
+        if (!_accounts.TryGetValue(accountId, out var account) || string.IsNullOrWhiteSpace(account.SubscriptionId)) return new Dictionary<string, (DateTime, string?)>();
         var result = await RunAzAsync(new[]
         {
             "monitor", "activity-log", "list", "--offset", "90d", "--max-events", "1000",
@@ -200,12 +202,12 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
         if (!result.IsSuccess)
         {
             _providerMessages.Add($"Azure role-assignment change history unavailable: {result.StandardError.Trim()}");
-            return new Dictionary<string, DateTime>();
+            return new Dictionary<string, (DateTime, string?)>();
         }
 
         using var document = JsonDocument.Parse(result.StandardOutput);
-        if (document.RootElement.ValueKind != JsonValueKind.Array) return new Dictionary<string, DateTime>();
-        var changes = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        if (document.RootElement.ValueKind != JsonValueKind.Array) return new Dictionary<string, (DateTime, string?)>();
+        var changes = new Dictionary<string, (DateTime ChangedAt, string? ChangedBy)>(StringComparer.OrdinalIgnoreCase);
         foreach (var activity in document.RootElement.EnumerateArray())
         {
             var action = ReadNestedString(activity, "authorization", "action");
@@ -218,7 +220,8 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
                 ?? ReadNestedString(activity, "authorization", "scope");
             if (principalId is null || roleId is null || scope is null) continue;
             var key = AzureAuditKey(principalId, roleId, scope);
-            if (!changes.TryGetValue(key, out var existing) || changedAt > existing) changes[key] = changedAt.ToUniversalTime();
+            var changedBy = activity.TryGetProperty("caller", out var caller) && caller.ValueKind == JsonValueKind.String ? caller.GetString() : null;
+            if (!changes.TryGetValue(key, out var existing) || changedAt > existing.ChangedAt) changes[key] = (changedAt.ToUniversalTime(), changedBy);
         }
         return changes;
     }

@@ -6,4 +6,5 @@ public interface IDialogService
     void ShowError(string message, string title = "YASK-CIEM");
     bool Confirm(string message, string title = "YASK-CIEM");
     string? ChooseReportPath();
+    string? ChoosePolicyDraftPath();
 }

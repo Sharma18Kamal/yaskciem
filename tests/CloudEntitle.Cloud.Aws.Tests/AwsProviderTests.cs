@@ -102,7 +102,7 @@ public class AwsProviderTests
 
             Assert.Contains(findings, finding => finding.Title.Contains("ExternalAccess", StringComparison.Ordinal));
             Assert.Contains(assignments, assignment => assignment.AssignmentType == "Role usage" && assignment.LastUsedAt.HasValue);
-            Assert.Contains(assignments, assignment => assignment.Principal == "demo-user" && assignment.Role == "ReadOnlyAccess" && assignment.LastChangedAt.HasValue && assignment.Source.Contains("CloudTrail", StringComparison.Ordinal));
+            Assert.Contains(assignments, assignment => assignment.Principal == "demo-user" && assignment.Role == "ReadOnlyAccess" && assignment.LastChangedAt.HasValue && assignment.LastChangedBy == "arn:aws:iam::123456789012:user/auditor" && assignment.Source.Contains("CloudTrail", StringComparison.Ordinal));
             Assert.Contains("Console password used", Assert.Single(users).LastActivity!);
         }
 
@@ -123,7 +123,7 @@ public class AwsProviderTests
             public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
             {
                 var output = arguments.Contains("lookup-events")
-                    ? "{\"Events\":[{\"EventName\":\"PutUserPolicy\",\"EventTime\":\"2026-10-01T11:00:00Z\",\"CloudTrailEvent\":\"{\\\"requestParameters\\\":{\\\"userName\\\":\\\"demo-user\\\",\\\"policyName\\\":\\\"ReadOnlyAccess\\\"}}\"}]}"
+                    ? "{\"Events\":[{\"EventName\":\"PutUserPolicy\",\"EventTime\":\"2026-10-01T11:00:00Z\",\"CloudTrailEvent\":\"{\\\"userIdentity\\\":{\\\"arn\\\":\\\"arn:aws:iam::123456789012:user/auditor\\\"},\\\"requestParameters\\\":{\\\"userName\\\":\\\"demo-user\\\",\\\"policyName\\\":\\\"ReadOnlyAccess\\\"}}\"}]}"
                     : arguments.Contains("list-analyzers")
                     ? "{\"analyzers\":[{\"arn\":\"arn:aws:access-analyzer:us-east-1:123456789012:analyzer/demo\",\"status\":\"ACTIVE\"}]}"
                     : arguments.Contains("list-findings-v2")

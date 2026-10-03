@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Application.Interfaces;
@@ -451,7 +452,7 @@ public sealed class NavigationTests
         var lastChangedAt = DateTime.UtcNow.AddDays(-1);
         var entry = new LiveScanHistoryEntry(
             DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow, "AWS", 1, 1, 0, 1, 1, 0,
-            new[] { new LiveEffectiveAccessRecord("AWS", "audit-user", "ReadOnly", "account", "CloudTrail", false, LastUsedAt: lastUsedAt, LastChangedAt: lastChangedAt) },
+            new[] { new LiveEffectiveAccessRecord("AWS", "audit-user", "ReadOnly", "account", "CloudTrail", false, LastUsedAt: lastUsedAt, LastChangedAt: lastChangedAt, LastChangedBy: "auditor@example.invalid") },
             Array.Empty<LiveScanAccountRecord>());
 
         await historyStore.RecordAsync(entry);
@@ -459,6 +460,7 @@ public sealed class NavigationTests
 
         Assert.Equal(lastUsedAt, savedAccess.LastUsedAt);
         Assert.Equal(lastChangedAt, savedAccess.LastChangedAt);
+        Assert.Equal("auditor@example.invalid", savedAccess.LastChangedBy);
         Directory.Delete(directory, recursive: true);
     }
 
@@ -544,11 +546,63 @@ public sealed class NavigationTests
 
         Assert.True(entitlements.HasResults);
         Assert.True(entitlements.Entitlements.Count >= 3);
+        Assert.Contains(entitlements.Entitlements, row => row.Provider == "Azure" && row.Subject == "test-principal" && row.Grant == "Owner" && row.Source == "Test assignment");
+        Assert.Equal(1, dashboard.Entitlements);
         Assert.Equal(2, effectiveAccess.AccessRecords.Count);
+        Assert.Contains(effectiveAccess.AccessRecords, row => row.Principal == "test-principal" && row.Provider == "Azure");
         Assert.Equal(2, riskFindings.Findings.Count);
         Assert.True(recommendations.HasResults);
         Assert.True(history.Scans.Count >= 2);
         Directory.Delete(historyDirectory, recursive: true);
+    }
+
+    [Fact]
+    public async Task PolicyWorkbench_ShouldExportSelectedProposalAsNonExecutableDraft()
+    {
+        var recommendation = new RecommendationModel
+        {
+            Id = Guid.NewGuid(),
+            Title = "Narrow wildcard permission",
+            RecommendationType = RecommendationType.NarrowWildcardPermission,
+            Provider = CloudProvider.Azure,
+            CurrentState = "* at subscription scope",
+            SuggestedState = "storage.read at resource scope",
+            Impact = "Impact=RequiresReview",
+            ImpactState = RecommendationImpactState.RequiresReview,
+            EvaluationState = RiskEvaluationState.Potential,
+            Reason = "Required operations need owner validation.",
+            Evidence = "Observed provider evidence"
+        };
+        var snapshot = new DemoSnapshot(
+            Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(), Array.Empty<Entitlement>(),
+            Array.Empty<CloudEntitle.Domain.Entities.EffectiveAccess>(), Array.Empty<RiskFindingModel>(), new[] { recommendation }, Array.Empty<Scan>());
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "policy-draft.json");
+        var dialogs = new RecordingDialogService(true) { PolicyDraftPath = path };
+        var viewModel = new RecommendationsViewModel(new SnapshotDemoDataService(snapshot), new SnapshotRecommendationStore(snapshot), dialogService: dialogs);
+
+        try
+        {
+            await viewModel.RefreshAsync();
+            viewModel.SelectedRecommendation = Assert.Single(viewModel.Recommendations);
+            Assert.True(viewModel.CanExportDraft);
+
+            await viewModel.ExportDraftAsync();
+
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+            var draft = document.RootElement;
+            Assert.False(draft.GetProperty("executable").GetBoolean());
+            Assert.True(draft.GetProperty("approvalRequired").GetBoolean());
+            Assert.Equal(recommendation.CurrentState, draft.GetProperty("currentState").GetString());
+            Assert.Equal(recommendation.SuggestedState, draft.GetProperty("proposedState").GetString());
+            Assert.Equal(recommendation.Impact, draft.GetProperty("impactAssessment").GetString());
+            Assert.Equal(recommendation.Evidence, draft.GetProperty("evidence").GetString());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private sealed class NoopDemoDataService : IDemoDataService
@@ -645,9 +699,11 @@ public sealed class NavigationTests
         public List<string> Confirmations { get; } = new();
         public List<string> InformationMessages { get; } = new();
         public string? ReportPath { get; set; }
+        public string? PolicyDraftPath { get; set; }
         public void ShowInformation(string message, string title = "YASK-CIEM") => InformationMessages.Add(message);
         public void ShowError(string message, string title = "YASK-CIEM") { }
         public string? ChooseReportPath() => ReportPath;
+        public string? ChoosePolicyDraftPath() => PolicyDraftPath;
         public bool Confirm(string message, string title = "YASK-CIEM")
         {
             Confirmations.Add(message);
