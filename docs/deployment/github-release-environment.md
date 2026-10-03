@@ -9,4 +9,8 @@ Before dispatching a release workflow:
 3. Add the signing PFX as the environment secret `YASK_CIEM_SIGNING_CERT_BASE64` and its password as `YASK_CIEM_SIGNING_CERT_PASSWORD`. Do not commit the PFX or password.
 4. Confirm the signing certificate publisher exactly matches the MSIX manifest publisher (`CN=YASK-CIEM`) or update the package publisher and certificate as an intentional coordinated change.
 
-The workflow's signing preflight checks that both secrets are available without printing their values. If the environment or either secret is missing, the release job stops after candidate validation. MSIX generation, publication, and post-publication verification are still separate workflow tasks.
+After candidate validation, the protected workflow job decodes the PFX into the ephemeral runner's temporary directory, calls `scripts/package-msix.ps1`, removes the temporary certificate file, and uploads the signed MSIX and App Installer feed as a 14-day workflow artifact. The PFX and password values are not printed.
+
+The generated feed uses the version-tagged GitHub Release URL for the MSIX and the stable `releases/latest/download/YASK-CIEM.appinstaller` URL for future updates. At this stage the assets are only in the workflow artifact, so the feed cannot install or update until TODO 3 publishes both files as assets on a GitHub Release at tag `v{release_version}`. The workflow does not create or publish that release yet.
+
+If the environment or either secret is missing, packaging stops after candidate validation. Post-publication signature, URL, and version verification remains TODO 4.

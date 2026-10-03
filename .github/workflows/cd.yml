@@ -42,25 +42,31 @@ jobs:
       - name: Run tests
         run: dotnet test CloudEntitle.sln --configuration Release --no-build --no-restore
 
-      # TODO: Generate a signed MSIX and App Installer feed using scripts/package-msix.ps1.
       # TODO: Publish both artifacts to the approved HTTPS distribution host.
       # TODO: Verify package signature, feed URL, and published version before announcing release.
-      - name: CD deployment is not configured
-        shell: pwsh
-        run: Write-Output 'Release candidate validation complete; signing and publishing remain pending.'
 
-  release-signing-preflight:
-    name: Verify protected signing environment
+  signed-package:
+    name: Generate signed MSIX and App Installer feed
     needs: release-candidate
     runs-on: windows-latest
     environment:
       name: release
     steps:
-      - name: Validate signing certificate secrets
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Package signed MSIX and App Installer feed
         shell: pwsh
         env:
           SIGNING_CERTIFICATE_BASE64: ${{ secrets.YASK_CIEM_SIGNING_CERT_BASE64 }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.YASK_CIEM_SIGNING_CERT_PASSWORD }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_BASE64)) {
             throw 'Set YASK_CIEM_SIGNING_CERT_BASE64 in the protected release environment.'
@@ -68,4 +74,40 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_PASSWORD)) {
             throw 'Set YASK_CIEM_SIGNING_CERT_PASSWORD in the protected release environment.'
           }
-          Write-Output 'Protected release environment and signing inputs are configured.'
+
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'yask-ciem-release-signing.pfx'
+          try {
+            $certificateBytes = [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64)
+            [IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+
+            $tag = "v$($env:RELEASE_VERSION)"
+            $packageUri = "https://github.com/$($env:GITHUB_REPOSITORY)/releases/download/$tag/YASK-CIEM-$($env:RELEASE_VERSION).msix"
+            $appInstallerUri = "https://github.com/$($env:GITHUB_REPOSITORY)/releases/latest/download/YASK-CIEM.appinstaller"
+
+            & .\scripts\package-msix.ps1 `
+              -Configuration Release `
+              -Runtime win-x64 `
+              -PackageVersion $env:RELEASE_VERSION `
+              -Publisher 'CN=YASK-CIEM' `
+              -CertificatePath $certificatePath `
+              -CertificatePassword $env:SIGNING_CERTIFICATE_PASSWORD `
+              -AppInstallerUri $appInstallerUri `
+              -PackageUri $packageUri `
+              -OutputPath '.\artifacts\release'
+            if ($LASTEXITCODE -ne 0) { throw "MSIX packaging failed with exit code $LASTEXITCODE." }
+          }
+          finally {
+            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:SIGNING_CERTIFICATE_BASE64 -ErrorAction SilentlyContinue
+            Remove-Item Env:SIGNING_CERTIFICATE_PASSWORD -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload signed release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: YASK-CIEM-${{ inputs.release_version }}-signed
+          path: |
+            artifacts/release/YASK-CIEM-${{ inputs.release_version }}.msix
+            artifacts/release/YASK-CIEM.appinstaller
+          if-no-files-found: error
+          retention-days: 14
