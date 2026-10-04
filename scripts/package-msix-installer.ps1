@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$PackageVersion = '1.0.0.16',
+    [string]$PackagePath,
     [string]$PublisherCertificatePath = '.\artifacts\certs\yask-ciem-dev.cer',
     [string]$OutputPath = '.\artifacts\installer'
 )
@@ -8,9 +9,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot 'installer\YaskCiemSetup\YaskCiemSetup.csproj'
-$packagePath = Join-Path $repositoryRoot "artifacts\msix\YASK-CIEM-$PackageVersion.msix"
+$packagePath = if ([string]::IsNullOrWhiteSpace($PackagePath)) {
+    Join-Path $repositoryRoot "artifacts\msix\YASK-CIEM-$PackageVersion.msix"
+}
+elseif ([IO.Path]::IsPathRooted($PackagePath)) {
+    $PackagePath
+}
+else {
+    Join-Path $repositoryRoot $PackagePath
+}
 $certificatePath = Join-Path $repositoryRoot $PublisherCertificatePath
-$outputDirectory = Join-Path $repositoryRoot $OutputPath
+$outputDirectory = if ([IO.Path]::IsPathRooted($OutputPath)) { $OutputPath } else { Join-Path $repositoryRoot $OutputPath }
 $publishDirectory = Join-Path $outputDirectory 'publish'
 $installerPath = Join-Path $outputDirectory "YASK-CIEM-Setup-$PackageVersion.exe"
 $expectedThumbprint = '537C64CF83CF2C6C1EBC89553B7B4EDD13E7F104'

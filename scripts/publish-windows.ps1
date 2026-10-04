@@ -3,6 +3,7 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [string]$Runtime = 'win-x64',
+    [bool]$SelfContained = $false,
     [string]$OutputPath = '.\artifacts\publish'
 )
 
@@ -26,7 +27,7 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet runtime restore failed with exit code $
 & dotnet publish $projectPath `
     --configuration $Configuration `
     --runtime $Runtime `
-    --self-contained false `
+    --self-contained $SelfContained.ToString().ToLowerInvariant() `
     --no-restore `
     --output $output
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE." }

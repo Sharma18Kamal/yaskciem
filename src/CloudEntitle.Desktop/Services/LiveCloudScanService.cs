@@ -119,11 +119,14 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             {
                 if (!await provider.TestConnectionAsync(cancellationToken))
                 {
+                    if (_cloudConnectionState?.ConnectedProviders.Contains(provider.ProviderType) == true)
+                        _cloudConnectionState.Update(Array.Empty<CloudProviderType>());
                     messages.Add($"{provider.ProviderType}: no active CLI sign-in. Use Connect Cloud first.");
                     coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "CLI sign-in", ScanCoverageStatus.Unavailable, 0, "No active CLI sign-in was detected."));
                     continue;
                 }
 
+                _cloudConnectionState?.Update(new[] { provider.ProviderType });
                 var accounts = await CollectAsync(provider.ProviderType.ToString(), string.Empty, "Cloud accounts", () => provider.DiscoverAccountsAsync(cancellationToken), coverage, messages, cancellationToken);
                 accountsScanned += accounts.Count;
                 accountRecords.AddRange(accounts.Select(account => new LiveScanAccountRecord(

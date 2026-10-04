@@ -1,5 +1,17 @@
 # Windows MSIX installer
 
+To create a single-file, self-contained Setup EXE that includes the MSIX app and .NET 9 runtime, and automatically trusts the bundled public publisher certificate for the current Windows user:
+
+```powershell
+.\scripts\package-msix.ps1 -PackageVersion 1.0.0.36 -OutputPath .\artifacts\msix-1.0.0.36
+.\scripts\package-msix-installer.ps1 `
+  -PackageVersion 1.0.0.36 `
+  -PackagePath .\artifacts\msix-1.0.0.36\YASK-CIEM-1.0.0.36.msix `
+  -OutputPath .\artifacts\installer-1.0.0.36
+```
+
+The setup EXE imports only `yask-ciem-dev.cer` into `CurrentUser\TrustedPeople`; it does not need administrator rights and does not contain the signing `.pfx` private key. These packages are signed with the local development certificate and should only be distributed to machines/users that trust this development build. Public releases should use an organization-trusted code-signing certificate.
+
 The repository now includes an MSIX packaging definition and script. Run this on a Windows packaging machine with the Windows SDK installed:
 
 ```powershell

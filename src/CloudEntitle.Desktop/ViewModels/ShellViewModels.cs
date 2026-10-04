@@ -129,6 +129,7 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         });
         OpenCloudDisconnectCommand = new AsyncRelayCommand(DisconnectActiveCloudAsync);
+        _ = RefreshCloudConnectionStatusAsync();
     }
 
     public string ApplicationName => "YASK-CIEM";
@@ -148,6 +149,27 @@ public sealed class MainWindowViewModel : ObservableObject
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public ParameterizedRelayCommand NavigateCommand { get; }
     public AsyncRelayCommand OpenCloudDisconnectCommand { get; }
+
+    public async Task RefreshCloudConnectionStatusAsync()
+    {
+        if (_authenticationLauncher is null)
+        {
+            return;
+        }
+
+        var states = await Task.WhenAll(Enum.GetValues<CloudProviderType>().Select(async provider =>
+        {
+            try
+            {
+                return (Provider: provider, IsConnected: await _authenticationLauncher.IsConnectedAsync(provider));
+            }
+            catch
+            {
+                return (Provider: provider, IsConnected: false);
+            }
+        }));
+        _cloudConnectionState.Update(states.Where(state => state.IsConnected).Select(state => state.Provider));
+    }
 
     public async Task InitializeTrialAsync(CancellationToken cancellationToken = default)
     {

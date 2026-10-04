@@ -21,4 +21,17 @@ public sealed class WorkspaceViewBindingTests
         Assert.NotEmpty(bindings);
         Assert.All(bindings, binding => Assert.Contains("Mode=OneWay", binding, StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void DashboardToolbar_ShouldExposeSharedCloudConnectionStatus()
+    {
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var xamlPath = Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml");
+        var document = XDocument.Load(xamlPath);
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+
+        Assert.Contains(document.Descendants(presentation + "TextBlock"), textBlock =>
+            ((string?)textBlock.Attribute("Text"))?.Contains("CloudConnectionStatus", StringComparison.Ordinal) == true
+            && ((string?)textBlock.Attribute("Grid.Column")) == "3");
+    }
 }

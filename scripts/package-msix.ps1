@@ -3,6 +3,7 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [string]$Runtime = 'win-x64',
+    [bool]$SelfContained = $true,
     [string]$PackageVersion = '1.0.0.0',
     [string]$Publisher = 'CN=YASK-CIEM',
     [string]$CertificatePath,
@@ -67,7 +68,7 @@ function Find-SignTool {
 New-Item $packageRoot -ItemType Directory -Force | Out-Null
 New-Item $outputDirectory -ItemType Directory -Force | Out-Null
 
-& $publishScript -Configuration $Configuration -Runtime $Runtime -OutputPath $packageRoot
+& $publishScript -Configuration $Configuration -Runtime $Runtime -SelfContained $SelfContained -OutputPath $packageRoot
 if ($LASTEXITCODE -ne 0) { throw "Publish failed with exit code $LASTEXITCODE." }
 
 $manifest = Get-Content $manifestTemplate -Raw

@@ -76,6 +76,25 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task MainWindowViewModel_ShouldRefreshAndShareCloudCliStatusAtStartup()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IDemoDataService, NoopDemoDataService>();
+        services.AddSingleton<IAnalyticsService, NoopAnalyticsService>();
+        services.AddTransient<DashboardViewModel>();
+        services.AddSingleton<INavigationService, NavigationService>();
+        using var provider = services.BuildServiceProvider();
+        var cloudState = new CloudConnectionState();
+        var authenticationLauncher = new RecordingCloudAuthenticationLauncher();
+        authenticationLauncher.LaunchedProviders.Add(CloudProviderType.Azure);
+        var viewModel = new MainWindowViewModel(provider.GetRequiredService<INavigationService>(), cloudState, authenticationLauncher);
+
+        await viewModel.RefreshCloudConnectionStatusAsync();
+
+        Assert.Equal("Azure connected", viewModel.CloudConnectionStatus);
+    }
+
+    [Fact]
     public async Task MainWindowViewModel_ShouldStartDeviceTrialWithoutRequestingEmail()
     {
         var trialService = new RecordingTrialService(existingTrial: null, newTrial: new TrialInfo

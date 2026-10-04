@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Xml.Linq;
 
@@ -25,7 +26,7 @@ internal static class Program
         {
             var packageBytes = ReadEmbeddedResource(PackageResource);
             var certificateBytes = ReadEmbeddedResource(CertificateResource);
-            certificate = new X509Certificate2(certificateBytes);
+            certificate = X509CertificateLoader.LoadCertificate(certificateBytes);
             ValidateCertificate(certificate);
             var packageVersion = ValidatePackageManifest(packageBytes, certificate.Subject);
 
@@ -33,14 +34,7 @@ internal static class Program
             Console.WriteLine($"Package version: {packageVersion}");
             Console.WriteLine($"Publisher: {certificate.Subject}");
             Console.WriteLine();
-            Console.WriteLine("This setup will trust the YASK-CIEM development certificate for your Windows account and install the app.");
-            Console.WriteLine("Only continue if you trust the source of this installer.");
-            Console.Write("Continue? [y/N]: ");
-            if (!string.Equals(Console.ReadLine()?.Trim(), "y", StringComparison.OrdinalIgnoreCase))
-            {
-                Console.WriteLine("Installation cancelled.");
-                return 0;
-            }
+            Console.WriteLine("Installing the YASK-CIEM publisher certificate for your Windows account and installing the app.");
 
             using (var store = new X509Store(StoreName.TrustedPeople, StoreLocation.CurrentUser))
             {
