@@ -69,6 +69,7 @@ public sealed record LiveScanHistoryEntry(
     IReadOnlyList<LiveEffectiveAccessRecord> EffectiveAccess,
     IReadOnlyList<LiveScanAccountRecord> AccountDetails)
 {
+    public IReadOnlyList<string> ScannedAccountKeys { get; init; } = Array.Empty<string>();
     public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
     public IReadOnlyList<KubernetesWorkloadTrace> WorkloadTraces { get; init; } = Array.Empty<KubernetesWorkloadTrace>();
     public IReadOnlyList<LiveRiskFindingSnapshot> RiskFindingDetails { get; init; } = Array.Empty<LiveRiskFindingSnapshot>();
@@ -165,6 +166,7 @@ public sealed class LocalLiveScanHistoryStore : ILiveScanHistoryStore
 
     private static LiveScanHistoryEntry NormalizeEntry(LiveScanHistoryEntry entry) => entry with
     {
+        ScannedAccountKeys = entry.ScannedAccountKeys ?? Array.Empty<string>(),
         EffectiveAccess = entry.EffectiveAccess ?? Array.Empty<LiveEffectiveAccessRecord>(),
         AccountDetails = entry.AccountDetails ?? Array.Empty<LiveScanAccountRecord>(),
         Coverage = entry.Coverage ?? Array.Empty<ScanCoverageRecord>(),

@@ -45,6 +45,19 @@ public class AzureProviderTests
     }
 
     [Fact]
+    public async Task AzureProvider_ShouldDiscoverEveryEnabledCliSubscription()
+    {
+        var provider = new AzureProvider(new FakeCommandRunner(multipleSubscriptions: true), useLiveDiscovery: true);
+
+        var accounts = await provider.DiscoverAccountsAsync();
+
+        Assert.Equal(2, accounts.Count);
+        Assert.Contains(accounts, account => account.SubscriptionId == "subscription-001");
+        Assert.Contains(accounts, account => account.SubscriptionId == "subscription-002");
+        Assert.All(accounts, account => Assert.True(account.IsReadOnly));
+    }
+
+    [Fact]
     public async Task AzureProvider_ShouldExposeObservedRoleAssignmentsAsEffectiveAccess()
     {
         var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);
@@ -129,7 +142,7 @@ public class AzureProviderTests
         Assert.Equal(ScanStatus.Cancelled, result.Scan.Status);
     }
 
-    private sealed class FakeCommandRunner(bool denyPim = false, bool denyActivityLog = false) : ICloudCommandRunner
+    private sealed class FakeCommandRunner(bool denyPim = false, bool denyActivityLog = false, bool multipleSubscriptions = false) : ICloudCommandRunner
     {
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
@@ -172,7 +185,11 @@ public class AzureProviderTests
                 return Task.FromResult(new CloudCommandResult(0, graphOutput, string.Empty));
             }
 
-            var output = arguments[0] == "account"
+            var output = arguments[0] == "account" && arguments.Contains("list")
+                ? multipleSubscriptions
+                    ? "[{\"name\":\"Production\",\"id\":\"subscription-001\",\"tenantId\":\"tenant-001\",\"state\":\"Enabled\"},{\"name\":\"Development\",\"id\":\"subscription-002\",\"tenantId\":\"tenant-001\",\"state\":\"Enabled\"},{\"name\":\"Disabled\",\"id\":\"subscription-disabled\",\"tenantId\":\"tenant-001\",\"state\":\"Disabled\"}]"
+                    : "[{\"name\":\"Production\",\"id\":\"subscription-001\",\"tenantId\":\"tenant-001\",\"state\":\"Enabled\"}]"
+                : arguments[0] == "account"
                 ? "{\"name\":\"Production\",\"id\":\"subscription-001\",\"tenantId\":\"tenant-001\"}"
                 : "[{\"principalId\":\"principal-001\",\"principalName\":\"owner@example.com\",\"principalType\":\"User\",\"roleDefinitionId\":\"role-001\",\"roleDefinitionName\":\"Owner\",\"scope\":\"/subscriptions/subscription-001\"}]";
             return Task.FromResult(new CloudCommandResult(0, output, string.Empty));

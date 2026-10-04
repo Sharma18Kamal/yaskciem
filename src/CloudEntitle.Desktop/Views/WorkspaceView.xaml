@@ -6,13 +6,32 @@
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
             <StackPanel>
             <Grid Margin="0,0,0,16">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Button Grid.Column="0" Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" ToolTip="Scan the connected cloud provider using read-only CLI access"/>
                 <Button Grid.Column="1" Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" MinWidth="100" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
                 <Button Grid.Column="2" Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Choose a folder and save findings as JSON or CSV"/>
-                <TextBlock Grid.Column="3" Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxWidth="180" MaxHeight="48" ToolTip="Cloud CLI connection status"/>
-                <TextBlock Grid.Column="4" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
+                <Button Grid.Column="3" Content="Discover accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="List accounts available through the currently connected cloud provider"/>
+                <TextBlock Grid.Column="4" Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxWidth="180" MaxHeight="48" ToolTip="Cloud CLI connection status"/>
+                <TextBlock Grid.Column="5" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
             </Grid>
+            <Expander Header="{Binding AccountSelectionMessage}" IsExpanded="False" Margin="0,0,0,14">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
+                        <Button Content="Select all" Command="{Binding SelectAllAccountsCommand}" Style="{StaticResource QuietButton}"/>
+                        <Button Content="Select none" Command="{Binding SelectNoAccountsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                    </StackPanel>
+                    <DataGrid ItemsSource="{Binding AvailableAccounts}" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="False" MaxHeight="240" MinHeight="80" CanUserSortColumns="True">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="Scan" Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                            <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" IsReadOnly="True" Width="90"/>
+                            <DataGridTextColumn Header="Account" Binding="{Binding AccountName}" IsReadOnly="True" Width="*"/>
+                            <DataGridTextColumn Header="Account ID" Binding="{Binding AccountId}" IsReadOnly="True" Width="180"/>
+                            <DataGridTextColumn Header="Profile" Binding="{Binding Profile}" IsReadOnly="True" Width="140"/>
+                            <DataGridTextColumn Header="Permission set" Binding="{Binding PermissionSet}" IsReadOnly="True" Width="140"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+            </Expander>
             <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
             <UniformGrid Columns="2" Rows="4">
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CLOUD ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CloudAccounts}" Style="{StaticResource CardValue}"/></StackPanel></Border>

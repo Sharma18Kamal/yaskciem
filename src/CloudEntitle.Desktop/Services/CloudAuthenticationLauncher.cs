@@ -78,7 +78,7 @@ public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
 
         var (command, arguments) = provider switch
         {
-            CloudProviderType.Azure => ("az", (IReadOnlyList<string>)new[] { "account", "show", "--output", "json" }),
+            CloudProviderType.Azure => ("az", (IReadOnlyList<string>)new[] { "account", "list", "--all", "--output", "json" }),
             CloudProviderType.Aws => ("aws", (IReadOnlyList<string>)new[] { "sts", "get-caller-identity", "--output", "json" }),
             CloudProviderType.Gcp => ("gcloud", (IReadOnlyList<string>)new[] { "auth", "list", "--format=json" }),
             _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported cloud provider.")
@@ -90,16 +90,33 @@ public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
             return false;
         }
 
-        if (provider != CloudProviderType.Gcp)
+        if (provider == CloudProviderType.Aws)
         {
             return true;
         }
 
-        using var document = JsonDocument.Parse(result.StandardOutput);
-        return document.RootElement.ValueKind == JsonValueKind.Array
-            && document.RootElement.EnumerateArray().Any(account =>
-                account.TryGetProperty("status", out var status)
-                && string.Equals(status.GetString(), "ACTIVE", StringComparison.OrdinalIgnoreCase));
+        try
+        {
+            using var document = JsonDocument.Parse(result.StandardOutput);
+            return provider switch
+            {
+                CloudProviderType.Azure => document.RootElement.ValueKind == JsonValueKind.Array
+                    && document.RootElement.EnumerateArray().Any(subscription =>
+                        subscription.TryGetProperty("id", out var id)
+                        && !string.IsNullOrWhiteSpace(id.GetString())
+                        && (!subscription.TryGetProperty("state", out var state)
+                            || !string.Equals(state.GetString(), "Disabled", StringComparison.OrdinalIgnoreCase))),
+                CloudProviderType.Gcp => document.RootElement.ValueKind == JsonValueKind.Array
+                    && document.RootElement.EnumerateArray().Any(account =>
+                        account.TryGetProperty("status", out var status)
+                        && string.Equals(status.GetString(), "ACTIVE", StringComparison.OrdinalIgnoreCase)),
+                _ => false
+            };
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     public async Task DisconnectAsync(CloudProviderType provider, CancellationToken cancellationToken = default)

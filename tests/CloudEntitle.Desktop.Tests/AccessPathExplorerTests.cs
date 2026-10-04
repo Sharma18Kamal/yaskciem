@@ -110,6 +110,10 @@ public sealed class AccessPathExplorerTests
 
         public LiveCloudScanResult? CurrentResult => _result;
         public event EventHandler? ScanCompleted { add { } remove { } }
+        public Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(_result.AccountRecords);
         public Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default) => Task.FromResult(_result);
+        public Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default)
+            => Task.FromResult(_result);
     }
 }

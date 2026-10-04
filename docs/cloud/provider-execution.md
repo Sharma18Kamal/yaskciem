@@ -151,18 +151,23 @@ The output is normalized into:
 
 Owner-level IAM bindings are evaluated by the risk engine.
 
-## Run a multi-cloud scan
+## Run a provider scan
 
-After authenticating one or more providers:
+The desktop scans one connected provider at a time. If more than one CLI is authenticated, disconnect all but the provider you intend to scan.
 
 1. Start YASK-CIEM.
-2. Review the readiness message.
-3. Click `Scan Now`.
-4. Select `All Providers`, `Azure`, `Aws`, or `Gcp` in the provider filter.
-5. Review `Risk Findings`, `Identities`, `Roles`, and `Permissions`.
-6. Export results with `Export JSON` or `Export CSV`.
+2. Review the cloud connection status on the Dashboard.
+3. Select `Discover accounts` to list the connected provider's available accounts.
+4. Keep all accounts selected for a full provider scan, or choose a subset in the account scope panel.
+5. Click `Scan Now`.
+6. Review `Risk Findings`, `Identities`, `Roles`, `Permissions`, and `Scan History` coverage.
+7. Export results with `Generate Report`.
 
 Unavailable or unauthenticated providers are skipped and reported in the status message. A scan can continue with the providers that are ready.
+
+## Select accounts for a scan
+
+The Dashboard's **Discover accounts** action lists the accounts visible to the one connected provider. Selection keys use provider, external account ID, and AWS profile where applicable, so a refreshed discovery can be matched even when internal scan GUIDs change. Select a subset in the account scope expander before choosing **Scan Now**; an empty selection is rejected. Unselected accounts are marked `Skipped` in coverage, and partial scans are compared for drift only against scans with the same stable account set. Kubernetes cluster scanning is skipped during partial account scans until cluster accounts are included in the picker; choosing all accounts retains the existing Kubernetes scan behavior.
 
 ## Local data and reports
 

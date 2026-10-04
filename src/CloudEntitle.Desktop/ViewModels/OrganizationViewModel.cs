@@ -312,7 +312,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         var result = _liveScan.CurrentResult;
         var allAccounts = result?.AccountRecords ?? Array.Empty<LiveScanAccountRecord>();
         _consolidatedAccounts = (result?.AccountRecords ?? Array.Empty<LiveScanAccountRecord>())
-            .Where(IsBoundAccount)
+            .Where(account => account.ScanAccess.StartsWith("Scanned", StringComparison.OrdinalIgnoreCase) && IsBoundAccount(account))
             .GroupBy(account => (account.Provider, account.AccountId), StringTupleComparer.Instance).Select(group => group.First()).ToArray();
         var currentAccountIds = _consolidatedAccounts.Select(account => account.CloudAccountId).Where(id => id != Guid.Empty).ToHashSet();
         var externalAccountIds = _consolidatedAccounts.Select(account => account.AccountId).ToHashSet(StringComparer.OrdinalIgnoreCase);

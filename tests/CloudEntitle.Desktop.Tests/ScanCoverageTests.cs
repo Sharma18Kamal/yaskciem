@@ -12,6 +12,31 @@ namespace CloudEntitle.Desktop.Tests;
 public sealed class ScanCoverageTests
 {
     [Fact]
+    public async Task LiveScan_ShouldCollectOnlySelectedAccountsAndMarkOthersSkipped()
+    {
+        var provider = new TwoAccountCloudProvider();
+        var kubernetes = new CountingKubernetesProvider();
+        var scanner = new LiveCloudScanService(new[] { provider }, kubernetesRbacProvider: kubernetes);
+        var discovered = await scanner.DiscoverAccountsAsync();
+        var selected = Assert.Single(discovered, account => account.AccountId == "sub-a");
+
+        var result = await scanner.ScanAsync(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { selected.SelectionKey });
+
+        Assert.Equal(1, result.AccountCount);
+        Assert.Contains(result.AccountRecords, account => account.AccountId == "sub-a" && account.ScanAccess == "Scanned");
+        Assert.Contains(result.AccountRecords, account => account.AccountId == "sub-b" && account.ScanAccess == "Not selected for this scan");
+        Assert.Single(result.IdentityRecords);
+        Assert.Equal("sub-a", Assert.Single(result.IdentityRecords).Name);
+        Assert.Single(result.ResourceRecords);
+        Assert.Single(result.PermissionRecords);
+        Assert.Single(result.Findings);
+        Assert.Single(result.EffectiveAccessRecords);
+        Assert.Contains(result.Coverage, item => item.DataSource.Contains("sub-b", StringComparison.Ordinal) && item.Status == ScanCoverageStatus.Skipped);
+        Assert.Equal(0, kubernetes.CallCount);
+        Assert.Contains(result.Coverage, item => item.DataSource == "Cluster accounts" && item.Status == ScanCoverageStatus.Skipped);
+    }
+
+    [Fact]
     public async Task LiveScan_ShouldContinueOtherSourcesWhenIdentityReadIsDenied()
     {
         var historyDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -74,6 +99,46 @@ public sealed class ScanCoverageTests
             => Task.FromResult<IReadOnlyList<CloudResource>>(new[] { new CloudResource { Id = Guid.NewGuid(), AccountId = accountId, Name = "vault-a", Type = "Vault", ResourceId = "/subscriptions/a/vaults/vault-a" } });
         public Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<CloudEffectiveAccessAssignment>>(new[] { new CloudEffectiveAccessAssignment("owner@example.invalid", "Owner", "/subscriptions/a", "Azure RBAC", true) });
+    }
+
+    private sealed class TwoAccountCloudProvider : ICloudProvider, IResourceProvider, ICloudEffectiveAccessProvider
+    {
+        private readonly Dictionary<Guid, string> _subscriptionIds = new();
+        public CloudProviderType ProviderType => CloudProviderType.Azure;
+        public Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+        {
+            var accounts = new[]
+            {
+                new CloudAccount { Id = Guid.NewGuid(), Name = "Subscription A", SubscriptionId = "sub-a", CloudProvider = CloudProviderType.Azure },
+                new CloudAccount { Id = Guid.NewGuid(), Name = "Subscription B", SubscriptionId = "sub-b", CloudProvider = CloudProviderType.Azure }
+            };
+            foreach (var account in accounts) _subscriptionIds[account.Id] = account.SubscriptionId!;
+            return Task.FromResult<IReadOnlyList<CloudAccount>>(accounts);
+        }
+        public Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default)
+        {
+            var externalId = _subscriptionIds.GetValueOrDefault(accountId, "unknown");
+            return Task.FromResult<IReadOnlyList<CloudPrincipal>>(new[] { new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, Name = externalId } });
+        }
+        public Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudRole>>(Array.Empty<CloudRole>());
+        public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPermission>>(new[] { new CloudPermission { Id = Guid.NewGuid(), AccountId = accountId, Name = "Owner", Source = "fixture" } });
+        public Task<IReadOnlyList<CloudResource>> GetResourcesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudResource>>(new[] { new CloudResource { Id = Guid.NewGuid(), AccountId = accountId, Name = accountId.ToString() } });
+        public Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudEffectiveAccessAssignment>>(new[] { new CloudEffectiveAccessAssignment(accountId.ToString(), "Owner", "/subscriptions/fixture", "fixture", true) });
+    }
+
+    private sealed class CountingKubernetesProvider : IKubernetesRbacProvider
+    {
+        public int CallCount { get; private set; }
+        public Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default, CloudProviderType? providerFilter = null)
+        {
+            CallCount++;
+            return Task.FromResult(new KubernetesRbacScanResult(Array.Empty<KubernetesClusterScan>(), Array.Empty<string>()));
+        }
     }
 
     private sealed class EmptyDemoDataService : IDemoDataService

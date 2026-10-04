@@ -57,8 +57,8 @@ public sealed class OrganizationViewModelTests
             },
             new[]
             {
-                new LiveScanAccountRecord("Azure", "Bound Subscription", "subscription-bound", string.Empty, string.Empty) { CloudAccountId = boundAccountId },
-                new LiveScanAccountRecord("Azure", "Other Subscription", "subscription-other", string.Empty, string.Empty) { CloudAccountId = otherAccountId }
+                new LiveScanAccountRecord("Azure", "Bound Subscription", "subscription-bound", string.Empty, string.Empty, "Scanned") { CloudAccountId = boundAccountId },
+                new LiveScanAccountRecord("Azure", "Other Subscription", "subscription-other", string.Empty, string.Empty, "Not selected for this scan") { CloudAccountId = otherAccountId }
             });
     }
 
@@ -72,7 +72,11 @@ public sealed class OrganizationViewModelTests
     {
         public LiveCloudScanResult? CurrentResult { get; private set; } = result;
         public event EventHandler? ScanCompleted { add { } remove { } }
+        public Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(CurrentResult!.AccountRecords);
         public Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default) => Task.FromResult(CurrentResult!);
+        public Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default)
+            => Task.FromResult(CurrentResult!);
     }
 
     private sealed class TestDemoDataService : IDemoDataService

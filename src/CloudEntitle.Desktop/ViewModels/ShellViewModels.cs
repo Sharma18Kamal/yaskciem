@@ -383,7 +383,10 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private readonly IDialogService? _dialogService;
     private AnalyticsSnapshot _analyticsSnapshot = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
     private LiveCloudScanResult? _liveScan;
+    private IReadOnlyList<ScanAccountSelection> _availableAccounts = Array.Empty<ScanAccountSelection>();
+    private bool _hasDiscoveredAccounts;
     private string _scanStatusMessage = "Connect a provider, then select Scan Now to fetch its data.";
+    private string _accountSelectionMessage = "Discover accounts to choose the scope for this scan.";
     private CancellationTokenSource? _scanCancellation;
     private bool _isScanning;
 
@@ -395,6 +398,9 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         _reportService = reportService;
         _dialogService = dialogService;
         ScanCommand = new AsyncRelayCommand(RunScanAsync);
+        DiscoverAccountsCommand = new AsyncRelayCommand(DiscoverAccountsAsync);
+        SelectAllAccountsCommand = new RelayCommand(() => SetAccountSelection(true));
+        SelectNoAccountsCommand = new RelayCommand(() => SetAccountSelection(false));
         StopScanCommand = new RelayCommand(StopScan, () => IsScanning);
         GenerateReportCommand = new AsyncRelayCommand(GenerateReportAsync);
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
@@ -404,8 +410,15 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public override string Title => "Dashboard";
     public override string Subtitle => "A clear view of your cloud entitlement posture.";
     public AsyncRelayCommand ScanCommand { get; }
+    public AsyncRelayCommand DiscoverAccountsCommand { get; }
+    public RelayCommand SelectAllAccountsCommand { get; }
+    public RelayCommand SelectNoAccountsCommand { get; }
     public RelayCommand StopScanCommand { get; }
     public AsyncRelayCommand GenerateReportCommand { get; }
+    public IReadOnlyList<ScanAccountSelection> AvailableAccounts => _availableAccounts;
+    public string AccountSelectionMessage { get => _accountSelectionMessage; private set => SetProperty(ref _accountSelectionMessage, value); }
+    public bool HasAvailableAccounts => _availableAccounts.Count > 0;
+    public bool HasPartialAccountSelection => _availableAccounts.Any(account => account.IsSelected) && _availableAccounts.Any(account => !account.IsSelected);
     public bool IsScanning
     {
         get => _isScanning;
@@ -431,6 +444,60 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public IReadOnlyList<AnalyticsMetric> FindingsByProvider => MergeMetrics(_analyticsSnapshot.FindingsByProvider, _liveScan?.Findings.GroupBy(finding => finding.CloudProvider.ToString()).Select(group => new AnalyticsMetric(group.Key, group.Count())));
     public IReadOnlyList<AnalyticsMetric> FindingsBySeverity => MergeMetrics(_analyticsSnapshot.FindingsBySeverity, _liveScan?.Findings.GroupBy(finding => finding.Severity.ToString()).Select(group => new AnalyticsMetric(group.Key, group.Count())));
     public IReadOnlyList<AnalyticsMetric> AccessByDecision => _analyticsSnapshot.AccessByDecision;
+
+    public async Task DiscoverAccountsAsync()
+    {
+        if (_liveCloudScanService is null)
+        {
+            AccountSelectionMessage = "Live cloud scanning is not configured.";
+            return;
+        }
+
+        IsLoading = true;
+        ErrorMessage = null;
+        try
+        {
+            var previouslySelected = _availableAccounts.Where(account => account.IsSelected)
+                .Select(account => account.Account.SelectionKey)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var accounts = await _liveCloudScanService.DiscoverAccountsAsync();
+            _availableAccounts = accounts.Select(account => new ScanAccountSelection(account,
+                !_hasDiscoveredAccounts || previouslySelected.Contains(account.SelectionKey))).ToArray();
+            _hasDiscoveredAccounts = true;
+            foreach (var account in _availableAccounts)
+                account.PropertyChanged += (_, args) =>
+                {
+                    if (args.PropertyName == nameof(ScanAccountSelection.IsSelected)) UpdateAccountSelectionMessage();
+                };
+            AccountSelectionMessage = _availableAccounts.Count == 0
+                ? "No accounts are available. Confirm a provider CLI sign-in, then refresh accounts."
+                : $"{_availableAccounts.Count} account/profile(s) discovered; {_availableAccounts.Count(account => account.IsSelected)} selected.";
+            OnPropertyChanged(nameof(AvailableAccounts));
+            OnPropertyChanged(nameof(HasAvailableAccounts));
+            OnPropertyChanged(nameof(HasPartialAccountSelection));
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to discover scan accounts: {exception.Message}";
+            AccountSelectionMessage = "Account discovery failed; no new account selection was applied.";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void SetAccountSelection(bool isSelected)
+    {
+        foreach (var account in _availableAccounts) account.IsSelected = isSelected;
+        UpdateAccountSelectionMessage();
+    }
+
+    private void UpdateAccountSelectionMessage()
+    {
+        AccountSelectionMessage = $"{_availableAccounts.Count} account/profile(s) discovered; {_availableAccounts.Count(account => account.IsSelected)} selected.";
+        OnPropertyChanged(nameof(HasPartialAccountSelection));
+    }
 
     public async Task GenerateReportAsync()
     {
@@ -487,7 +554,19 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         ScanStatusMessage = "Checking provider sign-ins and scanning available accounts...";
         try
         {
-            _liveScan = await _liveCloudScanService.ScanAsync(cancellation.Token);
+            IReadOnlySet<string>? selectedAccountKeys = null;
+            if (_availableAccounts.Count > 0)
+            {
+                var selected = _availableAccounts.Where(account => account.IsSelected).Select(account => account.Account.SelectionKey).ToArray();
+                if (selected.Length == 0)
+                {
+                    ScanStatusMessage = "Select at least one account before scanning.";
+                    return;
+                }
+                if (selected.Length < _availableAccounts.Count)
+                    selectedAccountKeys = selected.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+            _liveScan = await _liveCloudScanService.ScanAsync(selectedAccountKeys, cancellation.Token);
             ScanStatusMessage = FormatScanSummary(_liveScan);
             await RefreshAsync();
         }
@@ -544,6 +623,30 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         return values.Length == 0 ? new[] { new AnalyticsMetric("No findings", 0) } : values;
     }
 }
+
+public sealed class ScanAccountSelection : ObservableObject
+{
+    private bool _isSelected;
+
+    public ScanAccountSelection(LiveScanAccountRecord account, bool isSelected)
+    {
+        Account = account;
+        _isSelected = isSelected;
+    }
+
+    public LiveScanAccountRecord Account { get; }
+    public string Provider => Account.Provider;
+    public string AccountName => Account.AccountName;
+    public string AccountId => Account.AccountId;
+    public string Profile => Account.Profile;
+    public string PermissionSet => Account.PermissionSet;
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetProperty(ref _isSelected, value);
+    }
+}
+
 public sealed class CloudAccountsViewModel : WorkspaceViewModel
 {
     private readonly ICloudAuthenticationLauncher _authenticationLauncher;

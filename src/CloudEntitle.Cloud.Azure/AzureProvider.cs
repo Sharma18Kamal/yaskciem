@@ -35,8 +35,15 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
             return true;
         }
 
-        var result = await RunAzAsync(new[] { "account", "show", "--output", "json" }, cancellationToken);
-        return result.IsSuccess;
+        var result = await RunAzAsync(new[] { "account", "list", "--all", "--output", "json" }, cancellationToken);
+        if (!result.IsSuccess) return false;
+        using var document = JsonDocument.Parse(result.StandardOutput);
+        return document.RootElement.ValueKind == JsonValueKind.Array
+            && document.RootElement.EnumerateArray().Any(subscription =>
+                subscription.TryGetProperty("id", out var id)
+                && !string.IsNullOrWhiteSpace(id.GetString())
+                && (!subscription.TryGetProperty("state", out var state)
+                    || !string.Equals(state.GetString(), "Disabled", StringComparison.OrdinalIgnoreCase)));
     }
 
     public async Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
@@ -46,23 +53,36 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
             return MockAccounts();
         }
 
-        using var document = JsonDocument.Parse(await GetAzOutputAsync(
-            new[] { "account", "show", "--output", "json" }, cancellationToken));
-        var root = document.RootElement;
-        var account = new CloudAccount
-        {
-            Id = Guid.NewGuid(),
-            Name = root.GetProperty("name").GetString() ?? "Azure subscription",
-            CloudProvider = CloudProviderType.Azure,
-            SubscriptionId = root.GetProperty("id").GetString(),
-            ExternalAccountId = root.TryGetProperty("tenantId", out var tenant) ? tenant.GetString() : null,
-            TenantId = root.TryGetProperty("tenantId", out tenant) ? tenant.GetString() : null,
-            ConnectionStatus = ConnectionStatus.Connected,
-            IsReadOnly = true,
-            LastScanAt = DateTime.UtcNow
-        };
-        _accounts[account.Id] = account;
-        return new[] { account };
+        var output = await GetAzOutputAsync(new[] { "account", "list", "--all", "--output", "json" }, cancellationToken);
+        using var document = JsonDocument.Parse(output);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("Azure CLI account list returned an unexpected response.");
+
+        _accounts.Clear();
+        var accounts = document.RootElement.EnumerateArray()
+            .Where(subscription => !subscription.TryGetProperty("state", out var state)
+                || !string.Equals(state.GetString(), "Disabled", StringComparison.OrdinalIgnoreCase))
+            .Select(subscription =>
+            {
+                var tenantId = subscription.TryGetProperty("tenantId", out var tenant) ? tenant.GetString() : null;
+                var account = new CloudAccount
+                {
+                    Id = Guid.NewGuid(),
+                    Name = subscription.TryGetProperty("name", out var name) ? name.GetString() ?? "Azure subscription" : "Azure subscription",
+                    CloudProvider = CloudProviderType.Azure,
+                    SubscriptionId = subscription.TryGetProperty("id", out var id) ? id.GetString() : null,
+                    ExternalAccountId = tenantId,
+                    TenantId = tenantId,
+                    ConnectionStatus = ConnectionStatus.Connected,
+                    IsReadOnly = true,
+                    LastScanAt = DateTime.UtcNow
+                };
+                _accounts[account.Id] = account;
+                return account;
+            })
+            .Where(account => !string.IsNullOrWhiteSpace(account.SubscriptionId))
+            .ToArray();
+        return accounts;
     }
 
     public async Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default)

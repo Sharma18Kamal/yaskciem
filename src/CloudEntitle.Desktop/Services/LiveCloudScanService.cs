@@ -11,7 +11,9 @@ public interface ILiveCloudScanService
 {
     LiveCloudScanResult? CurrentResult { get; }
     event EventHandler? ScanCompleted;
+    Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default);
     Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default);
+    Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default);
 }
 
 public sealed record LiveCloudScanResult(
@@ -44,6 +46,10 @@ public sealed record DiscoveredCloudPermission(CloudProviderType Provider, Cloud
 public sealed record LiveScanAccountRecord(string Provider, string AccountName, string AccountId, string Profile, string PermissionSet, string ScanAccess = "Profile connected")
 {
     public Guid CloudAccountId { get; init; }
+    public string SelectionKey => CreateSelectionKey(Provider, AccountId, Profile);
+
+    public static string CreateSelectionKey(string provider, string accountId, string profile = "")
+        => $"{provider.Trim().ToUpperInvariant()}|{accountId.Trim().ToUpperInvariant()}|{profile.Trim().ToUpperInvariant()}";
 }
 
 public sealed class LiveCloudScanService : ILiveCloudScanService
@@ -68,7 +74,50 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         _postureNotificationChannel = postureNotificationChannel ?? new DisabledPostureNotificationChannel();
     }
 
-    public async Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+    {
+        var providers = _providers;
+        var connected = _cloudConnectionState?.ConnectedProviders;
+        if (connected is { Count: > 1 })
+            throw new InvalidOperationException("Disconnect all but one cloud provider before discovering scan accounts.");
+        if (connected is { Count: 1 })
+            providers = _providers.Where(provider => provider.ProviderType == connected.Single()).ToArray();
+
+        var readyProviders = new List<ICloudProvider>();
+        foreach (var provider in providers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (await provider.TestConnectionAsync(cancellationToken)) readyProviders.Add(provider);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+        }
+
+        if (readyProviders.Count == 0)
+        {
+            _cloudConnectionState?.Update(Array.Empty<CloudProviderType>());
+            return Array.Empty<LiveScanAccountRecord>();
+        }
+        if (readyProviders.Count > 1)
+        {
+            _cloudConnectionState?.Update(readyProviders.Select(provider => provider.ProviderType));
+            throw new InvalidOperationException("More than one provider CLI is connected. Disconnect all but one provider before discovering accounts.");
+        }
+
+        var selectedProvider = readyProviders[0];
+        _cloudConnectionState?.Update(new[] { selectedProvider.ProviderType });
+        var accounts = await selectedProvider.DiscoverAccountsAsync(cancellationToken);
+        return accounts.Select(account => ToAccountRecord(selectedProvider.ProviderType, account)).ToArray();
+    }
+
+    public Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default)
+        => ScanAsync(null, cancellationToken);
+
+    public async Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default)
     {
         var startedAt = DateTime.UtcNow;
         var accountsScanned = 0;
@@ -128,14 +177,20 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
 
                 _cloudConnectionState?.Update(new[] { provider.ProviderType });
                 var accounts = await CollectAsync(provider.ProviderType.ToString(), string.Empty, "Cloud accounts", () => provider.DiscoverAccountsAsync(cancellationToken), coverage, messages, cancellationToken);
-                accountsScanned += accounts.Count;
-                accountRecords.AddRange(accounts.Select(account => new LiveScanAccountRecord(
-                    provider.ProviderType.ToString(),
-                    account.Name,
-                    account.ExternalAccountId ?? account.SubscriptionId ?? account.ProjectId ?? string.Empty,
-                    ExtractAwsProfile(account.Description, provider.ProviderType),
-                    ExtractPermissionSet(account.Name, account.Description, provider.ProviderType)) { CloudAccountId = account.Id }));
-                foreach (var account in accounts)
+                var selectedAccounts = accounts.Where(account => selectedAccountKeys is null
+                    || selectedAccountKeys.Contains(ToAccountRecord(provider.ProviderType, account).SelectionKey)).ToArray();
+                var selectedIds = selectedAccounts.Select(account => account.Id).ToHashSet();
+                accountsScanned += selectedAccounts.Length;
+                accountRecords.AddRange(accounts.Select(account => ToAccountRecord(provider.ProviderType, account,
+                    selectedIds.Contains(account.Id) ? "Scanned" : "Not selected for this scan")));
+                foreach (var account in accounts.Where(account => !selectedIds.Contains(account.Id)))
+                {
+                    var skippedScope = $"{account.Name} ({GetStableAccountId(account)})";
+                    coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), $"{skippedScope}: Account selection", ScanCoverageStatus.Skipped, 0, "Account was not selected for this scan."));
+                }
+                if (selectedAccounts.Length == 0 && selectedAccountKeys is { Count: > 0 })
+                    messages.Add($"{provider.ProviderType}: none of the selected accounts are available in this scan.");
+                foreach (var account in selectedAccounts)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var scanScope = $"{account.Name} ({account.ExternalAccountId ?? account.SubscriptionId ?? account.ProjectId ?? account.Id.ToString()})";
@@ -287,7 +342,13 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             }
         }
 
-        if (_kubernetesRbacProvider is not null && !multipleConnectedProviders)
+        if (_kubernetesRbacProvider is not null && !multipleConnectedProviders && selectedAccountKeys is not null)
+        {
+            coverage.Add(new ScanCoverageRecord("Kubernetes", "Cluster accounts", ScanCoverageStatus.Skipped, 0, "Kubernetes cluster accounts are not included in the selected cloud-account scope. Select all accounts to include the Kubernetes scan."));
+            messages.Add("Kubernetes cluster scanning was skipped because the account picker does not yet include cluster accounts.");
+        }
+
+        if (_kubernetesRbacProvider is not null && !multipleConnectedProviders && selectedAccountKeys is null)
         {
             try
             {
@@ -299,7 +360,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                 {
                     var providerType = cluster.Cluster.CloudProvider;
                     accountsScanned++;
-                    accountRecords.Add(new LiveScanAccountRecord(providerType.ToString(), cluster.Cluster.Name, cluster.Cluster.ExternalAccountId ?? string.Empty, cluster.Cluster.Description ?? string.Empty, "Kubernetes RBAC", $"{cluster.Cluster.ConnectionStatus}: read-only scan") { CloudAccountId = cluster.Cluster.Id });
+                    accountRecords.Add(new LiveScanAccountRecord(providerType.ToString(), cluster.Cluster.Name, cluster.Cluster.ExternalAccountId ?? string.Empty, cluster.Cluster.Description ?? string.Empty, "Kubernetes RBAC", $"Scanned: {cluster.Cluster.ConnectionStatus}; read-only scan") { CloudAccountId = cluster.Cluster.Id });
                     resourcesScanned += cluster.Resources.Count;
                     resourceRecords.AddRange(cluster.Resources);
                     identitiesScanned += cluster.Principals.Count;
@@ -335,6 +396,11 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         }
 
         var completedAt = DateTime.UtcNow;
+        var scannedAccountKeys = accountRecords.Where(account => account.ScanAccess.StartsWith("Scanned", StringComparison.OrdinalIgnoreCase))
+            .Select(account => account.SelectionKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var riskFindingDetails = PostureHistoryService.SnapshotFindings(findings);
         var providersInScan = accountRecords.Select(item => item.Provider)
             .Concat(effectiveAccessRecords.Select(item => item.Provider))
@@ -342,7 +408,9 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             .Concat(riskFindingDetails.Select(item => item.Provider))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var previous = previousScans.Where(scan => providersInScan.Overlaps(ScanProviders(scan)))
+        var previous = previousScans.Where(scan => providersInScan.Overlaps(ScanProviders(scan))
+                && scan.ScannedAccountKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                    .SequenceEqual(scannedAccountKeys, StringComparer.OrdinalIgnoreCase))
             .OrderByDescending(scan => scan.CompletedAt)
             .FirstOrDefault();
         var historyEntry = new LiveScanHistoryEntry(
@@ -359,6 +427,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             accountRecords)
         {
             Coverage = coverage,
+                        ScannedAccountKeys = scannedAccountKeys,
             WorkloadTraces = workloadTraces,
             RiskFindingDetails = riskFindingDetails
         };
@@ -419,6 +488,15 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         ScanCompleted?.Invoke(this, EventArgs.Empty);
         return CurrentResult;
     }
+
+    private static LiveScanAccountRecord ToAccountRecord(CloudProviderType provider, CloudAccount account, string scanAccess = "Available")
+        => new(provider.ToString(), account.Name, GetStableAccountId(account), ExtractAwsProfile(account.Description, provider),
+            ExtractPermissionSet(account.Name, account.Description, provider), scanAccess) { CloudAccountId = account.Id };
+
+    private static string GetStableAccountId(CloudAccount account)
+        => account.CloudProvider == CloudProviderType.Azure
+            ? account.SubscriptionId ?? account.ExternalAccountId ?? account.ProjectId ?? account.Id.ToString()
+            : account.ExternalAccountId ?? account.ProjectId ?? account.SubscriptionId ?? account.Id.ToString();
 
     private static HashSet<string> ScanProviders(LiveScanHistoryEntry scan)
         => scan.AccountDetails.Select(account => account.Provider)
