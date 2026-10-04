@@ -17,27 +17,27 @@ public static class AzurePermissionMapper
         {
             foreach (var action in ReadStrings(block, "actions"))
             {
-                yield return Create(accountId, roleId, action, "Allow", "Actions");
+                yield return Create(accountId, roleId, action, "Actions");
             }
 
             foreach (var action in ReadStrings(block, "notActions"))
             {
-                yield return Create(accountId, roleId, action, "Deny", "NotActions");
+                yield return Create(accountId, roleId, action, "NotActions", isExclusion: true);
             }
 
             foreach (var action in ReadStrings(block, "dataActions"))
             {
-                yield return Create(accountId, roleId, action, "Allow", "DataActions");
+                yield return Create(accountId, roleId, action, "DataActions");
             }
 
             foreach (var action in ReadStrings(block, "notDataActions"))
             {
-                yield return Create(accountId, roleId, action, "Deny", "NotDataActions");
+                yield return Create(accountId, roleId, action, "NotDataActions", isExclusion: true);
             }
         }
     }
 
-    private static CloudPermission Create(Guid accountId, string? roleId, string action, string accessType, string source) => new()
+    private static CloudPermission Create(Guid accountId, string? roleId, string action, string source, bool isExclusion = false) => new()
     {
         Id = Guid.NewGuid(),
         AccountId = accountId,
@@ -45,7 +45,8 @@ public static class AzurePermissionMapper
         Action = action,
         Resource = "*",
         Source = $"Azure RBAC {source}",
-        AccessType = accessType == "Allow" ? global::CloudEntitle.Domain.AccessType.Allow : global::CloudEntitle.Domain.AccessType.Deny
+        AccessType = global::CloudEntitle.Domain.AccessType.Allow,
+        IsExclusion = isExclusion
     };
 
     private static IEnumerable<string> ReadStrings(JsonElement element, string property)

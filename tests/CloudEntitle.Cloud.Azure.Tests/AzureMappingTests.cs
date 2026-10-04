@@ -25,7 +25,8 @@ public sealed class AzureMappingTests
 
         Assert.Equal(4, permissions.Length);
         Assert.Contains(permissions, permission => permission.AccessType == AccessType.Allow && permission.Source!.Contains("Actions"));
-        Assert.Contains(permissions, permission => permission.AccessType == AccessType.Deny && permission.Source!.Contains("NotActions"));
+        Assert.Contains(permissions, permission => permission.AccessType == AccessType.Allow && permission.IsExclusion && permission.Source!.Contains("NotActions"));
+        Assert.Contains(permissions, permission => permission.AccessType == AccessType.Allow && permission.IsExclusion && permission.Source!.Contains("NotDataActions"));
         Assert.Contains(permissions, permission => permission.Action == "Microsoft.Storage/*");
     }
 }

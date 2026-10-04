@@ -66,13 +66,16 @@ public abstract class ProviderEntitlementNormalizer : IEntitlementNormalizer
             }
 
             var originalAssignment = record.ProviderSpecificData?.TryGetValue("assignment", out var assignment) == true ? assignment : record.AssignmentType.ToString();
+            var isExclusion = Provider == CloudProvider.Azure
+                && (originalAssignment is "NotActions" or "NotDataActions"
+                    || source.Permissions.Any(permission => permission.Id == record.PermissionId && permission.IsExclusion));
             var evidence = new ProviderEvidence(Provider, record.SourceType, record.SourceId, record.SourceName, record.OriginalDocument, record.OriginalStatement, record.Scope, originalAssignment, source.CollectedAt, record.ProviderSpecificData ?? new Dictionary<string, string>());
             var scope = new NormalizedScope(Provider, ClassifyScope(record.Scope), record.Scope, record.SourceScope, record.TargetScope, record.IsInherited);
-            var normalizedAccess = conditional ? NormalizedAccessType.Conditional : record.AccessType switch { AccessType.Allow => NormalizedAccessType.Allow, AccessType.Deny => NormalizedAccessType.Deny, _ => NormalizedAccessType.Unknown };
+            var normalizedAccess = conditional ? NormalizedAccessType.Conditional : isExclusion ? NormalizedAccessType.Allow : record.AccessType switch { AccessType.Allow => NormalizedAccessType.Allow, AccessType.Deny => NormalizedAccessType.Deny, _ => NormalizedAccessType.Unknown };
             var condition = conditional ? new NormalizedCondition(record.ConditionTitle, record.ConditionExpression, "Unknown", record.ConditionExpression) : null;
             var key = string.Join('|', Provider, record.CloudAccountId, record.PrincipalId, record.RoleId, record.PolicyId, record.PermissionId, record.Scope, record.ResourcePattern, normalizedAccess, record.AssignmentType, record.ConditionExpression);
             if (entitlements.ContainsKey(key)) continue;
-            entitlements[key] = new NormalizedEntitlement(GuidUtility.Create(GuidUtility.Namespace, key), Provider, record.CloudAccountId, record.PrincipalId, null, record.RoleId, record.PolicyId, record.PermissionId, scope, record.AssignmentType, normalizedAccess, !record.IsInherited && record.AssignmentType is AssignmentType.Direct or AssignmentType.Role or AssignmentType.Policy, record.IsInherited, conditional, condition, status, evidence, source.CollectedAt, null, record.ResourcePattern);
+            entitlements[key] = new NormalizedEntitlement(GuidUtility.Create(GuidUtility.Namespace, key), Provider, record.CloudAccountId, record.PrincipalId, null, record.RoleId, record.PolicyId, record.PermissionId, scope, record.AssignmentType, normalizedAccess, !record.IsInherited && record.AssignmentType is AssignmentType.Direct or AssignmentType.Role or AssignmentType.Policy, record.IsInherited, conditional, condition, status, evidence, source.CollectedAt, null, record.ResourcePattern, isExclusion, conditional ? record.AccessType : null);
         }
 
         return Task.FromResult(new NormalizationResult(source.Principals, source.Roles, source.Policies, source.Permissions, entitlements.Values.ToArray(), warnings, errors, new(processed, entitlements.Count, partial, 0, failed)));

@@ -8,14 +8,15 @@ namespace CloudEntitle.Normalization.Tests;
 public sealed class NormalizationTests
 {
     [Fact]
-    public async Task AzureNotActions_ShouldRemainExplicitDenyAndTraceable()
+    public async Task AzureNotActions_ShouldRemainRoleScopedExclusionAndTraceable()
     {
         var source = CreateSource(CloudProvider.Azure, AccessType.Deny, AssignmentType.Role, "Microsoft.Compute/virtualMachines/delete", "/subscriptions/azure-demo/resourceGroups/prod", "AzureRoleDefinition", "role-azure", "NotActions");
 
         var result = await new EntitlementNormalizationService().NormalizeAsync(source);
         var entitlement = Assert.Single(result.Entitlements);
 
-        Assert.Equal(NormalizedAccessType.Deny, entitlement.AccessType);
+        Assert.Equal(NormalizedAccessType.Allow, entitlement.AccessType);
+        Assert.True(entitlement.IsExclusion);
         Assert.Equal("role-azure", entitlement.Evidence.SourceId);
         Assert.Equal("NotActions", entitlement.Evidence.OriginalAssignment);
         Assert.Equal(NormalizedScopeType.ResourceGroup, entitlement.Scope.Type);

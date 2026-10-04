@@ -395,6 +395,7 @@ public class CloudPermission
     public string? ActionName { get => Action; set => Action = value; }
     public string? ResourcePattern { get => Resource; set => Resource = value; }
     public AccessType AccessType { get; set; } = AccessType.Allow;
+    public bool IsExclusion { get; set; }
     public string? Description { get; set; }
 
     public void Validate()

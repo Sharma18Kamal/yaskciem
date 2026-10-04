@@ -959,7 +959,10 @@ public sealed class ResourcesViewModel : WorkspaceViewModel
 public sealed record EntitlementGridRow(string Provider, string Subject, string Grant, string Scope, string Assignment, string Source);
 public sealed record EffectiveAccessGridRow(string Provider, string Principal, string Role, string Permission, string Resource, string Decision, string Path, string Source, string LastUsed, string LastChanged, bool Privileged);
 public sealed record PermissionSimulatorOption(Guid Id, string Label);
-public sealed record PermissionSimulationRow(string Provider, string Principal, string Resource, string Permission, string Decision, string EvaluationStatus, string Source, string Evidence, string Diagnostics);
+public sealed record PermissionSimulationRow(string Provider, string Principal, string Resource, string Permission, string Decision, string EvaluationStatus, string Source, string Evidence, string Diagnostics)
+{
+    public string AccessPath { get; init; } = string.Empty;
+}
 public sealed record RiskFindingGridRow(string Provider, string Severity, string Title, string Principal, string Resource, string Evidence, string Recommendation);
 public sealed record RecommendationGridRow(RecommendationModel? Model, string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority, string Impact, string Reason, string Evidence);
 public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings, int EffectiveAccess);
@@ -1098,7 +1101,7 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
         .Select(permission => new PermissionSimulatorOption(permission.Id, $"{permission.Name} ({permission.Action ?? "action not supplied"})"))
         .ToArray();
     public AsyncRelayCommand SimulatePermissionCommand { get; }
-    public string DataCoverageMessage => "Last used and last changed are separate provider-reported signals. Missing audit data remains unknown; conditional inheritance and explicit-deny evaluation are not simulated.";
+    public string DataCoverageMessage => "Last used and last changed are separate provider-reported signals. Unsupported policy constructs and missing audit data remain partial or unknown.";
     public IReadOnlyList<EffectiveAccessGridRow> AccessRecords
     {
         get
@@ -1215,7 +1218,10 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 account.CloudProvider.ToString(), principal.Name, resource.Name, permission.Name,
                 result.Decision.ToString(), result.EvaluationStatus.ToString(), result.AccessSource,
                 string.Join(" | ", result.Evidence.Select(evidence => $"{evidence.SourceType}: {evidence.SourceName ?? evidence.SourceId}")),
-                string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+                string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message)))
+            {
+                AccessPath = string.Join(Environment.NewLine, result.AccessPaths.Select(path => $"{path.Decision}: {string.Join(" -> ", path.Steps.Select(step => step.Name))}"))
+            };
             SimulationStatus = result.Decision == AccessDecision.NotApplicable
                 ? "No applicable normalized grant was found; this is not a provider-side access denial."
                 : $"Evaluated {result.ApplicableEntitlements.Count} normalized entitlement(s).";
@@ -1282,7 +1288,8 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 : permission?.AccessType == AccessType.Allow ? NormalizedAccessType.Allow
                 : NormalizedAccessType.Unknown;
             var sourceId = entitlement.Id.ToString();
-            var evidence = new ProviderEvidence(provider, "SnapshotEntitlement", sourceId, entitlement.Source, null, null, scopeText, entitlement.AssignmentType.ToString(), entitlement.GrantedAt, new Dictionary<string, string>());
+            var evidenceType = permission?.AccessType == AccessType.Deny ? "SnapshotExplicitDeny" : "SnapshotEntitlement";
+            var evidence = new ProviderEvidence(provider, evidenceType, sourceId, entitlement.Source, null, null, scopeText, entitlement.AssignmentType.ToString(), entitlement.GrantedAt, new Dictionary<string, string>());
             var scopeType = scopeText.Contains("project", StringComparison.OrdinalIgnoreCase) ? NormalizedScopeType.Project
                 : scopeText.Contains("subscription", StringComparison.OrdinalIgnoreCase) ? NormalizedScopeType.Subscription
                 : NormalizedScopeType.Unknown;
@@ -1292,7 +1299,7 @@ public sealed class EffectiveAccessViewModel : WorkspaceViewModel
                 new NormalizedScope(provider, scopeType, scopeText, null, null, inherited), entitlement.AssignmentType, accessType,
                 entitlement.AssignmentType == AssignmentType.Direct, inherited, conditional, condition,
                 unresolvedGroupGrant ? NormalizationStatus.PartiallyNormalized : conditional ? NormalizationStatus.PartiallyNormalized : NormalizationStatus.Normalized,
-                evidence, entitlement.GrantedAt, entitlement.ExpiresAt, permission?.ResourcePattern);
+                evidence, entitlement.GrantedAt, entitlement.ExpiresAt, permission?.ResourcePattern, permission?.IsExclusion == true);
         }).ToArray();
 
             return new NormalizationResult(snapshot.Principals, snapshot.Roles, Array.Empty<CloudPolicy>(), snapshot.Permissions, normalizedEntitlements,

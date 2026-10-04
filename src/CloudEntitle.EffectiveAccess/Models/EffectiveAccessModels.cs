@@ -13,7 +13,9 @@ public sealed record AccessEvaluationRequest(
     Guid? PrincipalId = null,
     Guid? ResourceId = null,
     Guid? PermissionId = null,
-    DateTime? EvaluationTime = null);
+    DateTime? EvaluationTime = null,
+    IReadOnlyDictionary<string, string>? RuntimeConditionContext = null,
+    IReadOnlyList<RoleTrustRelationship>? RoleTrustRelationships = null);
 
 public sealed record AccessEvaluationContext(
     CloudProvider Provider,
@@ -22,7 +24,27 @@ public sealed record AccessEvaluationContext(
     Guid ResourceId,
     Guid PermissionId,
     DateTime EvaluationTime,
-    IReadOnlyDictionary<string, string> RuntimeConditionContext);
+    IReadOnlyDictionary<string, string> RuntimeConditionContext)
+{
+    public CloudResource? Resource { get; init; }
+    public CloudPermission? Permission { get; init; }
+    public IReadOnlyList<NormalizedEntitlement> ApplicableEntitlements { get; init; } = Array.Empty<NormalizedEntitlement>();
+    public bool HasIncompleteNormalization { get; init; }
+}
+
+public sealed record RoleTrustRelationship(
+    CloudProvider Provider,
+    Guid CloudAccountId,
+    Guid? TrustedPrincipalId,
+    string? TrustedPrincipalExternalId,
+    Guid RolePrincipalId,
+    Guid RoleId,
+    string SourceId,
+    string Description);
+
+public sealed record AccessPathStep(string Type, string Name, string? EvidenceSource, string? Details);
+
+public sealed record AccessExplanationPath(string SourceId, string Decision, IReadOnlyList<AccessPathStep> Steps);
 
 public sealed record AccessEvaluationDiagnostic(string Code, string Message, string? SourceId = null, bool IsBlocking = false);
 
@@ -35,7 +57,10 @@ public sealed record AccessDecisionResult(
     string AccessSource,
     IReadOnlyList<NormalizedEntitlement> ApplicableEntitlements,
     IReadOnlyList<ProviderEvidence> Evidence,
-    IReadOnlyList<AccessEvaluationDiagnostic> Diagnostics);
+    IReadOnlyList<AccessEvaluationDiagnostic> Diagnostics)
+{
+    public IReadOnlyList<AccessExplanationPath> AccessPaths { get; init; } = Array.Empty<AccessExplanationPath>();
+}
 
 public sealed record AccessEvaluationResult(
     IReadOnlyList<DomainEffectiveAccess> EffectiveAccess,
@@ -44,4 +69,7 @@ public sealed record AccessEvaluationResult(
     int DenyCount,
     int ConditionalCount,
     int UnknownCount,
-    int UnsupportedCount);
+    int UnsupportedCount)
+{
+    public IReadOnlyDictionary<Guid, IReadOnlyList<AccessExplanationPath>> AccessPaths { get; init; } = new Dictionary<Guid, IReadOnlyList<AccessExplanationPath>>();
+}

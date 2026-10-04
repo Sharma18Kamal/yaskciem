@@ -192,6 +192,7 @@
                                 </StackPanel>
                                 <TextBlock Text="{Binding SimulationResult.Permission}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                                 <TextBlock Text="{Binding SimulationResult.Source}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SimulationResult.AccessPath}" Foreground="{StaticResource AccentBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                                 <TextBlock Text="{Binding SimulationResult.Evidence}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                                 <TextBlock Text="{Binding SimulationResult.Diagnostics}" Foreground="{StaticResource CriticalBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                             </StackPanel>

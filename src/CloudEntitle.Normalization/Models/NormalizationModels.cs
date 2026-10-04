@@ -43,7 +43,8 @@ public sealed record NormalizedPermission(
     PermissionCategory Category,
     ResourcePatternType ResourcePatternType,
     IReadOnlyDictionary<string, string> ProviderSpecificData,
-    ProviderEvidence Evidence);
+    ProviderEvidence Evidence,
+    bool IsExclusion = false);
 
 public sealed record NormalizedEntitlement(
     Guid Id,
@@ -65,7 +66,9 @@ public sealed record NormalizedEntitlement(
     ProviderEvidence Evidence,
     DateTime CreatedAt,
     DateTime? ExpiresAt,
-    string? ResourcePattern = null);
+    string? ResourcePattern = null,
+    bool IsExclusion = false,
+    AccessType? ConditionalEffect = null);
 
 public sealed record ProviderAuthorizationRecord(
     string SourceId,
