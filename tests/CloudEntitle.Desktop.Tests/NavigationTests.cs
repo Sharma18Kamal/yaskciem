@@ -63,11 +63,12 @@ public sealed class NavigationTests
         var navigation = provider.GetRequiredService<INavigationService>();
         var viewModel = new MainWindowViewModel(navigation);
 
-        Assert.Equal(14, viewModel.NavigationItems.Count);
+        Assert.Equal(15, viewModel.NavigationItems.Count);
         Assert.Equal("Dashboard", viewModel.CurrentNavigationItem.Title);
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Effective Access");
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Access Paths");
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Remediation");
+        Assert.Contains(viewModel.NavigationItems, item => item.Title == "Organizations");
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Access Reviews");
         Assert.Equal("YASK-CIEM", viewModel.ApplicationName);
         Assert.Equal("Cloud Accounts", viewModel.CloudAccountsNavigationItem.Title);

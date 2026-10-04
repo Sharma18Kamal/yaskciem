@@ -1,4 +1,5 @@
 using CloudEntitle.Domain;
+using CloudEntitle.OrganizationManagement.Abstractions;
 using CloudEntitle.OrganizationManagement.Models;
 
 namespace CloudEntitle.OrganizationManagement.Services;
@@ -8,46 +9,102 @@ public sealed class OrganizationManagementService
     private readonly Dictionary<Guid, OrganizationProfile> _organizations = new();
     private readonly Dictionary<Guid, OrganizationMember> _members = new();
     private readonly Dictionary<Guid, TenantBinding> _bindings = new();
+    private readonly List<OrganizationAuditEntry> _auditEntries = new();
+    private readonly IOrganizationStore? _store;
 
-    public OrganizationProfile CreateOrganization(string name, string tenantKey)
+    public OrganizationManagementService(IOrganizationStore? store = null)
+    {
+        _store = store;
+        if (store is null) return;
+        var state = store.Load();
+        foreach (var organization in state.Organizations) _organizations[organization.Id] = organization;
+        foreach (var member in state.Members) _members[member.Id] = member;
+        foreach (var binding in state.Bindings) _bindings[binding.Id] = binding;
+        _auditEntries.AddRange(state.AuditEntries);
+    }
+
+    public OrganizationProfile CreateOrganization(string name, string tenantKey, string entraTenantId, OrganizationIdentity creator)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Organization name is required.", nameof(name));
         if (string.IsNullOrWhiteSpace(tenantKey)) throw new ArgumentException("Tenant key is required.", nameof(tenantKey));
-        var organization = new OrganizationProfile(Guid.NewGuid(), name.Trim(), tenantKey.Trim(), OrganizationStatus.Active, DateTime.UtcNow);
+        if (_organizations.Values.Any(item => string.Equals(item.TenantKey, tenantKey.Trim(), StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("An organization with this tenant key already exists.");
+        if (!Guid.TryParse(entraTenantId, out var parsedTenantId) || parsedTenantId == Guid.Empty) throw new ArgumentException("A valid Entra tenant ID is required.", nameof(entraTenantId));
+        ValidateIdentity(creator);
+        if (!string.Equals(parsedTenantId.ToString(), creator.TenantId, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("The signed-in identity does not belong to the organization's Entra tenant.");
+        var organization = new OrganizationProfile(Guid.NewGuid(), name.Trim(), tenantKey.Trim(), OrganizationStatus.Active, DateTime.UtcNow)
+        {
+            EntraTenantId = parsedTenantId.ToString()
+        };
         _organizations.Add(organization.Id, organization);
+        var owner = new OrganizationMember(Guid.NewGuid(), organization.Id, creator.UserId, creator.Email.Trim(), OrganizationMemberRole.OrganizationAdmin, true, DateTime.UtcNow);
+        _members.Add(owner.Id, owner);
+        RecordAudit(organization.Id, creator, "OrganizationCreated", organization.Id.ToString(), "Creator assigned OrganizationAdmin.");
+        Persist();
         return organization;
     }
 
-    public OrganizationMember AddMember(Guid organizationId, Guid userId, string email, OrganizationMemberRole role)
+    public OrganizationMember AddMember(Guid organizationId, OrganizationIdentity actor, string email, OrganizationMemberRole role)
     {
-        RequireOrganization(organizationId);
+        EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
         if (string.IsNullOrWhiteSpace(email)) throw new ArgumentException("Member email is required.", nameof(email));
-        var member = new OrganizationMember(Guid.NewGuid(), organizationId, userId, email.Trim(), role, true, DateTime.UtcNow);
+        var normalizedEmail = email.Trim();
+        if (_members.Values.Any(item => item.OrganizationId == organizationId && string.Equals(item.Email, normalizedEmail, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("This email is already a member of the organization.");
+        var member = new OrganizationMember(Guid.NewGuid(), organizationId, Guid.Empty, normalizedEmail, role, true, DateTime.UtcNow);
         _members.Add(member.Id, member);
+        RecordAudit(organizationId, actor, "MemberAdded", normalizedEmail, $"Role: {role}.");
+        Persist();
         return member;
     }
 
-    public TenantBinding BindCloudAccount(Guid organizationId, CloudProvider provider, Guid cloudAccountId, string externalTenantId, string displayName)
+    public OrganizationMember? AcceptInvitation(Guid organizationId, OrganizationIdentity identity)
     {
-        RequireOrganization(organizationId);
+        ValidateIdentity(identity);
+        var organization = RequireOrganization(organizationId);
+        if (organization.Status != OrganizationStatus.Active || !IsTenantMatch(organization, identity)) return null;
+        var invitation = _members.Values.FirstOrDefault(item => item.OrganizationId == organizationId && item.IsActive
+            && item.IsPending && string.Equals(item.Email, identity.Email, StringComparison.OrdinalIgnoreCase));
+        if (invitation is null) return null;
+        var accepted = invitation with { UserId = identity.UserId };
+        _members[invitation.Id] = accepted;
+        RecordAudit(organizationId, identity, "InvitationAccepted", accepted.Email, "Membership linked to the authenticated Entra object ID.");
+        Persist();
+        return accepted;
+    }
+
+    public TenantBinding BindCloudAccount(Guid organizationId, OrganizationIdentity actor, CloudProvider provider, Guid cloudAccountId, string externalTenantId, string displayName)
+    {
+        EnsureAuthorized(organizationId, actor, OrganizationAction.ManageConnections);
         if (cloudAccountId == Guid.Empty) throw new ArgumentException("Cloud account ID is required.", nameof(cloudAccountId));
         if (string.IsNullOrWhiteSpace(externalTenantId)) throw new ArgumentException("External tenant ID is required.", nameof(externalTenantId));
-        var binding = new TenantBinding(Guid.NewGuid(), organizationId, provider, cloudAccountId, externalTenantId.Trim(), displayName.Trim(), DateTime.UtcNow);
+        var normalizedExternalId = externalTenantId.Trim();
+        if (_bindings.Values.Any(item => item.Provider == provider && string.Equals(item.ExternalTenantId, normalizedExternalId, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("This cloud account is already bound to an organization.");
+        var binding = new TenantBinding(Guid.NewGuid(), organizationId, provider, cloudAccountId, normalizedExternalId, displayName.Trim(), DateTime.UtcNow);
         _bindings.Add(binding.Id, binding);
+        RecordAudit(organizationId, actor, "AccountBound", cloudAccountId.ToString(), $"{provider}: {displayName.Trim()} ({externalTenantId.Trim()}).");
+        Persist();
         return binding;
     }
 
-    public OrganizationScope GetScope(Guid organizationId)
+    public OrganizationScope GetScope(Guid organizationId, OrganizationIdentity identity)
     {
-        RequireOrganization(organizationId);
+        EnsureAuthorized(organizationId, identity, OrganizationAction.ViewInventory);
         var bindings = _bindings.Values.Where(binding => binding.OrganizationId == organizationId).ToArray();
         return new OrganizationScope(organizationId, bindings.Select(binding => binding.CloudAccountId).ToHashSet(), bindings.Select(binding => binding.Provider).ToHashSet());
     }
 
-    public AuthorizationDecision Authorize(Guid organizationId, Guid userId, OrganizationAction action)
+    public AuthorizationDecision Authorize(Guid organizationId, OrganizationIdentity identity, OrganizationAction action)
     {
         var organization = RequireOrganization(organizationId);
-        var member = _members.Values.FirstOrDefault(item => item.OrganizationId == organizationId && item.UserId == userId && item.IsActive);
+        if (identity is null || identity.UserId == Guid.Empty || string.IsNullOrWhiteSpace(identity.Subject)
+            || string.IsNullOrWhiteSpace(identity.Email) || string.IsNullOrWhiteSpace(identity.TenantId))
+            return new(false, "A validated Entra identity is required.");
+        if (!IsTenantMatch(organization, identity)) return new(false, "Signed-in identity does not belong to this organization's Entra tenant.");
+        var member = _members.Values.FirstOrDefault(item => item.OrganizationId == organizationId && item.IsActive
+                && item.UserId == identity.UserId);
         if (member == null) return new(false, "User is not an active organization member.");
         if (organization.Status != OrganizationStatus.Active) return new(false, $"Organization is {organization.Status}.");
         var allowed = action switch
@@ -60,8 +117,91 @@ public sealed class OrganizationManagementService
         return new(allowed, allowed ? "Organization role permits this action." : "Organization role does not permit this action.");
     }
 
-    public IReadOnlyList<OrganizationMember> GetMembers(Guid organizationId) => _members.Values.Where(member => member.OrganizationId == organizationId).ToArray();
-    public IReadOnlyList<TenantBinding> GetTenantBindings(Guid organizationId) => _bindings.Values.Where(binding => binding.OrganizationId == organizationId).ToArray();
+    public IReadOnlyList<OrganizationProfile> GetOrganizations() => _organizations.Values.OrderBy(item => item.Name).ToArray();
+
+    public OrganizationMemberRole? GetCurrentRole(Guid organizationId, OrganizationIdentity identity)
+    {
+        var organization = RequireOrganization(organizationId);
+        if (identity is null || identity.UserId == Guid.Empty || string.IsNullOrWhiteSpace(identity.TenantId)
+            || string.IsNullOrWhiteSpace(identity.Email) || !IsTenantMatch(organization, identity)
+            || organization.Status != OrganizationStatus.Active)
+            return null;
+        return _members.Values.FirstOrDefault(item => item.OrganizationId == organizationId && item.IsActive
+                && item.UserId == identity.UserId)?.Role;
+    }
+
+    public IReadOnlyList<OrganizationMember> GetMembers(Guid organizationId, OrganizationIdentity identity)
+    {
+        EnsureAuthorized(organizationId, identity, OrganizationAction.ManageMembers);
+        return _members.Values.Where(member => member.OrganizationId == organizationId).ToArray();
+    }
+
+    public OrganizationMember UpdateMemberRole(Guid organizationId, OrganizationIdentity actor, Guid memberId, OrganizationMemberRole role)
+    {
+        EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
+        if (!_members.TryGetValue(memberId, out var member) || member.OrganizationId != organizationId)
+            throw new KeyNotFoundException("Organization member was not found.");
+        if (member.Role == OrganizationMemberRole.OrganizationAdmin && role != OrganizationMemberRole.OrganizationAdmin
+            && _members.Values.Count(item => item.OrganizationId == organizationId && item.IsActive && item.Role == OrganizationMemberRole.OrganizationAdmin) <= 1)
+            throw new InvalidOperationException("An organization must retain at least one active administrator.");
+        var updated = member with { Role = role };
+        _members[memberId] = updated;
+        RecordAudit(organizationId, actor, "MemberRoleChanged", member.Email, $"{member.Role} -> {role}.");
+        Persist();
+        return updated;
+    }
+
+    public OrganizationMember SetMemberActive(Guid organizationId, OrganizationIdentity actor, Guid memberId, bool isActive)
+    {
+        EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
+        if (!_members.TryGetValue(memberId, out var member) || member.OrganizationId != organizationId)
+            throw new KeyNotFoundException("Organization member was not found.");
+        if (member.IsActive && !isActive && member.Role == OrganizationMemberRole.OrganizationAdmin
+            && _members.Values.Count(item => item.OrganizationId == organizationId && item.IsActive && item.Role == OrganizationMemberRole.OrganizationAdmin) <= 1)
+            throw new InvalidOperationException("An organization must retain at least one active administrator.");
+        var updated = member with { IsActive = isActive };
+        _members[memberId] = updated;
+        RecordAudit(organizationId, actor, isActive ? "MemberActivated" : "MemberDeactivated", member.Email, "Membership status changed.");
+        Persist();
+        return updated;
+    }
+
+    public IReadOnlyList<TenantBinding> GetTenantBindings(Guid organizationId, OrganizationIdentity identity)
+    {
+        EnsureAuthorized(organizationId, identity, OrganizationAction.ViewInventory);
+        return _bindings.Values.Where(binding => binding.OrganizationId == organizationId).ToArray();
+    }
+
+    public IReadOnlyList<OrganizationAuditEntry> GetAuditTrail(Guid organizationId, OrganizationIdentity identity)
+    {
+        EnsureAuthorized(organizationId, identity, OrganizationAction.ManageMembers);
+        return _auditEntries.Where(entry => entry.OrganizationId == organizationId).OrderByDescending(entry => entry.Timestamp).ToArray();
+    }
+
+    private void EnsureAuthorized(Guid organizationId, OrganizationIdentity identity, OrganizationAction action)
+    {
+        var decision = Authorize(organizationId, identity, action);
+        if (!decision.Allowed) throw new UnauthorizedAccessException(decision.Reason);
+    }
+
+    private static bool IsTenantMatch(OrganizationProfile organization, OrganizationIdentity identity)
+        => string.Equals(organization.EntraTenantId, identity.TenantId, StringComparison.OrdinalIgnoreCase);
+
+    private static void ValidateIdentity(OrganizationIdentity identity)
+    {
+        if (identity.UserId == Guid.Empty || string.IsNullOrWhiteSpace(identity.Subject)
+            || string.IsNullOrWhiteSpace(identity.TenantId) || string.IsNullOrWhiteSpace(identity.Email))
+            throw new UnauthorizedAccessException("A validated Entra identity is required.");
+    }
+
+    private void Persist() => _store?.Save(new OrganizationDirectoryState(
+        _organizations.Values.ToArray(), _members.Values.ToArray(), _bindings.Values.ToArray())
+    {
+        AuditEntries = _auditEntries.ToArray()
+    });
+
+    private void RecordAudit(Guid organizationId, OrganizationIdentity actor, string action, string target, string details)
+        => _auditEntries.Add(new OrganizationAuditEntry(DateTime.UtcNow, organizationId, actor.UserId, actor.Email.Trim(), action, target, details));
 
     private OrganizationProfile RequireOrganization(Guid id) => _organizations.TryGetValue(id, out var organization) ? organization : throw new KeyNotFoundException($"Organization {id} was not found.");
 }

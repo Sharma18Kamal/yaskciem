@@ -438,6 +438,116 @@
                 <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
             </StackPanel>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:OrganizationViewModel}">
+            <StackPanel>
+                <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="0.8*"/><ColumnDefinition Width="1.2*"/></Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                        <TextBlock Text="ORGANIZATIONS" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
+                        <DataGrid ItemsSource="{Binding Organizations}" SelectedItem="{Binding SelectedOrganization, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" MaxHeight="220" SelectionMode="Single">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="95"/>
+                                <DataGridTextColumn Header="Tenant" Binding="{Binding EntraTenantId}" Width="190"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="MICROSOFT ENTRA SSO" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="{Binding SignedInAs}" Foreground="{StaticResource PrimaryBrush}" Margin="0,6,0,8" TextWrapping="Wrap"/>
+                                <TextBox Text="{Binding SignInTenantId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Entra tenant ID for the selected organization"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Content="Sign in" Command="{Binding SignInCommand}" IsEnabled="{Binding CanSignIn}" Style="{StaticResource PrimaryButton}"/>
+                                    <Button Content="Sign out" Command="{Binding SignOutCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="CREATE ORGANIZATION" Style="{StaticResource CardLabel}"/>
+                                <TextBox Text="{Binding OrganizationName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Organization name" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding TenantKey, UpdateSourceTrigger=PropertyChanged}" ToolTip="Unique organization key" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding OrganizationTenantId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Microsoft Entra tenant ID; must match the signed-in tenant" Margin="0,8,0,0"/>
+                                <Button Content="Create and become admin" Command="{Binding CreateOrganizationCommand}" IsEnabled="{Binding CanCreateOrganization}" Style="{StaticResource PrimaryButton}" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                        <Grid Margin="0,4,0,8">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{Binding SelectedOrganization.Name}" Style="{StaticResource CardLabel}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding CurrentRole}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                        </Grid>
+                        <UniformGrid Columns="3" Rows="2" Margin="0,0,0,8">
+                            <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="BOUND ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding BoundAccountCount}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                            <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="SCANNED ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding ConsolidatedAccountCount}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                            <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="IDENTITIES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding ConsolidatedIdentities}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                            <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="RESOURCES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding ConsolidatedResources}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                            <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="FINDINGS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding ConsolidatedFindings}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                            <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL / EFFECTIVE ACCESS" Style="{StaticResource CardLabel}"/><TextBlock Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"><Run Text="{Binding ConsolidatedCriticalFindings}"/><Run Text=" / "/><Run Text="{Binding ConsolidatedEffectiveAccess}"/></TextBlock></StackPanel></Border>
+                        </UniformGrid>
+                        <TextBlock Text="{Binding ConsolidatedCoverage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="CLOUD ACCOUNT BINDINGS" Style="{StaticResource CardLabel}"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <ComboBox Grid.Column="0" ItemsSource="{Binding AvailableAccounts}" SelectedItem="{Binding SelectedAccount, Mode=TwoWay}" DisplayMemberPath="AccountName" ToolTip="Accounts from the latest live scan"/>
+                                    <Button Grid.Column="1" Content="Bind account" Command="{Binding BindAccountCommand}" IsEnabled="{Binding CanBindAccount}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                </Grid>
+                                <DataGrid ItemsSource="{Binding Bindings}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="80" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Account" Binding="{Binding DisplayName}" Width="*"/>
+                                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="100"/>
+                                        <DataGridTextColumn Header="External account" Binding="{Binding ExternalTenantId}" Width="190"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="ORGANIZATION MEMBERS" Style="{StaticResource CardLabel}"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding NewMemberEmail, UpdateSourceTrigger=PropertyChanged}" ToolTip="Invite by Entra sign-in email" Margin="0,0,8,0"/>
+                                    <ComboBox Grid.Column="1" ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding NewMemberRole, Mode=TwoWay}" Margin="4,0"/>
+                                    <Button Grid.Column="2" Content="Add member" Command="{Binding AddMemberCommand}" IsEnabled="{Binding CanAddMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                </Grid>
+                                <DataGrid ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="80" MaxHeight="180" SelectionMode="Single" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Email" Binding="{Binding Email}" Width="*"/>
+                                        <DataGridTextColumn Header="Role" Binding="{Binding Role}" Width="150"/>
+                                        <DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" Width="70"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <ComboBox ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding SelectedMemberRole, Mode=TwoWay}" IsEnabled="{Binding CanChangeMemberRole}" MinWidth="180"/>
+                                    <Button Content="Update role" Command="{Binding UpdateMemberRoleCommand}" IsEnabled="{Binding CanChangeMemberRole}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <Button Content="Toggle active" Command="{Binding ToggleMemberActiveCommand}" IsEnabled="{Binding CanToggleMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="ADMIN AUDIT TRAIL" Style="{StaticResource CardLabel}"/>
+                                <DataGrid ItemsSource="{Binding AuditTrail}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="70" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Time" Binding="{Binding Timestamp, StringFormat=g}" Width="145"/>
+                                        <DataGridTextColumn Header="Actor" Binding="{Binding ActorEmail}" Width="*"/>
+                                        <DataGridTextColumn Header="Action" Binding="{Binding Action}" Width="145"/>
+                                        <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="150"/>
+                                        <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="2*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+                <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SuccessBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:AccessReviewViewModel}">
             <StackPanel>
                 <TextBlock Text="{Binding CoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>

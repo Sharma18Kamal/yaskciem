@@ -112,6 +112,7 @@ public sealed class MainWindowViewModel : ObservableObject
             new("Risk Findings", "!", typeof(RiskFindingsViewModel)),
             new("Recommendations", "✓", typeof(RecommendationsViewModel)),
             new("Remediation", "⚒", typeof(RemediationViewModel)),
+            new("Organizations", "▦", typeof(OrganizationViewModel)),
             new("Access Reviews", "☑", typeof(AccessReviewViewModel)),
             new("Scan History", "◷", typeof(ScanHistoryViewModel)),
             new("Feedback", "✎", typeof(FeedbackViewModel)),

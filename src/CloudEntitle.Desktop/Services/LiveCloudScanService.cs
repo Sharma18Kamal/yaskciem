@@ -41,7 +41,10 @@ public sealed record LiveCloudScanResult(
 
 public sealed record DiscoveredCloudRole(CloudProviderType Provider, CloudRole Role);
 public sealed record DiscoveredCloudPermission(CloudProviderType Provider, CloudPermission Permission);
-public sealed record LiveScanAccountRecord(string Provider, string AccountName, string AccountId, string Profile, string PermissionSet, string ScanAccess = "Profile connected");
+public sealed record LiveScanAccountRecord(string Provider, string AccountName, string AccountId, string Profile, string PermissionSet, string ScanAccess = "Profile connected")
+{
+    public Guid CloudAccountId { get; init; }
+}
 
 public sealed class LiveCloudScanService : ILiveCloudScanService
 {
@@ -128,7 +131,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     account.Name,
                     account.ExternalAccountId ?? account.SubscriptionId ?? account.ProjectId ?? string.Empty,
                     ExtractAwsProfile(account.Description, provider.ProviderType),
-                    ExtractPermissionSet(account.Name, account.Description, provider.ProviderType))));
+                    ExtractPermissionSet(account.Name, account.Description, provider.ProviderType)) { CloudAccountId = account.Id }));
                 foreach (var account in accounts)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -145,7 +148,12 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     var permissions = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Permissions", () => provider.DiscoverPermissionsAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
                     permissionsScanned += permissions.Count;
                     permissionRecords.AddRange(permissions.Select(permission => new DiscoveredCloudPermission(provider.ProviderType, permission)));
-                    findings.AddRange(await _riskEngine.EvaluateAsync(permissions, provider.ProviderType, cancellationToken));
+                    var accountFindings = await _riskEngine.EvaluateAsync(permissions, provider.ProviderType, cancellationToken);
+                    foreach (var finding in accountFindings)
+                    {
+                        finding.CloudAccountId = account.Id;
+                        findings.Add(finding);
+                    }
 
                     if (provider is IResourceProvider resourceProvider)
                     {
@@ -172,6 +180,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     if (provider is IAccessAnalyzerFindingsProvider analyzerProvider)
                     {
                         var analyzerFindings = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Access analyzer", () => analyzerProvider.DiscoverAccessAnalyzerFindingsAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
+                        foreach (var finding in analyzerFindings) finding.CloudAccountId = account.Id;
                         findings.AddRange(analyzerFindings);
                     }
                     else if (provider.ProviderType == CloudProviderType.Aws)
@@ -246,7 +255,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                                     : "Hierarchy only; project scans are listed separately";
                                 accountRecords.Add(new LiveScanAccountRecord(
                                     provider.ProviderType.ToString(), organizationAccount.Name, accountId, string.Empty, string.Empty,
-                                    scanAccess));
+                                    scanAccess) { CloudAccountId = organizationAccount.Id });
                             }
                         }
                     }
@@ -287,7 +296,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                 {
                     var providerType = cluster.Cluster.CloudProvider;
                     accountsScanned++;
-                    accountRecords.Add(new LiveScanAccountRecord(providerType.ToString(), cluster.Cluster.Name, cluster.Cluster.ExternalAccountId ?? string.Empty, cluster.Cluster.Description ?? string.Empty, "Kubernetes RBAC", $"{cluster.Cluster.ConnectionStatus}: read-only scan"));
+                    accountRecords.Add(new LiveScanAccountRecord(providerType.ToString(), cluster.Cluster.Name, cluster.Cluster.ExternalAccountId ?? string.Empty, cluster.Cluster.Description ?? string.Empty, "Kubernetes RBAC", $"{cluster.Cluster.ConnectionStatus}: read-only scan") { CloudAccountId = cluster.Cluster.Id });
                     resourcesScanned += cluster.Resources.Count;
                     resourceRecords.AddRange(cluster.Resources);
                     identitiesScanned += cluster.Principals.Count;
@@ -297,7 +306,12 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     roleRecords.AddRange(cluster.Roles.Select(role => new DiscoveredCloudRole(providerType, role)));
                     permissionsScanned += cluster.Permissions.Count;
                     permissionRecords.AddRange(cluster.Permissions.Select(permission => new DiscoveredCloudPermission(providerType, permission)));
-                    findings.AddRange(await _riskEngine.EvaluateAsync(cluster.Permissions, providerType, cancellationToken));
+                    var clusterFindings = await _riskEngine.EvaluateAsync(cluster.Permissions, providerType, cancellationToken);
+                    foreach (var finding in clusterFindings)
+                    {
+                        finding.CloudAccountId = cluster.Cluster.Id;
+                        findings.Add(finding);
+                    }
                     effectiveAccessRecords.AddRange(cluster.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
                         providerType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, cluster.Cluster.ExternalAccountId ?? cluster.Cluster.Id.ToString())));
                 }
