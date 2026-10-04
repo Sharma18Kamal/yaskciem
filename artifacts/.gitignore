@@ -1,0 +1,11 @@
+# Build artifacts
+artifacts/
+
+# Installer files
+*.exe
+*.msi
+
+# Build output
+publish/
+bin/
+obj/

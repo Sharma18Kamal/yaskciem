@@ -28,6 +28,7 @@ appsettings.Development.json
 .env
 
 # Installer outputs
+*.exe
 *.msi
 *.msix
 *.appx
