@@ -15,7 +15,7 @@ public sealed class RiskRuleRegistry : IRiskRuleRegistry
     {
         var builtInRules = (rules ?? new IRiskRule[]
         {
-            new PrivilegedIdentityRule(), new ExcessivePermissionRule(), new WildcardPermissionRule(), new BroadScopeRule(), new DormantPrivilegedIdentityRule(), new ExternalPrivilegedIdentityRule(), new PrivilegedServiceAccountRule(), new UnusedEntitlementRule(), new UnusedRoleAssignmentRule(), new ProductionAdministrativeAccessRule(), new ExcessiveServicePermissionRule(), new RedundantAccessPathRule(), new PrivilegedGroupMembershipRule(), new NestedPrivilegedAccessRule(), new BroadResourceWildcardRule(), new LongPrivilegeChainRule()
+            new PrivilegedIdentityRule(), new ExcessivePermissionRule(), new WildcardPermissionRule(), new BroadScopeRule(), new DormantPrivilegedIdentityRule(), new ExternalPrivilegedIdentityRule(), new PrivilegedServiceAccountRule(), new UnusedEntitlementRule(), new UnusedRoleAssignmentRule(), new ProductionAdministrativeAccessRule(), new ExcessiveServicePermissionRule(), new RedundantAccessPathRule(), new PrivilegedGroupMembershipRule(), new NestedPrivilegedAccessRule(), new BroadResourceWildcardRule(), new LongPrivilegeChainRule(), new ExploitableAttackPathRule()
         });
         var loadedCustomRules = (customRules ?? Array.Empty<CustomRiskRuleDefinition>()).Where(rule => rule.Enabled).Select(rule => (IRiskRule)new CustomRiskRule(rule));
         _rules = builtInRules.Concat(loadedCustomRules).GroupBy(rule => rule.RuleId, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
@@ -60,7 +60,7 @@ public sealed class RiskEngine : IRiskEngine
             }
         }
 
-        var result = findings.Values.OrderBy(finding => finding.Fingerprint, StringComparer.Ordinal).ToArray();
+        var result = findings.Values.OrderByDescending(finding => finding.PriorityScore).ThenBy(finding => finding.Severity).ThenBy(finding => finding.Fingerprint, StringComparer.Ordinal).ToArray();
         return new RiskEvaluationResult(result, diagnostics, new(evaluated, failed, result.Length, result.Count(finding => finding.EvaluationState == RiskEvaluationState.Confirmed), result.Count(finding => finding.EvaluationState == RiskEvaluationState.Potential), result.Count(finding => finding.EvaluationState == RiskEvaluationState.Unknown), result.Count(finding => finding.EvaluationState == RiskEvaluationState.Unsupported)));
     }
 }

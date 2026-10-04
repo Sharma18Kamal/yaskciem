@@ -963,7 +963,7 @@ public sealed record PermissionSimulationRow(string Provider, string Principal, 
 {
     public string AccessPath { get; init; } = string.Empty;
 }
-public sealed record RiskFindingGridRow(string Provider, string Severity, string Title, string Principal, string Resource, string Evidence, string Recommendation);
+public sealed record RiskFindingGridRow(string Provider, string Severity, string Title, string Principal, string Resource, string Evidence, string Recommendation, int PriorityScore = 0);
 public sealed record RecommendationGridRow(RecommendationModel? Model, string Type, string Title, string Provider, string State, string Status, string Current, string Suggested, string Priority, string Impact, string Reason, string Evidence);
 public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings, int EffectiveAccess);
 public sealed record AccessChangeTimelineRow(string Provider, string Change, DateTime DetectedAt, DateTime? ProviderChangedAt, string ChangedBy, string Principal, string Assignment, string Scope, string PreviousState, string CurrentState, string Source);
@@ -1343,7 +1343,7 @@ public sealed class RiskFindingsViewModel : WorkspaceViewModel
                 item.CloudProvider.ToString(), item.Severity.ToString(), item.Title,
                 principals.GetValueOrDefault(item.PrincipalId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PrincipalId),
                 resources.GetValueOrDefault(item.ResourceId ?? Guid.Empty)?.Name ?? "Not specified",
-                item.Evidence.Summary, item.Recommendation ?? "Review finding"));
+                item.Evidence.Summary, item.Recommendation ?? "Review finding", item.PriorityScore));
             rows = rows.Concat((_liveCloudScanService?.CurrentResult?.Findings ?? Array.Empty<CloudEntitle.Domain.RiskFinding>()).Select(item => new RiskFindingGridRow(
                 item.CloudProvider.ToString(), item.Severity.ToString(), item.Title,
                 item.Principal, item.Resource, item.Evidence, item.Recommendation)));

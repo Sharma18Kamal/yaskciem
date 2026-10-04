@@ -1090,6 +1090,9 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("PrincipalId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("PriorityScore")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Recommendation")
                         .HasColumnType("TEXT");
 

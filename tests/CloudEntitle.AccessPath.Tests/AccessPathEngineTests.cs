@@ -26,6 +26,24 @@ public sealed class AccessPathEngineTests
     }
 
     [Fact]
+    public async Task SecuritySignals_ShouldExtendPathFromIdentityToRiskyWorkload()
+    {
+        var fixture = FixtureData.Create(AssignmentType.Direct, inherited: false);
+        var signals = new[]
+        {
+            new ResourceSecuritySignal(fixture.Resource.Id, ResourceSecuritySignalType.PublicExposure, "Internet-facing", "Cloud inventory", RiskSeverity.High),
+            new ResourceSecuritySignal(fixture.Resource.Id, ResourceSecuritySignalType.WorkloadVulnerability, "CVE-2026-1234", "Vulnerability scanner", RiskSeverity.Critical, IsExploitable: true, CvssScore: 9.8)
+        };
+
+        var result = await new AccessPathEngine().BuildAsync(fixture.Request with { ResourceSecuritySignals = signals });
+
+        var path = Assert.Single(result.Paths);
+        Assert.Contains(path.Nodes, node => node.NodeType == "PublicExposure");
+        Assert.Contains(path.Nodes, node => node.NodeType == "WorkloadVulnerability");
+        Assert.Equal(path.Nodes.Count - 1, path.Edges.Count);
+    }
+
+    [Fact]
     public async Task NestedGroupPath_ShouldPreserveAllGroupsAndAvoidCircularTraversal()
     {
         var fixture = FixtureData.Create(AssignmentType.Group, inherited: false);

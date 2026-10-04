@@ -114,6 +114,24 @@ public class AccessPathEdge
     public string? Metadata { get; set; }
 }
 
+public enum ResourceSecuritySignalType
+{
+    PublicExposure,
+    SensitiveData,
+    WorkloadVulnerability
+}
+
+public sealed record ResourceSecuritySignal(
+    Guid ResourceId,
+    ResourceSecuritySignalType Type,
+    string Name,
+    string Source,
+    RiskSeverity Severity,
+    bool IsConfirmed = true,
+    bool IsExploitable = false,
+    double? CvssScore = null,
+    string? Details = null);
+
 public class ActivityRecord
 {
     public Guid Id { get; set; }
@@ -150,6 +168,7 @@ public class RiskFindingModel
     public Guid? AccessPathId { get; set; }
     public RiskEvaluationState EvaluationState { get; set; } = RiskEvaluationState.Unknown;
     public RiskCategory Category { get; set; } = RiskCategory.Configuration;
+    public int PriorityScore { get; set; }
     public string RuleVersion { get; set; } = "1.0";
     public string Fingerprint { get; set; } = string.Empty;
     public DateTime DetectedAt { get; set; } = DateTime.UtcNow;

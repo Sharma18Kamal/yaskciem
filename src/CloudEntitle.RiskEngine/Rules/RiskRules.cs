@@ -22,7 +22,7 @@ public abstract class RiskRuleBase : IRiskRule
     protected static CloudPermission? Permission(RiskRuleContext context, Guid id) => context.Request.Permissions.FirstOrDefault(item => item.Id == id);
     protected static CloudResource? Resource(RiskRuleContext context, Guid? id) => id.HasValue ? context.Request.Resources.FirstOrDefault(item => item.Id == id) : null;
     protected static NormalizedEntitlement? Entitlement(RiskRuleContext context, DomainEffectiveAccess access) => context.Request.Entitlements.FirstOrDefault(item => item.PrincipalId == access.PrincipalId && item.PermissionId == access.PermissionId);
-    protected RiskFindingModel Finding(RiskRuleContext context, DomainEffectiveAccess access, RiskEvaluationState state, string title, string description, string evidence, Guid? pathId = null)
+    protected RiskFindingModel Finding(RiskRuleContext context, DomainEffectiveAccess access, RiskEvaluationState state, string title, string description, string evidence, Guid? pathId = null, int priorityScore = 0, RiskSeverity? severity = null)
     {
         var principal = Principal(context, access.PrincipalId);
         var resource = Resource(context, access.ResourceId);
@@ -33,7 +33,7 @@ public abstract class RiskRuleBase : IRiskRule
         var ruleGuid = Stable(RuleId);
         return new RiskFindingModel
         {
-            Id = Stable(fingerprint), RuleId = ruleGuid, CloudProvider = provider, CloudAccountId = access.CloudAccountId, PrincipalId = access.PrincipalId, ResourceId = access.ResourceId, EffectiveAccessId = access.Id, AccessPathId = pathId, PermissionId = access.PermissionId, Severity = DefaultSeverity, Status = FindingStatus.Open, Category = Category, EvaluationState = state, RuleVersion = "1.0", Fingerprint = fingerprint, Title = title, Description = description, Evidence = new RiskEvidence($"Principal={principal?.Name ?? "unknown"}; Resource={resource?.Name ?? "unknown"}; Permission={permission?.Name ?? "unknown"}; {evidence}"), CreatedAt = now, UpdatedAt = now, DetectedAt = now, LastEvaluatedAt = now
+            Id = Stable(fingerprint), RuleId = ruleGuid, CloudProvider = provider, CloudAccountId = access.CloudAccountId, PrincipalId = access.PrincipalId, ResourceId = access.ResourceId, EffectiveAccessId = access.Id, AccessPathId = pathId, PermissionId = access.PermissionId, Severity = severity ?? DefaultSeverity, Status = FindingStatus.Open, Category = Category, EvaluationState = state, PriorityScore = priorityScore, RuleVersion = "1.0", Fingerprint = fingerprint, Title = title, Description = description, Evidence = new RiskEvidence($"Principal={principal?.Name ?? "unknown"}; Resource={resource?.Name ?? "unknown"}; Permission={permission?.Name ?? "unknown"}; {evidence}"), CreatedAt = now, UpdatedAt = now, DetectedAt = now, LastEvaluatedAt = now
         };
     }
 
@@ -184,6 +184,79 @@ public sealed class UnusedRoleAssignmentRule : RiskRuleBase
 
         return Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(findings);
     }
+}
+
+public sealed class ExploitableAttackPathRule : RiskRuleBase
+{
+    public override string RuleId => "CIEM-017";
+    public override string Name => "Exploitable Identity-to-Workload Path";
+    public override RiskSeverity DefaultSeverity => RiskSeverity.Medium;
+    public override RiskCategory Category => RiskCategory.ExternalAccess;
+
+    public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext context, CancellationToken cancellationToken = default)
+    {
+        var findings = new List<RiskFindingModel>();
+        foreach (var access in Allowed(context).Where(item => item.ResourceId.HasValue))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var principal = Principal(context, access.PrincipalId);
+            var resource = Resource(context, access.ResourceId);
+            var path = context.Request.AccessPaths.FirstOrDefault(item => item.EffectiveAccessId == access.Id);
+            if (principal is null || resource is null || path is null) continue;
+
+            var signals = (context.Request.ResourceSecuritySignals ?? Array.Empty<ResourceSecuritySignal>())
+                .Where(signal => signal.ResourceId == resource.Id && signal.IsConfirmed).ToArray();
+            var publicSignals = signals.Where(signal => signal.Type == ResourceSecuritySignalType.PublicExposure).ToArray();
+            var sensitiveSignals = signals.Where(signal => signal.Type == ResourceSecuritySignalType.SensitiveData).ToArray();
+            var vulnerabilities = signals.Where(signal => signal.Type == ResourceSecuritySignalType.WorkloadVulnerability).ToArray();
+            var publicTag = HasTagValue(resource, new[] { "PubliclyAccessible", "InternetFacing", "PublicAccess", "Exposure" }, new[] { "true", "yes", "public", "internet", "internet-facing" });
+            var sensitiveTag = HasTagValue(resource, new[] { "Sensitivity", "DataClassification", "Criticality" }, new[] { "sensitive", "confidential", "restricted", "high", "critical", "tier0" });
+            var isNonHuman = principal.IdentityType is IdentityType.ServiceAccount or IdentityType.ServicePrincipal or IdentityType.ManagedIdentity or IdentityType.Application;
+            var permissionAction = Permission(context, access.PermissionId)?.Action ?? string.Empty;
+            var isDangerous = permissionAction.Contains("admin", StringComparison.OrdinalIgnoreCase)
+                || permissionAction.Contains("write", StringComparison.OrdinalIgnoreCase)
+                || permissionAction.Contains("delete", StringComparison.OrdinalIgnoreCase);
+            var hasRiskyIdentity = access.IsPrivileged || principal.IsPrivileged || principal.IsExternal || isNonHuman || isDangerous;
+            var hasRiskyResource = publicSignals.Length > 0 || sensitiveSignals.Length > 0 || vulnerabilities.Length > 0 || publicTag || sensitiveTag;
+            if (!hasRiskyIdentity || !hasRiskyResource) continue;
+
+            var vulnerabilityScore = vulnerabilities.Select(VulnerabilityPoints).DefaultIfEmpty(0).Max();
+            var points = (access.IsPrivileged || principal.IsPrivileged ? 25 : 0)
+                + (principal.IsExternal ? 20 : 0)
+                + (isNonHuman ? 20 : 0)
+                + (isDangerous ? 10 : 0)
+                + (publicSignals.Length > 0 || publicTag ? 25 : 0)
+                + (sensitiveSignals.Length > 0 || sensitiveTag ? 20 : 0)
+                + vulnerabilityScore
+                + (path.PathStatus == AccessPathStatus.Complete ? 10 : path.PathStatus == AccessPathStatus.Partial ? 4 : 0);
+            var score = Math.Min(100, points);
+            if (score < 30) continue;
+
+            var severity = score >= 80 ? RiskSeverity.Critical : score >= 60 ? RiskSeverity.High : score >= 40 ? RiskSeverity.Medium : RiskSeverity.Low;
+            var state = path.PathStatus == AccessPathStatus.Complete && !publicTag && !sensitiveTag
+                ? RiskEvaluationState.Confirmed
+                : RiskEvaluationState.Potential;
+            var signalSummary = string.Join("; ", signals.Select(signal => $"{signal.Type}={signal.Name} from {signal.Source}"));
+            var identitySummary = $"IdentityType={principal.IdentityType}; Privileged={access.IsPrivileged || principal.IsPrivileged}; External={principal.IsExternal}";
+            var evidence = $"PriorityScore={score}; {identitySummary}; PublicExposure={publicSignals.Length > 0 || publicTag}; SensitiveAsset={sensitiveSignals.Length > 0 || sensitiveTag}; VulnerabilityPoints={vulnerabilityScore}; PathStatus={path.PathStatus}; Signals={signalSummary}";
+            findings.Add(Finding(context, access, state, Name,
+                "A risky identity can reach an exposed, sensitive, or vulnerable workload resource.", evidence, path.Id, score, severity));
+        }
+
+        return Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(findings);
+    }
+
+    private static int VulnerabilityPoints(ResourceSecuritySignal signal)
+    {
+        if (signal.IsExploitable) return 35;
+        if (signal.CvssScore >= 9) return 30;
+        if (signal.CvssScore >= 7) return 22;
+        return signal.Severity switch { RiskSeverity.Critical => 28, RiskSeverity.High => 18, RiskSeverity.Medium => 10, _ => 4 };
+    }
+
+    private static bool HasTagValue(CloudResource resource, IReadOnlyList<string> keys, IReadOnlyList<string> acceptedValues)
+        => resource.Tags.Any(tag => keys.Contains(tag.Key, StringComparer.OrdinalIgnoreCase)
+            && acceptedValues.Contains(tag.Value.Trim(), StringComparer.OrdinalIgnoreCase));
 }
 public sealed class ProductionAdministrativeAccessRule : RiskRuleBase { public override string RuleId => "CIEM-009"; public override string Name => "Production Administrative Access"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.Scope; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged && Resource(c, a.ResourceId)?.Tags.TryGetValue("Environment", out var environment) == true && string.Equals(environment, "Production", StringComparison.OrdinalIgnoreCase)).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "Privileged effective access reaches a production resource.", "Resource tag Environment=Production")).ToArray()); }
 public sealed class ExcessiveServicePermissionRule : RiskRuleBase { public override string RuleId => "CIEM-010"; public override string Name => "Potentially Excessive Service Permissions"; public override RiskSeverity DefaultSeverity => RiskSeverity.Medium; public override RiskCategory Category => RiskCategory.ServiceIdentity; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => Principal(c, a.PrincipalId)?.IdentityType is IdentityType.ServiceAccount or IdentityType.ServicePrincipal or IdentityType.ManagedIdentity).Where(a => Permission(c, a.PermissionId)?.Action?.Contains("write", StringComparison.OrdinalIgnoreCase) == true || Permission(c, a.PermissionId)?.Action?.Contains("delete", StringComparison.OrdinalIgnoreCase) == true).Select(a => Finding(c, a, RiskEvaluationState.Potential, Name, "A service identity has write/delete capability requiring review.", "Service permission breadth exceeds read-only operations evidence.")).ToArray()); }

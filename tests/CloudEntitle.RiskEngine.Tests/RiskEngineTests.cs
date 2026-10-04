@@ -181,6 +181,41 @@ public sealed class RiskEngineTests
     }
 
     [Fact]
+    public async Task ExploitableAttackPath_ShouldPrioritizeNonHumanIdentityToPublicSensitiveVulnerableResource()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "production-resource", privileged: true, external: true, identityType: IdentityType.ServiceAccount);
+        var resourceId = fixture.Effective.ResourceId!.Value;
+        var signals = new[]
+        {
+            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.PublicExposure, "Public endpoint", "Cloud inventory", RiskSeverity.High),
+            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.SensitiveData, "Restricted customer data", "Data catalog", RiskSeverity.High),
+            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.WorkloadVulnerability, "CVE-2026-1234", "Scanner", RiskSeverity.Critical, IsExploitable: true, CvssScore: 9.8)
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request with { ResourceSecuritySignals = signals });
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-017"));
+        Assert.Equal(100, finding.PriorityScore);
+        Assert.Equal(RiskSeverity.Critical, finding.Severity);
+        Assert.Equal(fixture.Request.AccessPaths[0].Id, finding.AccessPathId);
+        Assert.Contains("PublicExposure", finding.Evidence.Summary, StringComparison.Ordinal);
+        Assert.Contains("SensitiveData", finding.Evidence.Summary, StringComparison.Ordinal);
+        Assert.Contains("CVE-2026-1234", finding.Evidence.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SecuritySignalsOnUnrelatedResource_ShouldNotCreateAttackPathFinding()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "production-resource", privileged: true, identityType: IdentityType.ServiceAccount);
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request with
+        {
+            ResourceSecuritySignals = new[] { new ResourceSecuritySignal(Guid.NewGuid(), ResourceSecuritySignalType.PublicExposure, "Public endpoint", "Cloud inventory", RiskSeverity.Critical) }
+        });
+
+        Assert.DoesNotContain(result.Findings, finding => finding.RuleId == Stable("CIEM-017"));
+    }
+
+    [Fact]
     public async Task NormalReadOnlyUser_ShouldNotProducePrivilegeOrWildcardFindings()
     {
         var fixture = FixtureData.Create(action: "storage.read", resource: "specific-resource", privileged: false);

@@ -20,7 +20,8 @@ public sealed record RiskEvaluationRequest(
     Guid? ScanId = null,
     DateTime? EvaluatedAt = null,
     RiskRuleOptions? Options = null,
-    IReadOnlyList<ActivityEvidenceCoverage>? ActivityCoverage = null);
+    IReadOnlyList<ActivityEvidenceCoverage>? ActivityCoverage = null,
+    IReadOnlyList<ResourceSecuritySignal>? ResourceSecuritySignals = null);
 
 public sealed record RiskRuleOptions(int DormancyDays = 90, int MaxPathDepth = 5, bool RequireProductionTag = true, IReadOnlySet<string>? EnabledRules = null, int UsageObservationDays = 30)
 {

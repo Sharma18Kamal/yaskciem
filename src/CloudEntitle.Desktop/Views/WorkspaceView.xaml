@@ -277,6 +277,7 @@
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="90"/>
                         <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="90"/>
+                        <DataGridTextColumn Header="Priority" Binding="{Binding PriorityScore}" Width="80"/>
                         <DataGridTextColumn Header="Finding" Binding="{Binding Title}" Width="200"/>
                         <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="150"/>
                         <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="150"/>

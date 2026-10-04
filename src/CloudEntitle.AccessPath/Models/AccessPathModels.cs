@@ -20,7 +20,8 @@ public sealed record AccessPathRequest(
     int MaxTraversalOperations = 10000,
     Guid? EffectiveAccessId = null,
     Guid? PrincipalId = null,
-    Guid? ResourceId = null);
+    Guid? ResourceId = null,
+    IReadOnlyList<ResourceSecuritySignal>? ResourceSecuritySignals = null);
 
 public sealed record AccessPathDiagnostic(string Code, string Message, Guid? PathId = null);
 public sealed record AccessPathStatistics(int TotalPaths, int CompletePaths, int PartialPaths, int UnknownPaths, int UnsupportedPaths, int DirectPaths, int GroupPaths, int InheritedPaths, int ConditionalPaths);
