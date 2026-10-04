@@ -49,6 +49,38 @@ public sealed class AccessPathExplorerTests
         Assert.Contains(path.Edges, edge => edge.Confidence.Contains("not verified", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task Explorer_ShouldVisualizePathAndEstimateObservedBlastRadius()
+    {
+        var now = DateTime.UtcNow;
+        var access = new[]
+        {
+            new LiveEffectiveAccessRecord("Azure", "user-a", "Owner", "/subscriptions/sub-a/resourceGroups/rg-a", "Azure RBAC", true, AccountId: "sub-a"),
+            new LiveEffectiveAccessRecord("Azure", "user-a", "Reader", "/subscriptions/sub-a/resourceGroups/rg-a", "Azure RBAC", false, AccountId: "sub-a"),
+            new LiveEffectiveAccessRecord("Azure", "user-b", "Reader", "/subscriptions/sub-b", "Azure RBAC", false, AccountId: "sub-b")
+        };
+        var resources = new[]
+        {
+            new CloudResource { Id = Guid.NewGuid(), Name = "vault-a", ResourceId = "/subscriptions/sub-a/resourceGroups/rg-a/providers/Microsoft.KeyVault/vaults/vault-a" },
+            new CloudResource { Id = Guid.NewGuid(), Name = "vault-b", ResourceId = "/subscriptions/sub-b/resourceGroups/rg-b/providers/Microsoft.KeyVault/vaults/vault-b" }
+        };
+        var result = new LiveCloudScanResult(2, 2, 2, 2, 2, 1, Array.Empty<RiskFinding>(), now, Array.Empty<string>(),
+            Array.Empty<CloudPrincipal>(), resources, Array.Empty<DiscoveredCloudRole>(), Array.Empty<DiscoveredCloudPermission>(),
+            now.AddMinutes(-1), access, Array.Empty<LiveScanAccountRecord>());
+        var viewModel = new AccessPathExplorerViewModel(new EmptyDemoDataService(), liveCloudScanService: new FixedLiveScanService(result));
+
+        await viewModel.RefreshAsync();
+
+        var path = Assert.Single(viewModel.Paths, item => item.Principal == "user-a" && item.Role == "Owner");
+        Assert.Equal(3, viewModel.SelectedVisualNodes.Count);
+        Assert.Equal("Granted role", viewModel.SelectedVisualNodes[0].Relationship);
+        Assert.Equal(2, viewModel.BlastRadius!.RelatedAssignments);
+        Assert.Equal(2, viewModel.BlastRadius.RelatedRoles);
+        Assert.Equal(1, viewModel.BlastRadius.ObservedResources);
+        Assert.Contains("lower bound", viewModel.BlastRadius.Caveat, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Owner", path.Role);
+    }
+
     private static LiveScanHistoryEntry CreateEntry(DateTime completedAt, string provider, string principal)
         => new(completedAt.AddMinutes(-1), completedAt, provider, 1, 1, 0, 1, 1, 0,
             new[] { new LiveEffectiveAccessRecord(provider, principal, "Viewer", "scope", "test source", false) },
@@ -68,5 +100,16 @@ public sealed class AccessPathExplorerTests
     {
         public Task RecordAsync(LiveScanHistoryEntry entry, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<IReadOnlyList<LiveScanHistoryEntry>> GetRecentAsync(CancellationToken cancellationToken = default) => Task.FromResult(entries);
+    }
+
+    private sealed class FixedLiveScanService : ILiveCloudScanService
+    {
+        private readonly LiveCloudScanResult _result;
+
+        public FixedLiveScanService(LiveCloudScanResult result) => _result = result;
+
+        public LiveCloudScanResult? CurrentResult => _result;
+        public event EventHandler? ScanCompleted { add { } remove { } }
+        public Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default) => Task.FromResult(_result);
     }
 }

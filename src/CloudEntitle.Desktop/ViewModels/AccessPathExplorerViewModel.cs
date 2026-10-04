@@ -6,6 +6,8 @@ namespace CloudEntitle.Desktop.ViewModels;
 
 public sealed record AccessPathNodeRow(int Sequence, string Type, string Name, string Evidence);
 public sealed record AccessPathEdgeRow(string From, string Relationship, string To, string Confidence);
+public sealed record AccessPathVisualNodeRow(int Sequence, string Type, string Name, string Evidence, string Relationship, string Confidence);
+public sealed record AccessBlastRadiusSummary(int RelatedAssignments, int RelatedRoles, int ObservedResources, string Scope, string Assessment, string Caveat);
 
 public sealed record AccessPathExplorerRow(
     string Provider,
@@ -64,6 +66,8 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
             if (!SetProperty(ref _selectedPath, value)) return;
             OnPropertyChanged(nameof(SelectedNodes));
             OnPropertyChanged(nameof(SelectedEdges));
+            OnPropertyChanged(nameof(SelectedVisualNodes));
+            OnPropertyChanged(nameof(BlastRadius));
         }
     }
 
@@ -78,6 +82,14 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
 
     public IReadOnlyList<AccessPathNodeRow> SelectedNodes => SelectedPath?.Nodes ?? Array.Empty<AccessPathNodeRow>();
     public IReadOnlyList<AccessPathEdgeRow> SelectedEdges => SelectedPath?.Edges ?? Array.Empty<AccessPathEdgeRow>();
+    public IReadOnlyList<AccessPathVisualNodeRow> SelectedVisualNodes => SelectedPath is null
+        ? Array.Empty<AccessPathVisualNodeRow>()
+        : SelectedPath.Nodes.Select((node, index) =>
+        {
+            var edge = SelectedPath.Edges.ElementAtOrDefault(index);
+            return new AccessPathVisualNodeRow(node.Sequence, node.Type, node.Name, node.Evidence, edge?.Relationship ?? string.Empty, edge?.Confidence ?? string.Empty);
+        }).ToArray();
+    public AccessBlastRadiusSummary? BlastRadius => SelectedPath is null ? null : BuildBlastRadius(SelectedPath);
     public bool HasResults => Paths.Count > 0;
     public string CoverageMessage => "Paths include provider assignments and scanned Pod/Deployment-to-ServiceAccount traces. Cloud federation status is verified only when the provider CLI confirms issuer, subject, and audience; unavailable checks remain explicit.";
 
@@ -132,6 +144,38 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
         return connected.Count == 1
             ? traces.Where(trace => trace.Provider == connected.Single())
             : traces;
+    }
+
+    private AccessBlastRadiusSummary BuildBlastRadius(AccessPathExplorerRow path)
+    {
+        var subjectNames = path.Nodes
+            .Where(node => node.Type is "Identity" or "Kubernetes ServiceAccount" or "Cloud identity")
+            .Select(node => node.Name)
+            .Append(path.Principal)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var related = _records.Where(record => record.Provider.Equals(path.Provider, StringComparison.OrdinalIgnoreCase)
+            && subjectNames.Contains(record.Principal)).ToArray();
+        var scope = path.Scope.TrimEnd('/');
+        var resources = (_liveCloudScanService?.CurrentResult?.ResourceRecords ?? Array.Empty<CloudResource>())
+            .Count(resource => IsWithinScope(scope, resource.ResourceId ?? resource.ExternalId ?? resource.Scope));
+        var assessment = path.Privileged
+            ? "Privileged path; review the identity, grants, and scope."
+            : "Review the identity's observed grants at this scope.";
+        return new AccessBlastRadiusSummary(
+            related.Length,
+            related.Select(item => item.Role).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            resources,
+            string.IsNullOrWhiteSpace(scope) ? "Scope not reported" : scope,
+            assessment,
+            "Observed counts are a lower bound from the current scan; unenumerated resources and indirect provider permissions are not included.");
+    }
+
+    private static bool IsWithinScope(string scope, string? resourceId)
+    {
+        if (string.IsNullOrWhiteSpace(scope) || string.IsNullOrWhiteSpace(resourceId)) return false;
+        var resource = resourceId.TrimEnd('/');
+        return resource.Equals(scope, StringComparison.OrdinalIgnoreCase)
+            || resource.StartsWith(scope + "/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static AccessPathExplorerRow CreateWorkloadPath(KubernetesWorkloadTrace trace)
