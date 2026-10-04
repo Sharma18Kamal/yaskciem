@@ -75,6 +75,24 @@ public sealed class PostureHistoryTests
     }
 
     [Fact]
+    public async Task ConcurrentManualAndScheduledScans_ShouldRunSerially()
+    {
+        var provider = new BlockingDiscoveryProvider();
+        var scanner = new LiveCloudScanService(new[] { provider });
+
+        var firstScan = scanner.ScanAsync();
+        await provider.FirstDiscoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var secondScan = scanner.ScanAsync();
+        Assert.False(provider.SecondDiscoveryEntered.Task.IsCompleted);
+        provider.ReleaseDiscovery();
+
+        await Task.WhenAll(firstScan, secondScan);
+
+        Assert.Equal(2, provider.DiscoveryCount);
+        Assert.Equal(1, provider.MaxConcurrentDiscovery);
+    }
+
+    [Fact]
     public async Task LiveScan_ShouldHandleLegacyHistoryWithNullPostureCollections()
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -249,6 +267,54 @@ public sealed class PostureHistoryTests
             => Task.FromResult<IReadOnlyList<CloudPermission>>(Array.Empty<CloudPermission>());
         public Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
             => Task.FromResult(Access);
+    }
+
+    private sealed class BlockingDiscoveryProvider : ICloudProvider
+    {
+        private readonly Guid _accountId = Guid.NewGuid();
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _activeDiscoveries;
+        private int _discoveryCount;
+
+        public TaskCompletionSource FirstDiscoveryEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SecondDiscoveryEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int DiscoveryCount => Volatile.Read(ref _discoveryCount);
+        public int MaxConcurrentDiscovery { get; private set; }
+        public CloudProviderType ProviderType => CloudProviderType.Azure;
+        public Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        public async Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref _discoveryCount);
+            var active = Interlocked.Increment(ref _activeDiscoveries);
+            MaxConcurrentDiscovery = Math.Max(MaxConcurrentDiscovery, active);
+            try
+            {
+                if (call == 1)
+                {
+                    FirstDiscoveryEntered.TrySetResult();
+                    await _release.Task.WaitAsync(cancellationToken);
+                }
+                else
+                {
+                    SecondDiscoveryEntered.TrySetResult();
+                }
+                return new[] { new CloudAccount { Id = _accountId, Name = "serial-test", ExternalAccountId = "sub-serial", CloudProvider = ProviderType } };
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeDiscoveries);
+            }
+        }
+
+        public void ReleaseDiscovery() => _release.TrySetResult();
+
+        public Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPrincipal>>(Array.Empty<CloudPrincipal>());
+        public Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudRole>>(Array.Empty<CloudRole>());
+        public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPermission>>(Array.Empty<CloudPermission>());
     }
 
     private sealed class EmptyDemoDataService : IDemoDataService

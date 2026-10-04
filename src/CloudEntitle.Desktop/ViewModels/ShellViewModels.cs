@@ -1729,14 +1729,58 @@ internal static class WorkspaceDataFormatting
 public sealed class SettingsViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;
+    private readonly ContinuousMonitoringService? _monitoringService;
     private string _demoModeState = "Demo Mode is off";
-    public SettingsViewModel(IDemoDataService demoData) { _demoData = demoData; LoadDemoDataCommand = new AsyncRelayCommand(LoadDemoDataAsync); ResetDemoDataCommand = new AsyncRelayCommand(ResetDemoDataAsync); _demoData.DataChanged += (_, _) => { DemoModeState = _demoData.IsDemoMode ? "DEMO MODE active: synthetic data only" : "Demo Mode is off"; }; }
+    private bool _scheduledScansEnabled;
+    private int _selectedScanIntervalMinutes = 1440;
+    public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null)
+    {
+        _demoData = demoData;
+        _monitoringService = monitoringService;
+        _scheduledScansEnabled = monitoringService?.Schedule.Enabled ?? false;
+        _selectedScanIntervalMinutes = monitoringService?.Schedule.IntervalMinutes ?? 1440;
+        LoadDemoDataCommand = new AsyncRelayCommand(LoadDemoDataAsync);
+        ResetDemoDataCommand = new AsyncRelayCommand(ResetDemoDataAsync);
+        SaveMonitoringScheduleCommand = new AsyncRelayCommand(SaveMonitoringScheduleAsync);
+        _demoData.DataChanged += (_, _) => { DemoModeState = _demoData.IsDemoMode ? "DEMO MODE active: synthetic data only" : "Demo Mode is off"; };
+    }
     public override string Title => "Settings";
     public override string Subtitle => "Application, database, connection, and security preferences.";
     public string DataLocation => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     public string DemoModeState { get => _demoModeState; private set => SetProperty(ref _demoModeState, value); }
+    public bool ScheduledScansEnabled { get => _scheduledScansEnabled; set => SetProperty(ref _scheduledScansEnabled, value); }
+    public int SelectedScanIntervalMinutes { get => _selectedScanIntervalMinutes; set => SetProperty(ref _selectedScanIntervalMinutes, value); }
+    public IReadOnlyList<MonitoringIntervalOption> ScanIntervals { get; } = new[]
+    {
+        new MonitoringIntervalOption(30, "30 minutes"),
+        new MonitoringIntervalOption(60, "1 hour"),
+        new MonitoringIntervalOption(360, "6 hours"),
+        new MonitoringIntervalOption(1440, "24 hours")
+    };
+    public ContinuousMonitoringService? MonitoringService => _monitoringService;
     public AsyncRelayCommand LoadDemoDataCommand { get; }
     public AsyncRelayCommand ResetDemoDataCommand { get; }
+    public AsyncRelayCommand SaveMonitoringScheduleCommand { get; }
+    private async Task SaveMonitoringScheduleAsync()
+    {
+        if (_monitoringService is null)
+        {
+            ErrorMessage = "Scheduled monitoring is unavailable.";
+            return;
+        }
+
+        try
+        {
+            await _monitoringService.SetScheduleAsync(new MonitoringSchedule(ScheduledScansEnabled, SelectedScanIntervalMinutes));
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to save monitoring schedule: {exception.Message}";
+        }
+    }
     private async Task LoadDemoDataAsync() { IsLoading = true; ErrorMessage = null; try { await _demoData.LoadAsync(); DemoModeState = "DEMO MODE active: synthetic data only"; } catch { ErrorMessage = "Unable to load Demo Mode data."; } finally { IsLoading = false; } }
     private async Task ResetDemoDataAsync() { IsLoading = true; ErrorMessage = null; try { await _demoData.ResetAsync(); DemoModeState = "Demo Mode is off"; } catch { ErrorMessage = "Unable to reset Demo Mode data."; } finally { IsLoading = false; } }
 }
+
+public sealed record MonitoringIntervalOption(int Minutes, string Label);

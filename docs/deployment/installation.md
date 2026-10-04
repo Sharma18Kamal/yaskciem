@@ -92,6 +92,14 @@ gcloud projects list
 
 Close and reopen the application after setting up or changing CLI authentication. A provider’s CLI and authentication are needed only when scanning that provider.
 
+## Continuous monitoring
+
+Scheduled scans are disabled by default. In **Settings > Continuous monitoring**, enable the schedule and choose 30 minutes, 1 hour, 6 hours, or 24 hours. Scans run only while YASK-CIEM is open and use the same read-only CLI sessions as manual scans. Each scheduled run is serialized with manual scans, compared with the previous comparable scan, saved to scan history, and evaluated for posture-change alerts.
+
+To deliver eligible high-impact posture alerts, set `YASK_CIEM_ALERT_WEBHOOK_URL` to an organization-approved HTTPS webhook before starting the application. The URL is not stored in the schedule file or included in delivery error messages. If the webhook is unavailable, eligible alerts remain pending and are retried on a later scan.
+
+The schedule is stored locally at `%LocalAppData%\YASK-CIEM\monitoring-schedule.json`. Disabling the schedule stops future scans; it does not delete scan history or pending alert records.
+
 ## Application data
 
 YASK-CIEM stores application files separately from install binaries:

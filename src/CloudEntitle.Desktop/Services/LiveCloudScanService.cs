@@ -61,6 +61,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
     private readonly PostureHistoryService _postureHistoryService = new();
     private readonly IPostureNotificationChannel _postureNotificationChannel;
     private readonly ApplicationRiskEngine _riskEngine = new();
+    private readonly SemaphoreSlim _scanGate = new(1, 1);
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
     public event EventHandler? ScanCompleted;
@@ -118,6 +119,19 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         => ScanAsync(null, cancellationToken);
 
     public async Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default)
+    {
+        await _scanGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await ScanCoreAsync(selectedAccountKeys, cancellationToken);
+        }
+        finally
+        {
+            _scanGate.Release();
+        }
+    }
+
+    private async Task<LiveCloudScanResult> ScanCoreAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken)
     {
         var startedAt = DateTime.UtcNow;
         var accountsScanned = 0;

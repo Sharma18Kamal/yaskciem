@@ -52,6 +52,8 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<IReportService, SqliteReportService>();
 		services.AddSingleton<ILiveScanHistoryStore, LocalLiveScanHistoryStore>();
+		services.AddSingleton<IMonitoringScheduleStore, LocalMonitoringScheduleStore>();
+		services.AddSingleton<ContinuousMonitoringService>();
 		services.AddSingleton<ITrialService, TrialService>();
 		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 		services.AddSingleton<IPostureNotificationChannel>(_ => new WebhookPostureNotificationChannel());
@@ -93,6 +95,7 @@ public partial class App : System.Windows.Application
 		services.AddTransient<SettingsViewModel>();
 		services.AddSingleton<MainWindow>();
 		_services = services.BuildServiceProvider();
+		await _services.GetRequiredService<ContinuousMonitoringService>().InitializeAsync();
 		await _services.GetRequiredService<MainWindowViewModel>().InitializeTrialAsync();
 		_services.GetRequiredService<MainWindow>().Show();
 	}
