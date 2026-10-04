@@ -316,9 +316,12 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
             .GroupBy(account => (account.Provider, account.AccountId), StringTupleComparer.Instance).Select(group => group.First()).ToArray();
         var currentAccountIds = _consolidatedAccounts.Select(account => account.CloudAccountId).Where(id => id != Guid.Empty).ToHashSet();
         var externalAccountIds = _consolidatedAccounts.Select(account => account.AccountId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        _availableAccounts = allAccounts
-            .Where(account => account.CloudAccountId != Guid.Empty && !_bindings.Any(binding => IsBindingMatch(binding, account)))
-            .GroupBy(account => (account.Provider, account.AccountId), StringTupleComparer.Instance).Select(group => group.First()).ToArray();
+        _availableAccounts = CanManageConnections && _identity is not null && SelectedOrganization is not null
+            ? allAccounts.Where(account => account.CloudAccountId != Guid.Empty
+                    && Enum.TryParse<CloudProvider>(account.Provider, true, out var provider)
+                    && _organizationsService.IsAccountAvailable(SelectedOrganization.Id, _identity, provider, account.AccountId))
+                .GroupBy(account => (account.Provider, account.AccountId), StringTupleComparer.Instance).Select(group => group.First()).ToArray()
+            : Array.Empty<LiveScanAccountRecord>();
         _consolidatedIdentities = CanViewTenant ? (result?.IdentityRecords ?? Array.Empty<CloudPrincipal>()).Count(item => currentAccountIds.Contains(item.AccountId)) : 0;
         _consolidatedResources = CanViewTenant ? (result?.ResourceRecords ?? Array.Empty<CloudResource>()).Count(item => currentAccountIds.Contains(item.AccountId)) : 0;
         var findings = CanViewTenant ? (result?.Findings ?? Array.Empty<RiskFinding>()).Where(item => currentAccountIds.Contains(item.CloudAccountId)).ToArray() : Array.Empty<RiskFinding>();

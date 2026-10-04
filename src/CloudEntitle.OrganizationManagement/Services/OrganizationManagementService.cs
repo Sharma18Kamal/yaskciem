@@ -172,6 +172,14 @@ public sealed class OrganizationManagementService
         return _bindings.Values.Where(binding => binding.OrganizationId == organizationId).ToArray();
     }
 
+    public bool IsAccountAvailable(Guid organizationId, OrganizationIdentity identity, CloudProvider provider, string externalAccountId)
+    {
+        EnsureAuthorized(organizationId, identity, OrganizationAction.ManageConnections);
+        if (string.IsNullOrWhiteSpace(externalAccountId)) return false;
+        return !_bindings.Values.Any(binding => binding.Provider == provider
+            && string.Equals(binding.ExternalTenantId, externalAccountId.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
     public IReadOnlyList<OrganizationAuditEntry> GetAuditTrail(Guid organizationId, OrganizationIdentity identity)
     {
         EnsureAuthorized(organizationId, identity, OrganizationAction.ManageMembers);

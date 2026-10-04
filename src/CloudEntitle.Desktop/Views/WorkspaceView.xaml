@@ -374,7 +374,6 @@
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RemediationViewModel}">
             <StackPanel>
-                <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search recommendations and remediation plans"/>
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
@@ -423,15 +422,15 @@
                         <TextBlock Text="{Binding VerificationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="PROPOSED CHANGES" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                         <ItemsControl ItemsSource="{Binding SelectedChanges}">
-                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding ChangeType}"/><Run Text=" | "/><Run Text="{Binding Target}"/><Run Text=" | "/><Run Text="{Binding BeforeState}"/><Run Text=" -> "/><Run Text="{Binding ProposedState}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding ChangeType, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Target, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding BeforeState, Mode=OneWay}"/><Run Text=" -> "/><Run Text="{Binding ProposedState, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <TextBlock Text="ROLLBACK DRAFT CHANGES" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                         <ItemsControl ItemsSource="{Binding SelectedRollbackChanges}">
-                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Target}"/><Run Text=" -> "/><Run Text="{Binding ProposedState}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Target, Mode=OneWay}"/><Run Text=" -> "/><Run Text="{Binding ProposedState, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <TextBlock Text="AUDIT TRAIL" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                         <ItemsControl ItemsSource="{Binding SelectedAuditTrail}">
-                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor}"/><Run Text=" | "/><Run Text="{Binding Action}"/><Run Text=" | "/><Run Text="{Binding Details}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, Mode=OneWay, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Action, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Details, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </StackPanel>
                 </Grid>
@@ -485,7 +484,7 @@
                             <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="IDENTITIES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding ConsolidatedIdentities}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                             <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="RESOURCES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding ConsolidatedResources}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                             <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="FINDINGS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding ConsolidatedFindings}" Style="{StaticResource CardValue}"/></StackPanel></Border>
-                            <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL / EFFECTIVE ACCESS" Style="{StaticResource CardLabel}"/><TextBlock Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"><Run Text="{Binding ConsolidatedCriticalFindings}"/><Run Text=" / "/><Run Text="{Binding ConsolidatedEffectiveAccess}"/></TextBlock></StackPanel></Border>
+                            <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL / EFFECTIVE ACCESS" Style="{StaticResource CardLabel}"/><TextBlock Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"><Run Text="{Binding ConsolidatedCriticalFindings, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding ConsolidatedEffectiveAccess, Mode=OneWay}"/></TextBlock></StackPanel></Border>
                         </UniformGrid>
                         <TextBlock Text="{Binding ConsolidatedCoverage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" TextWrapping="Wrap"/>
                         <Border Style="{StaticResource SectionCard}">
@@ -623,7 +622,7 @@
                                 </StackPanel>
                                 <TextBlock Text="AUDIT HISTORY" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                                 <ItemsControl ItemsSource="{Binding SelectedAuditTrail}">
-                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor}"/><Run Text=" | "/><Run Text="{Binding Action}"/><Run Text=" | "/><Run Text="{Binding Details}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, Mode=OneWay, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Action, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Details, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </StackPanel>
                         </Border>

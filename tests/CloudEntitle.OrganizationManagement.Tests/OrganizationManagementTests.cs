@@ -110,6 +110,20 @@ public sealed class OrganizationManagementTests
     }
 
     [Fact]
+    public void AccountBoundToAnOrganization_ShouldNotBeAvailableToAnother()
+    {
+        var service = new OrganizationManagementService();
+        var firstOwner = CreateIdentity(Guid.NewGuid().ToString(), "first@example.invalid");
+        var secondOwner = CreateIdentity(Guid.NewGuid().ToString(), "second@example.invalid");
+        var firstOrganization = service.CreateOrganization("First", "first", firstOwner.TenantId, firstOwner);
+        var secondOrganization = service.CreateOrganization("Second", "second", secondOwner.TenantId, secondOwner);
+        service.BindCloudAccount(firstOrganization.Id, firstOwner, CloudProvider.Aws, Guid.NewGuid(), "123456789012", "AWS Account");
+
+        Assert.False(service.IsAccountAvailable(secondOrganization.Id, secondOwner, CloudProvider.Aws, "123456789012"));
+        Assert.True(service.IsAccountAvailable(secondOrganization.Id, secondOwner, CloudProvider.Aws, "210987654321"));
+    }
+
+    [Fact]
     public void MemberManagement_ShouldRequireAdminAndRetainAnActiveAdmin()
     {
         var service = new OrganizationManagementService();
