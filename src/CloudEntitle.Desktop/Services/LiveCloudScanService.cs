@@ -33,6 +33,9 @@ public sealed record LiveCloudScanResult(
 {
     public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
     public IReadOnlyList<KubernetesWorkloadTrace> WorkloadTraces { get; init; } = Array.Empty<KubernetesWorkloadTrace>();
+    public IReadOnlyList<PostureChangeRecord> PostureChanges { get; init; } = Array.Empty<PostureChangeRecord>();
+    public PostureTrendRecord? PostureTrend { get; init; }
+    public string NotificationDelivery { get; init; } = "Not attempted";
 }
 
 public sealed record DiscoveredCloudRole(CloudProviderType Provider, CloudRole Role);
@@ -45,17 +48,20 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
     private readonly ILiveScanHistoryStore? _historyStore;
     private readonly IKubernetesRbacProvider? _kubernetesRbacProvider;
     private readonly CloudConnectionState? _cloudConnectionState;
+    private readonly PostureHistoryService _postureHistoryService = new();
+    private readonly IPostureNotificationChannel _postureNotificationChannel;
     private readonly RiskEngine _riskEngine = new();
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
     public event EventHandler? ScanCompleted;
 
-    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null)
+    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null, IPostureNotificationChannel? postureNotificationChannel = null)
     {
         _providers = providers.ToArray();
         _historyStore = historyStore;
         _kubernetesRbacProvider = kubernetesRbacProvider;
         _cloudConnectionState = cloudConnectionState;
+        _postureNotificationChannel = postureNotificationChannel ?? new DisabledPostureNotificationChannel();
     }
 
     public async Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default)
@@ -77,6 +83,18 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var messages = new List<string>();
         var coverage = new List<ScanCoverageRecord>();
         var workloadTraces = new List<KubernetesWorkloadTrace>();
+        IReadOnlyList<LiveScanHistoryEntry> previousScans = Array.Empty<LiveScanHistoryEntry>();
+        if (_historyStore is not null)
+        {
+            try
+            {
+                previousScans = await _historyStore.GetRecentAsync(cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                messages.Add($"Posture history could not be read: {exception.Message}");
+            }
+        }
         var connectedProviders = _cloudConnectionState?.ConnectedProviders ?? new HashSet<CloudProviderType>();
         var selectedProvider = connectedProviders.Count == 1 ? connectedProviders.Single() : (CloudProviderType?)null;
         var multipleConnectedProviders = connectedProviders.Count > 1;
@@ -143,7 +161,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     {
                         var access = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Effective access", () => accessProvider.DiscoverEffectiveAccessAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
                         effectiveAccessRecords.AddRange(access.Select(item => new LiveEffectiveAccessRecord(
-                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
+                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, account.ExternalAccountId ?? account.SubscriptionId ?? account.ProjectId ?? account.Id.ToString())));
                     }
                     else
                     {
@@ -177,7 +195,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                         identitiesScanned += newPrincipals.Length;
                         privilegedIdentities += newPrincipals.Count(identity => identity.IsPrivileged);
                         effectiveAccessRecords.AddRange(entraResult.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
-                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
+                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, accounts.FirstOrDefault()?.ExternalAccountId ?? accounts.FirstOrDefault()?.SubscriptionId ?? accounts.FirstOrDefault()?.TenantId)));
                         var partial = entraResult.ProviderMessages.Count > 0;
                         coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra directory", entraResult.Principals.Count > 0 ? partial ? ScanCoverageStatus.Partial : ScanCoverageStatus.Collected : partial ? ScanCoverageStatus.Denied : ScanCoverageStatus.NoData, entraResult.Principals.Count, string.Join("; ", entraResult.ProviderMessages.DefaultIfEmpty("Users, groups, service principals, and managed identities."))));
                         coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra PIM", entraResult.AccessAssignments.Count > 0 ? partial ? ScanCoverageStatus.Partial : ScanCoverageStatus.Collected : partial ? ScanCoverageStatus.Denied : ScanCoverageStatus.NoData, entraResult.AccessAssignments.Count, string.Join("; ", entraResult.ProviderMessages.DefaultIfEmpty("Active and eligible directory-role assignments."))));
@@ -280,7 +298,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     permissionRecords.AddRange(cluster.Permissions.Select(permission => new DiscoveredCloudPermission(providerType, permission)));
                     findings.AddRange(await _riskEngine.EvaluateAsync(cluster.Permissions, providerType, cancellationToken));
                     effectiveAccessRecords.AddRange(cluster.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
-                        providerType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy)));
+                        providerType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, cluster.Cluster.ExternalAccountId ?? cluster.Cluster.Id.ToString())));
                 }
             }
             catch (OperationCanceledException)
@@ -298,6 +316,51 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             messages.Add("No cloud providers are configured.");
         }
 
+        var completedAt = DateTime.UtcNow;
+        var riskFindingDetails = PostureHistoryService.SnapshotFindings(findings);
+        var providersInScan = accountRecords.Select(item => item.Provider)
+            .Concat(effectiveAccessRecords.Select(item => item.Provider))
+            .Concat(coverage.Select(item => item.Provider))
+            .Concat(riskFindingDetails.Select(item => item.Provider))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var previous = previousScans.Where(scan => providersInScan.Overlaps(ScanProviders(scan)))
+            .OrderByDescending(scan => scan.CompletedAt)
+            .FirstOrDefault();
+        var historyEntry = new LiveScanHistoryEntry(
+            startedAt,
+            completedAt,
+            string.Join(", ", providersInScan),
+            accountsScanned,
+            identitiesScanned,
+            resourcesScanned,
+            rolesScanned,
+            permissionsScanned,
+            findings.Count,
+            effectiveAccessRecords,
+            accountRecords)
+        {
+            Coverage = coverage,
+            WorkloadTraces = workloadTraces,
+            RiskFindingDetails = riskFindingDetails
+        };
+        var postureAnalysis = _postureHistoryService.Analyze(previous, historyEntry);
+        var notifications = (previous?.PendingNotifications ?? Array.Empty<PostureChangeRecord>())
+            .Concat(postureAnalysis.Changes.Where(change => change.AlertEligible))
+            .GroupBy(PostureHistoryService.NotificationKey, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        var delivery = await _postureNotificationChannel.DeliverAsync(notifications, cancellationToken);
+        var pendingNotifications = delivery.Delivered == notifications.Length
+            ? Array.Empty<PostureChangeRecord>()
+            : notifications;
+        historyEntry = historyEntry with
+        {
+            PostureChanges = postureAnalysis.Changes,
+            PendingNotifications = pendingNotifications,
+            PostureTrend = postureAnalysis.Trend,
+            NotificationDelivery = delivery.Status
+        };
         var result = new LiveCloudScanResult(
             accountsScanned,
             identitiesScanned,
@@ -306,7 +369,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             permissionsScanned,
             privilegedIdentities,
             findings,
-            DateTime.UtcNow,
+            completedAt,
             messages,
             identityRecords,
             resourceRecords,
@@ -317,27 +380,13 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             accountRecords)
         {
             Coverage = coverage,
-            WorkloadTraces = workloadTraces
+            WorkloadTraces = workloadTraces,
+            PostureChanges = postureAnalysis.Changes,
+            PostureTrend = postureAnalysis.Trend,
+            NotificationDelivery = delivery.Status
         };
         if (_historyStore is not null)
         {
-            var providers = string.Join(", ", messages.Select(message => message.Split(':')[0]).Distinct());
-            var historyEntry = new LiveScanHistoryEntry(
-                result.StartedAt,
-                result.CompletedAt,
-                providers,
-                result.AccountCount,
-                result.IdentityCount,
-                result.ResourceCount,
-                result.RoleCount,
-                result.PermissionCount,
-                result.Findings.Count,
-                result.EffectiveAccessRecords,
-                result.AccountRecords)
-            {
-                Coverage = result.Coverage,
-                WorkloadTraces = result.WorkloadTraces
-            };
             try
             {
                 await _historyStore.RecordAsync(historyEntry, cancellationToken);
@@ -351,6 +400,19 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         CurrentResult = result;
         ScanCompleted?.Invoke(this, EventArgs.Empty);
         return CurrentResult;
+    }
+
+    private static HashSet<string> ScanProviders(LiveScanHistoryEntry scan)
+        => scan.AccountDetails.Select(account => account.Provider)
+            .Concat(scan.EffectiveAccess.Select(access => access.Provider))
+            .Concat(scan.Coverage.Select(item => item.Provider))
+            .Concat(scan.RiskFindingDetails.Select(finding => finding.Provider))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private sealed class DisabledPostureNotificationChannel : IPostureNotificationChannel
+    {
+        public Task<PostureNotificationResult> DeliverAsync(IReadOnlyList<PostureChangeRecord> alerts, CancellationToken cancellationToken = default)
+            => Task.FromResult(new PostureNotificationResult(false, 0, "Webhook not configured; alert delivery skipped."));
     }
 
     private static async Task<IReadOnlyList<T>> CollectAsync<T>(

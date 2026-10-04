@@ -837,6 +837,8 @@ public sealed record RecommendationGridRow(RecommendationModel? Model, string Ty
 public sealed record ScanHistoryGridRow(string Provider, DateTime StartedAt, DateTime? CompletedAt, string Status, int Identities, int Items, int Permissions, int Findings, int EffectiveAccess);
 public sealed record AccessChangeTimelineRow(string Provider, string Change, DateTime DetectedAt, DateTime? ProviderChangedAt, string ChangedBy, string Principal, string Assignment, string Scope, string PreviousState, string CurrentState, string Source);
 public sealed record ScanCoverageGridRow(string Provider, string DataSource, string Status, int Records, string Details);
+public sealed record PostureTrendGridRow(DateTime CompletedAt, string Provider, int Accounts, int Identities, int Resources, int Permissions, int Findings, int Critical, int High, int EffectiveAccess, int Added, int Removed, int Changed);
+public sealed record PostureDriftGridRow(DateTime DetectedAt, string Provider, string Type, string EntityType, string Severity, string Summary, bool AlertEligible);
 
 public sealed class EntitlementsViewModel : WorkspaceViewModel
 {
@@ -1371,7 +1373,7 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
 
     public override string Title => "Scan History";
     public override string Subtitle => "Review scan history and access changes observed across retained live scans.";
-    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Scans)); OnPropertyChanged(nameof(HasResults)); OnPropertyChanged(nameof(AccessChanges)); OnPropertyChanged(nameof(HasAccessChanges)); OnPropertyChanged(nameof(Coverage)); OnPropertyChanged(nameof(HasCoverage)); } } }
+    public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) { OnPropertyChanged(nameof(Scans)); OnPropertyChanged(nameof(HasResults)); OnPropertyChanged(nameof(AccessChanges)); OnPropertyChanged(nameof(HasAccessChanges)); OnPropertyChanged(nameof(Coverage)); OnPropertyChanged(nameof(HasCoverage)); OnPropertyChanged(nameof(PostureTrends)); OnPropertyChanged(nameof(DriftAlerts)); OnPropertyChanged(nameof(HasDriftAlerts)); } } }
     public IReadOnlyList<ScanHistoryGridRow> Scans
     {
         get
@@ -1407,6 +1409,22 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
         }
     }
     public bool HasCoverage => Coverage.Count > 0;
+    public IReadOnlyList<PostureTrendGridRow> PostureTrends => _liveHistory
+        .Where(scan => scan.PostureTrend is not null)
+        .Select(scan => scan.PostureTrend!)
+        .Where(trend => WorkspaceDataFormatting.Matches(SearchText, trend.Provider))
+        .OrderByDescending(trend => trend.CompletedAt)
+        .Select(trend => new PostureTrendGridRow(trend.CompletedAt, trend.Provider, trend.Accounts, trend.Identities, trend.Resources, trend.Permissions, trend.Findings, trend.CriticalFindings, trend.HighFindings, trend.EffectiveAccess, trend.Added, trend.Removed, trend.Changed))
+        .ToArray();
+    public IReadOnlyList<PostureDriftGridRow> DriftAlerts => _liveHistory
+        .SelectMany(scan => scan.PostureChanges)
+        .Where(change => WorkspaceDataFormatting.Matches(SearchText, change.Provider, change.Type.ToString(), change.EntityType, change.Severity, change.Summary))
+        .OrderByDescending(change => change.DetectedAt)
+        .Select(change => new PostureDriftGridRow(change.DetectedAt, change.Provider, change.Type.ToString(), change.EntityType, change.Severity, change.Summary, change.AlertEligible))
+        .ToArray();
+    public bool HasDriftAlerts => DriftAlerts.Count > 0;
+    public string NotificationDeliveryMessage => _liveHistory.OrderByDescending(scan => scan.CompletedAt).FirstOrDefault()?.NotificationDelivery
+        ?? "No posture notification status is recorded yet.";
     public string CoverageMessage => _liveHistory.Count == 0
         ? "Scan coverage is available after a live provider scan."
         : _liveHistory.OrderByDescending(scan => scan.CompletedAt).First().Coverage.Count == 0
@@ -1481,6 +1499,10 @@ public sealed class ScanHistoryViewModel : WorkspaceViewModel
             OnPropertyChanged(nameof(Coverage));
             OnPropertyChanged(nameof(HasCoverage));
             OnPropertyChanged(nameof(CoverageMessage));
+            OnPropertyChanged(nameof(PostureTrends));
+            OnPropertyChanged(nameof(DriftAlerts));
+            OnPropertyChanged(nameof(HasDriftAlerts));
+            OnPropertyChanged(nameof(NotificationDeliveryMessage));
         }
         catch (Exception exception)
         {

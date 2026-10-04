@@ -14,7 +14,47 @@ public sealed record LiveEffectiveAccessRecord(
     string AssignmentType = "Assigned",
     DateTime? LastUsedAt = null,
     DateTime? LastChangedAt = null,
-    string? LastChangedBy = null);
+    string? LastChangedBy = null,
+    string? AccountId = null);
+
+public enum PostureChangeType { Added, Removed, Changed }
+
+public sealed record LiveRiskFindingSnapshot(
+    string Provider,
+    string Fingerprint,
+    string Severity,
+    string Title,
+    string Principal,
+    string Resource,
+    string Recommendation);
+
+public sealed record PostureChangeRecord(
+    string Provider,
+    PostureChangeType Type,
+    string EntityType,
+    string EntityKey,
+    string Severity,
+    string Summary,
+    string PreviousState,
+    string CurrentState,
+    DateTime DetectedAt,
+    bool AlertEligible);
+
+public sealed record PostureTrendRecord(
+    DateTime CompletedAt,
+    string Provider,
+    int Accounts,
+    int Identities,
+    int Resources,
+    int Roles,
+    int Permissions,
+    int Findings,
+    int CriticalFindings,
+    int HighFindings,
+    int EffectiveAccess,
+    int Added,
+    int Removed,
+    int Changed);
 
 public sealed record LiveScanHistoryEntry(
     DateTime StartedAt,
@@ -31,6 +71,11 @@ public sealed record LiveScanHistoryEntry(
 {
     public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
     public IReadOnlyList<KubernetesWorkloadTrace> WorkloadTraces { get; init; } = Array.Empty<KubernetesWorkloadTrace>();
+    public IReadOnlyList<LiveRiskFindingSnapshot> RiskFindingDetails { get; init; } = Array.Empty<LiveRiskFindingSnapshot>();
+    public IReadOnlyList<PostureChangeRecord> PostureChanges { get; init; } = Array.Empty<PostureChangeRecord>();
+    public IReadOnlyList<PostureChangeRecord> PendingNotifications { get; init; } = Array.Empty<PostureChangeRecord>();
+    public PostureTrendRecord? PostureTrend { get; init; }
+    public string NotificationDelivery { get; init; } = "Not attempted";
 }
 
 public interface ILiveScanHistoryStore
@@ -109,7 +154,7 @@ public sealed class LocalLiveScanHistoryStore : ILiveScanHistoryStore
             try
             {
                 var entry = JsonSerializer.Deserialize<LiveScanHistoryEntry>(line, JsonOptions);
-                if (entry is not null) entries.Add(entry);
+                if (entry is not null) entries.Add(NormalizeEntry(entry));
             }
             catch (JsonException)
             {
@@ -117,6 +162,18 @@ public sealed class LocalLiveScanHistoryStore : ILiveScanHistoryStore
         }
         return entries;
     }
+
+    private static LiveScanHistoryEntry NormalizeEntry(LiveScanHistoryEntry entry) => entry with
+    {
+        EffectiveAccess = entry.EffectiveAccess ?? Array.Empty<LiveEffectiveAccessRecord>(),
+        AccountDetails = entry.AccountDetails ?? Array.Empty<LiveScanAccountRecord>(),
+        Coverage = entry.Coverage ?? Array.Empty<ScanCoverageRecord>(),
+        WorkloadTraces = entry.WorkloadTraces ?? Array.Empty<KubernetesWorkloadTrace>(),
+        RiskFindingDetails = entry.RiskFindingDetails ?? Array.Empty<LiveRiskFindingSnapshot>(),
+        PostureChanges = entry.PostureChanges ?? Array.Empty<PostureChangeRecord>(),
+        PendingNotifications = entry.PendingNotifications ?? Array.Empty<PostureChangeRecord>(),
+        NotificationDelivery = entry.NotificationDelivery ?? "Legacy scan; no notification delivery status."
+    };
 
     private async Task WriteEntriesAsync(IReadOnlyList<LiveScanHistoryEntry> entries, CancellationToken cancellationToken)
     {

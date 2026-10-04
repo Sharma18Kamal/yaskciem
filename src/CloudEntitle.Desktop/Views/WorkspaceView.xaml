@@ -412,6 +412,49 @@
                         </TextBlock>
                     </StackPanel>
                 </Border>
+                <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                    <StackPanel>
+                        <TextBlock Text="POSTURE HISTORY" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="Seven-day local trend of inventory, findings, effective access, and scan-to-scan changes." Foreground="{StaticResource MutedBrush}" Margin="0,7,0,12" TextWrapping="Wrap"/>
+                        <DataGrid ItemsSource="{Binding PostureTrends}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="320" CanUserSortColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Completed" Binding="{Binding CompletedAt, StringFormat=g}" Width="150"/>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="100"/>
+                                <DataGridTextColumn Header="Accounts" Binding="{Binding Accounts}" Width="75"/>
+                                <DataGridTextColumn Header="Identities" Binding="{Binding Identities}" Width="75"/>
+                                <DataGridTextColumn Header="Resources" Binding="{Binding Resources}" Width="75"/>
+                                <DataGridTextColumn Header="Permissions" Binding="{Binding Permissions}" Width="80"/>
+                                <DataGridTextColumn Header="Findings" Binding="{Binding Findings}" Width="70"/>
+                                <DataGridTextColumn Header="Critical" Binding="{Binding Critical}" Width="65"/>
+                                <DataGridTextColumn Header="High" Binding="{Binding High}" Width="55"/>
+                                <DataGridTextColumn Header="Access" Binding="{Binding EffectiveAccess}" Width="65"/>
+                                <DataGridTextColumn Header="Added" Binding="{Binding Added}" Width="55"/>
+                                <DataGridTextColumn Header="Removed" Binding="{Binding Removed}" Width="65"/>
+                                <DataGridTextColumn Header="Changed" Binding="{Binding Changed}" Width="65"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                    <StackPanel>
+                        <TextBlock Text="DRIFT ALERTS AND NOTIFICATION DELIVERY" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="{Binding NotificationDeliveryMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,12" TextWrapping="Wrap"/>
+                        <DataGrid ItemsSource="{Binding DriftAlerts}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="320" CanUserSortColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Detected" Binding="{Binding DetectedAt, StringFormat=g}" Width="150"/>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="90"/>
+                                <DataGridTextColumn Header="Change" Binding="{Binding Type}" Width="85"/>
+                                <DataGridTextColumn Header="Entity" Binding="{Binding EntityType}" Width="130"/>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="90"/>
+                                <DataGridTextColumn Header="Alert" Binding="{Binding AlertEligible}" Width="60"/>
+                                <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="No posture changes are recorded in the retained history." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasDriftAlerts}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:WorkspaceViewModel}">

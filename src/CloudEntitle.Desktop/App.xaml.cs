@@ -49,6 +49,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<ILiveScanHistoryStore, LocalLiveScanHistoryStore>();
 		services.AddSingleton<ITrialService, TrialService>();
 		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
+		services.AddSingleton<IPostureNotificationChannel>(_ => new WebhookPostureNotificationChannel());
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new AwsProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new GcpProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
