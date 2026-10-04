@@ -16,7 +16,9 @@ public sealed record RecommendationContext(
     IReadOnlyList<CloudResource> Resources,
     IReadOnlyList<CloudPermission> Permissions,
     IReadOnlyList<ActivityRecord> ActivityRecords,
-    DateTime EvaluatedAt);
+    DateTime EvaluatedAt,
+    IReadOnlyList<ActivityEvidenceCoverage>? ActivityCoverage = null,
+    int ActivityObservationDays = 30);
 
 public sealed record RecommendationEvidence(
     Guid RiskFindingId,

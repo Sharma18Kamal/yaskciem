@@ -664,6 +664,9 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("ResourceId")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("RoleId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Service")
                         .HasColumnType("TEXT");
 

@@ -4,6 +4,7 @@ using CloudEntitle.Normalization.Models;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
 using CloudEntitle.Recommendations.Abstractions;
 using CloudEntitle.Recommendations.Models;
+using CloudEntitle.RiskEngine.Models;
 
 namespace CloudEntitle.Recommendations.Rules;
 
@@ -24,7 +25,11 @@ public abstract class RecommendationRuleBase : IRecommendationRule
         var entitlement = Entitlement(context, finding);
         var path = pathId.HasValue ? context.AccessPaths.FirstOrDefault(item => item.Id == pathId) : Path(context, finding);
         var state = finding.EvaluationState == RiskEvaluationState.Confirmed && entitlement != null && finding.EffectiveAccessId.HasValue ? RiskEvaluationState.Confirmed : finding.EvaluationState == RiskEvaluationState.Unknown ? RiskEvaluationState.Unknown : RiskEvaluationState.Potential;
-        var evidence = new RecommendationEvidence(finding.Id, finding.EffectiveAccessId, path?.Id, entitlement?.Id, finding.CloudProvider, "RiskFinding", finding.Fingerprint, finding.Title, Name(context, finding.PrincipalId), Resource(context, finding.ResourceId), Permission(context, finding.PermissionId), entitlement?.Scope.OriginalScope ?? "unknown", entitlement?.AssignmentType.ToString() ?? "unknown", finding.Evidence.Summary, context.ActivityRecords.Count == 0 ? "Activity data unavailable." : "Activity records loaded.", $"EffectiveAccess={finding.EffectiveAccessId}; AccessPath={path?.Id}; Entitlement={entitlement?.Id}", finding.Evidence.Summary);
+        var coverage = context.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == finding.CloudAccountId && item.Provider == finding.CloudProvider);
+        var activityEvidence = coverage is null
+            ? "Unavailable: no provider/account activity coverage record."
+            : $"{coverage.Status}; Window={coverage.ObservedFromUtc:O}..{coverage.ObservedThroughUtc:O}; Records={coverage.RecordCount}; {coverage.Details ?? "No additional details."}";
+        var evidence = new RecommendationEvidence(finding.Id, finding.EffectiveAccessId, path?.Id, entitlement?.Id, finding.CloudProvider, "RiskFinding", finding.Fingerprint, finding.Title, Name(context, finding.PrincipalId), Resource(context, finding.ResourceId), Permission(context, finding.PermissionId), entitlement?.Scope.OriginalScope ?? "unknown", entitlement?.AssignmentType.ToString() ?? "unknown", finding.Evidence.Summary, activityEvidence, $"EffectiveAccess={finding.EffectiveAccessId}; AccessPath={path?.Id}; Entitlement={entitlement?.Id}", finding.Evidence.Summary);
         var fingerprint = string.Join('|', finding.CloudProvider, finding.CloudAccountId, finding.PrincipalId, finding.ResourceId, finding.EffectiveAccessId, path?.Id, finding.Id, RecommendationType);
         return new RecommendationModel
         {
@@ -35,7 +40,137 @@ public abstract class RecommendationRuleBase : IRecommendationRule
     protected static Guid Stable(string value) => GuidUtility.Create(GuidUtility.Namespace, value);
 }
 
-public sealed class RemoveUnusedPermissionRule : RecommendationRuleBase { public override string RuleId => "CIEM-008"; public override RecommendationType RecommendationType => RecommendationType.RemoveUnusedPermission; public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RecommendationModel>>(Findings(c, RuleId).Where(f => f.EvaluationState == RiskEvaluationState.Confirmed).Select(f => Create(c, f, "Remove unused permission", "Remove the entitlement after confirming the observed usage window.", Permission(c, f.PermissionId), "Remove the unused permission from the source policy or assignment.", "Activity evidence confirms no observed use.", RecommendationImpactState.RequiresReview)).ToArray()); }
+public sealed class GenerateLeastPrivilegePolicyRule : RecommendationRuleBase
+{
+    private sealed record ObservedOperation(string Action, string Resource);
+
+    public override string RuleId => "CIEM-003";
+    public override RecommendationType RecommendationType => RecommendationType.GenerateLeastPrivilegePolicy;
+
+    public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext context, CancellationToken cancellationToken = default)
+    {
+        var recommendations = new List<RecommendationModel>();
+        var windowEnd = context.EvaluatedAt.ToUniversalTime();
+        var windowStart = windowEnd.AddDays(-Math.Max(1, context.ActivityObservationDays));
+        foreach (var finding in Findings(context, RuleId).Where(item => item.EvaluationState == RiskEvaluationState.Confirmed))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var coverage = context.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == finding.CloudAccountId && item.Provider == finding.CloudProvider);
+            var entitlement = Entitlement(context, finding);
+            var permission = context.Permissions.FirstOrDefault(item => item.Id == finding.PermissionId);
+            if (entitlement is null || string.IsNullOrWhiteSpace(permission?.Action)) continue;
+            if (!ActivityUsageEvaluator.Covers(coverage, windowStart, windowEnd, requiresActions: true, requiresResourceIds: true, requiresRoleIds: entitlement.RoleId.HasValue)) continue;
+
+            var observed = context.ActivityRecords
+                .Where(activity => activity.CloudAccountId == finding.CloudAccountId
+                    && activity.PrincipalId == finding.PrincipalId
+                    && activity.Success
+                    && activity.Timestamp.ToUniversalTime() >= windowStart
+                    && activity.Timestamp.ToUniversalTime() <= windowEnd
+                    && activity.ResourceId.HasValue
+                    && (!finding.ResourceId.HasValue || activity.ResourceId == finding.ResourceId)
+                    && (!entitlement.RoleId.HasValue || activity.RoleId == entitlement.RoleId)
+                    && ActivityUsageEvaluator.ActionMatches(finding.CloudProvider, permission.Action, activity.Action)
+                    && !activity.Action.Contains('*')
+                    && !activity.Action.Contains('?'))
+                .Select(activity => new ObservedOperation(
+                    activity.Action,
+                    context.Resources.FirstOrDefault(resource => resource.Id == activity.ResourceId)?.ResourceId ?? string.Empty))
+                .Where(item => !string.IsNullOrWhiteSpace(item.Resource))
+                .DistinctBy(item => (item.Action, item.Resource))
+                .OrderBy(item => item.Action, StringComparer.Ordinal)
+                .ThenBy(item => item.Resource, StringComparer.Ordinal)
+                .ToArray();
+            if (observed.Length == 0) continue;
+
+            var proposedPolicy = BuildPolicy(finding.CloudProvider, entitlement.Scope.OriginalScope, observed, windowStart, windowEnd);
+            if (proposedPolicy is null) continue;
+            var description = $"Generated from {observed.Length} successful action/resource observation(s) over {context.ActivityObservationDays} days. Review business requirements and provider constraints before replacing the source policy.";
+            recommendations.Add(Create(context, finding, "Generate least-privilege policy proposal", description, permission.Name, proposedPolicy,
+                $"Observed operations only; activity coverage was complete from {windowStart:O} through {windowEnd:O}.", RecommendationImpactState.RequiresReview));
+        }
+
+        return Task.FromResult<IReadOnlyCollection<RecommendationModel>>(recommendations);
+    }
+
+    private static string? BuildPolicy(CloudProvider provider, string scope, IReadOnlyList<ObservedOperation> observed, DateTime windowStart, DateTime windowEnd)
+    {
+        var actions = observed.Select(item => item.Action).Distinct(StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal).ToArray();
+        var resources = observed.Select(item => item.Resource).Distinct(StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal).ToArray();
+        object? document = provider switch
+        {
+            CloudProvider.Azure => new
+            {
+                Name = "YASK-CIEM least-privilege proposal",
+                IsCustom = true,
+                Description = $"Derived from successful observed activity ({windowStart:O} to {windowEnd:O}); review before use.",
+                Actions = actions,
+                NotActions = Array.Empty<string>(),
+                DataActions = Array.Empty<string>(),
+                NotDataActions = Array.Empty<string>(),
+                AssignableScopes = new[] { scope }
+            },
+            CloudProvider.Aws => new
+            {
+                Version = "2012-10-17",
+                Statement = observed.Select(item => new { Effect = "Allow", item.Action, item.Resource }).ToArray()
+            },
+            CloudProvider.Gcp => new
+            {
+                title = "YASK-CIEM least-privilege proposal",
+                description = $"Derived from successful observed activity ({windowStart:O} to {windowEnd:O}); bind only at the reviewed scope: {scope}.",
+                includedPermissions = actions
+            },
+            _ => null
+        };
+        return document is null ? null : System.Text.Json.JsonSerializer.Serialize(document, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+    }
+}
+
+public sealed class RemoveUnusedPermissionRule : RecommendationRuleBase
+{
+    public override string RuleId => "CIEM-008";
+    public override RecommendationType RecommendationType => RecommendationType.RemoveUnusedPermission;
+
+    public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext context, CancellationToken cancellationToken = default)
+    {
+        var windowEnd = context.EvaluatedAt.ToUniversalTime();
+        var windowStart = windowEnd.AddDays(-Math.Max(1, context.ActivityObservationDays));
+        var recommendations = Findings(context, RuleId)
+            .Where(finding => finding.EvaluationState == RiskEvaluationState.Confirmed)
+            .Where(finding =>
+            {
+                var entitlement = Entitlement(context, finding);
+                var coverage = context.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == finding.CloudAccountId && item.Provider == finding.CloudProvider);
+                return entitlement is not null && ActivityUsageEvaluator.Covers(coverage, windowStart, windowEnd,
+                    requiresActions: true, requiresResourceIds: finding.ResourceId.HasValue, requiresRoleIds: entitlement.RoleId.HasValue);
+            })
+            .Select(finding => Create(context, finding, "Remove unused permission", "Remove the entitlement after confirming the observed usage window.", Permission(context, finding.PermissionId),
+                "Remove the unused permission from the source policy or assignment.", "Complete activity coverage confirms no matching successful use.", RecommendationImpactState.RequiresReview))
+            .ToArray();
+        return Task.FromResult<IReadOnlyCollection<RecommendationModel>>(recommendations);
+    }
+}
+public sealed class RemoveUnusedRoleRule : RecommendationRuleBase
+{
+    public override string RuleId => "CIEM-016";
+    public override RecommendationType RecommendationType => RecommendationType.RemoveUnusedRole;
+
+    public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext context, CancellationToken cancellationToken = default)
+    {
+        var windowEnd = context.EvaluatedAt.ToUniversalTime();
+        var windowStart = windowEnd.AddDays(-Math.Max(1, context.ActivityObservationDays));
+        var recommendations = Findings(context, RuleId).Where(finding => finding.EvaluationState == RiskEvaluationState.Confirmed)
+            .Where(finding => ActivityUsageEvaluator.Covers(
+                context.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == finding.CloudAccountId && item.Provider == finding.CloudProvider),
+                windowStart, windowEnd, requiresRoleIds: true))
+            .Select(finding => Create(context, finding, "Remove unused role assignment", "Review removing the role assignment after confirming ownership and business requirements.",
+                Entitlement(context, finding)?.RoleId?.ToString() ?? "Unknown role", "Remove the unused role assignment from its source policy.",
+                "Complete role-attributed activity coverage contains no successful use in the observation window.", RecommendationImpactState.RequiresReview))
+            .ToArray();
+        return Task.FromResult<IReadOnlyCollection<RecommendationModel>>(recommendations);
+    }
+}
 public sealed class NarrowWildcardPermissionRule : RecommendationRuleBase { public override string RuleId => "CIEM-003"; public override RecommendationType RecommendationType => RecommendationType.NarrowWildcardPermission; public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RecommendationModel>>(Findings(c, RuleId).Select(f => Create(c, f, "Narrow wildcard permission", "Replace the wildcard action with only observed required operations after review.", Permission(c, f.PermissionId), "Specific observed permissions at the narrowest supported scope.", "The risk evidence identifies a wildcard action; required operations are not fully inferred.", RecommendationImpactState.RequiresReview)).ToArray()); }
 public sealed class NarrowResourceScopeRule : RecommendationRuleBase { public override string RuleId => "CIEM-004"; public override RecommendationType RecommendationType => RecommendationType.NarrowResourceScope; public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RecommendationModel>>(Findings(c, RuleId).Select(f => Create(c, f, "Narrow resource scope", "Review reducing the assignment to only the resources evidenced by effective access.", Entitlement(c, f)?.Scope.OriginalScope ?? "unknown", Resource(c, f.ResourceId), "Broad scope is evidenced, but required business coverage must be validated.", RecommendationImpactState.RequiresReview)).ToArray()); }
 public sealed class ReplaceBroadRoleRule : RecommendationRuleBase { public override string RuleId => "CIEM-001"; public override RecommendationType RecommendationType => RecommendationType.ReplaceBroadRole; public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RecommendationModel>>(Findings(c, RuleId).Select(f => Create(c, f, "Review broad privileged role", "Evaluate replacing the current role with a narrower role that preserves required access.", "Privileged role or permission", "Provider-supported least-privilege role", "Required permissions and business ownership require review before approval.", RecommendationImpactState.HighPotentialImpact)).ToArray()); }

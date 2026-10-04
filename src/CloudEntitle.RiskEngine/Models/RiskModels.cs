@@ -19,11 +19,69 @@ public sealed record RiskEvaluationRequest(
     IReadOnlyList<ActivityRecord> ActivityRecords,
     Guid? ScanId = null,
     DateTime? EvaluatedAt = null,
-    RiskRuleOptions? Options = null);
+    RiskRuleOptions? Options = null,
+    IReadOnlyList<ActivityEvidenceCoverage>? ActivityCoverage = null);
 
-public sealed record RiskRuleOptions(int DormancyDays = 90, int MaxPathDepth = 5, bool RequireProductionTag = true, IReadOnlySet<string>? EnabledRules = null)
+public sealed record RiskRuleOptions(int DormancyDays = 90, int MaxPathDepth = 5, bool RequireProductionTag = true, IReadOnlySet<string>? EnabledRules = null, int UsageObservationDays = 30)
 {
     public bool IsEnabled(string ruleId) => EnabledRules == null || EnabledRules.Contains(ruleId);
+}
+
+public enum ActivityCoverageStatus { Complete, Partial, Unavailable, Unsupported, Unknown }
+
+public sealed record ActivityEvidenceCoverage(
+    Guid CloudAccountId,
+    CloudProvider Provider,
+    DateTime ObservedFromUtc,
+    DateTime ObservedThroughUtc,
+    ActivityCoverageStatus Status,
+    bool IncludesActions,
+    bool IncludesResourceIds,
+    bool IncludesRoleIds,
+    int RecordCount,
+    string? Details = null);
+
+public static class ActivityUsageEvaluator
+{
+    public static bool Covers(ActivityEvidenceCoverage? coverage, DateTime windowStartUtc, DateTime windowEndUtc, bool requiresActions = false, bool requiresResourceIds = false, bool requiresRoleIds = false)
+        => coverage is not null
+            && coverage.Status == ActivityCoverageStatus.Complete
+            && coverage.ObservedFromUtc.ToUniversalTime() <= windowStartUtc.ToUniversalTime()
+            && coverage.ObservedThroughUtc.ToUniversalTime() >= windowEndUtc.ToUniversalTime()
+            && (!requiresActions || coverage.IncludesActions)
+            && (!requiresResourceIds || coverage.IncludesResourceIds)
+            && (!requiresRoleIds || coverage.IncludesRoleIds);
+
+    public static bool ActionMatches(CloudProvider provider, string pattern, string action)
+    {
+        var comparison = provider == CloudProvider.Gcp ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var patternIndex = 0;
+        var actionIndex = 0;
+        var starIndex = -1;
+        var retryActionIndex = -1;
+        while (actionIndex < action.Length)
+        {
+            if (patternIndex < pattern.Length && (pattern[patternIndex] == '?' || string.Equals(pattern[patternIndex].ToString(), action[actionIndex].ToString(), comparison)))
+            {
+                patternIndex++;
+                actionIndex++;
+            }
+            else if (patternIndex < pattern.Length && pattern[patternIndex] == '*')
+            {
+                starIndex = patternIndex++;
+                retryActionIndex = actionIndex;
+            }
+            else if (starIndex >= 0)
+            {
+                patternIndex = starIndex + 1;
+                actionIndex = ++retryActionIndex;
+            }
+            else return false;
+        }
+
+        while (patternIndex < pattern.Length && pattern[patternIndex] == '*') patternIndex++;
+        return patternIndex == pattern.Length;
+    }
 }
 
 public sealed record RiskRuleContext(RiskEvaluationRequest Request, DateTime EvaluatedAt, RiskRuleOptions Options);

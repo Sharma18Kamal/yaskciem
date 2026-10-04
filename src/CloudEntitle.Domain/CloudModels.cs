@@ -213,7 +213,9 @@ public enum RecommendationType
     ReducePrivilegedGroupAccess,
     ReduceNestedPrivilege,
     ReduceLongPrivilegeChain,
-    ConsolidateAccess
+    ConsolidateAccess,
+    GenerateLeastPrivilegePolicy,
+    RemoveUnusedRole
 }
 
 public enum RecommendationImpactState

@@ -60,6 +60,116 @@ public sealed class RiskEngineTests
     }
 
     [Fact]
+    public async Task MissingActivityCoverageForMutation_ShouldRemainUnknown()
+    {
+        var fixture = FixtureData.Create(action: "storage.write", resource: "specific-resource");
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request);
+
+        Assert.Contains(result.Findings, finding => finding.RuleId == Stable("CIEM-002") && finding.EvaluationState == RiskEvaluationState.Unknown);
+    }
+
+    [Fact]
+    public async Task CompleteActivityWindowWithoutMutation_ShouldBePotential()
+    {
+        var fixture = FixtureData.Create(action: "storage.write", resource: "specific-resource");
+        var evaluatedAt = DateTime.UtcNow;
+        var request = fixture.Request with
+        {
+            EvaluatedAt = evaluatedAt,
+            ActivityCoverage = new[] { new ActivityEvidenceCoverage(fixture.Effective.CloudAccountId, fixture.Effective.Provider, evaluatedAt.AddDays(-30), evaluatedAt, ActivityCoverageStatus.Complete, true, true, true, 0) }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.Contains(result.Findings, finding => finding.RuleId == Stable("CIEM-002") && finding.EvaluationState == RiskEvaluationState.Potential);
+    }
+
+    [Fact]
+    public async Task CompleteActivityWindowWithoutMatchingActions_ShouldConfirmUnusedEntitlement()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "specific-resource");
+        var evaluatedAt = DateTime.UtcNow;
+        var request = fixture.Request with
+        {
+            EvaluatedAt = evaluatedAt,
+            ActivityCoverage = new[] { new ActivityEvidenceCoverage(fixture.Effective.CloudAccountId, fixture.Effective.Provider, evaluatedAt.AddDays(-30), evaluatedAt, ActivityCoverageStatus.Complete, true, true, true, 0, "Cloud audit query completed") }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-008"));
+        Assert.Equal(RiskEvaluationState.Confirmed, finding.EvaluationState);
+        Assert.Contains("complete activity window", finding.Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ActivityOnDifferentResource_ShouldNotBeMistakenForPermissionUse()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "specific-resource");
+        var evaluatedAt = DateTime.UtcNow;
+        var request = fixture.Request with
+        {
+            EvaluatedAt = evaluatedAt,
+            ActivityCoverage = new[] { new ActivityEvidenceCoverage(fixture.Effective.CloudAccountId, fixture.Effective.Provider, evaluatedAt.AddDays(-30), evaluatedAt, ActivityCoverageStatus.Complete, true, true, true, 1) },
+            ActivityRecords = new[] { new ActivityRecord { PrincipalId = fixture.Effective.PrincipalId, RoleId = fixture.Effective.RoleId, CloudAccountId = fixture.Effective.CloudAccountId, ResourceId = Guid.NewGuid(), Action = "storage.read", Timestamp = evaluatedAt.AddDays(-1), Success = true } }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.Contains(result.Findings, finding => finding.RuleId == Stable("CIEM-008") && finding.EvaluationState == RiskEvaluationState.Confirmed);
+    }
+
+    [Fact]
+    public async Task PartialActivityCoverage_ShouldRemainUnknown()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "specific-resource");
+        var evaluatedAt = DateTime.UtcNow;
+        var request = fixture.Request with
+        {
+            EvaluatedAt = evaluatedAt,
+            ActivityCoverage = new[] { new ActivityEvidenceCoverage(fixture.Effective.CloudAccountId, fixture.Effective.Provider, evaluatedAt.AddDays(-30), evaluatedAt, ActivityCoverageStatus.Partial, true, true, true, 0, "Some regions denied") }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.Contains(result.Findings, finding => finding.RuleId == Stable("CIEM-008") && finding.EvaluationState == RiskEvaluationState.Unknown);
+    }
+
+    [Fact]
+    public async Task CompleteRoleCoverageWithoutUse_ShouldConfirmUnusedRoleAssignment()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "specific-resource");
+        var evaluatedAt = DateTime.UtcNow;
+        var request = fixture.Request with
+        {
+            EvaluatedAt = evaluatedAt,
+            ActivityCoverage = new[] { new ActivityEvidenceCoverage(fixture.Effective.CloudAccountId, fixture.Effective.Provider, evaluatedAt.AddDays(-30), evaluatedAt, ActivityCoverageStatus.Complete, true, true, true, 0, "Role usage query completed") }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.Contains(result.Findings, finding => finding.RuleId == Stable("CIEM-016") && finding.EvaluationState == RiskEvaluationState.Confirmed);
+    }
+
+    [Fact]
+    public async Task SuccessfulRoleUse_ShouldPreventUnusedRoleFinding()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "specific-resource");
+        var evaluatedAt = DateTime.UtcNow;
+        var request = fixture.Request with
+        {
+            EvaluatedAt = evaluatedAt,
+            ActivityCoverage = new[] { new ActivityEvidenceCoverage(fixture.Effective.CloudAccountId, fixture.Effective.Provider, evaluatedAt.AddDays(-30), evaluatedAt, ActivityCoverageStatus.Complete, true, true, true, 1) },
+            ActivityRecords = new[] { new ActivityRecord { CloudAccountId = fixture.Effective.CloudAccountId, RoleId = fixture.Effective.RoleId, Action = "AssumeRole", Timestamp = evaluatedAt.AddDays(-1), Success = true } }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.DoesNotContain(result.Findings, finding => finding.RuleId == Stable("CIEM-016"));
+    }
+
+    [Fact]
     public async Task ExternalPrivilegedServiceIdentity_ShouldProduceSeparateFindings()
     {
         var fixture = FixtureData.Create(action: "storage.read", resource: "production-resource", privileged: true, external: true, identityType: IdentityType.ServiceAccount, production: true);

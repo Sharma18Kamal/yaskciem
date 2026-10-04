@@ -118,6 +118,7 @@ public class ActivityRecord
 {
     public Guid Id { get; set; }
     public Guid PrincipalId { get; set; }
+    public Guid? RoleId { get; set; }
     public Guid CloudAccountId { get; set; }
     public Guid? ResourceId { get; set; }
     public string Action { get; set; } = string.Empty;

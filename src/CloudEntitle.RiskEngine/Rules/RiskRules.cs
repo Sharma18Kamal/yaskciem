@@ -48,13 +48,143 @@ public abstract class RiskRuleBase : IRiskRule
 }
 
 public sealed class PrivilegedIdentityRule : RiskRuleBase { public override string RuleId => "CIEM-001"; public override string Name => "Privileged Identity"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.Privilege; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "The principal has privileged effective access.", "EffectiveAccess.IsPrivileged=true")).ToArray()); }
-public sealed class ExcessivePermissionRule : RiskRuleBase { public override string RuleId => "CIEM-002"; public override string Name => "Excessive Permission"; public override RiskSeverity DefaultSeverity => RiskSeverity.Medium; public override RiskCategory Category => RiskCategory.ExcessiveAccess; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => (Permission(c, a.PermissionId)?.Action?.Contains("write", StringComparison.OrdinalIgnoreCase) == true || Permission(c, a.PermissionId)?.Action?.Contains("delete", StringComparison.OrdinalIgnoreCase) == true) && !c.Request.ActivityRecords.Any(x => x.PrincipalId == a.PrincipalId && x.Action.Contains("write", StringComparison.OrdinalIgnoreCase))).Select(a => Finding(c, a, RiskEvaluationState.Potential, Name, "The permission is broader than observed activity supports.", "Activity does not demonstrate the granted write/delete operation.")).ToArray()); }
+public sealed class ExcessivePermissionRule : RiskRuleBase
+{
+    public override string RuleId => "CIEM-002";
+    public override string Name => "Excessive Permission";
+    public override RiskSeverity DefaultSeverity => RiskSeverity.Medium;
+    public override RiskCategory Category => RiskCategory.ExcessiveAccess;
+
+    public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext context, CancellationToken cancellationToken = default)
+    {
+        var findings = new List<RiskFindingModel>();
+        var windowEnd = context.EvaluatedAt.ToUniversalTime();
+        var windowStart = windowEnd.AddDays(-Math.Max(1, context.Options.UsageObservationDays));
+        foreach (var access in context.Request.EffectiveAccess.Where(item => item.Decision == AccessDecision.Allow))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var action = Permission(context, access.PermissionId)?.Action;
+            if (action is null || (!action.Contains("write", StringComparison.OrdinalIgnoreCase) && !action.Contains("delete", StringComparison.OrdinalIgnoreCase))) continue;
+            var coverage = context.Request.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == access.CloudAccountId && item.Provider == access.Provider);
+            var complete = ActivityUsageEvaluator.Covers(coverage, windowStart, windowEnd, requiresActions: true, requiresResourceIds: access.ResourceId.HasValue, requiresRoleIds: access.RoleId.HasValue);
+            var matchingMutation = context.Request.ActivityRecords.Any(activity =>
+                activity.CloudAccountId == access.CloudAccountId
+                && activity.PrincipalId == access.PrincipalId
+                && (!access.RoleId.HasValue || activity.RoleId == access.RoleId)
+                && activity.Success
+                && activity.Timestamp.ToUniversalTime() >= windowStart
+                && activity.Timestamp.ToUniversalTime() <= windowEnd
+                && (!access.ResourceId.HasValue || activity.ResourceId == access.ResourceId)
+                && activity.Action.Contains("write", StringComparison.OrdinalIgnoreCase)
+                && ActivityUsageEvaluator.ActionMatches(access.Provider, action, activity.Action));
+            if (matchingMutation) continue;
+
+            var state = complete ? RiskEvaluationState.Potential
+                : coverage?.Status == ActivityCoverageStatus.Unsupported ? RiskEvaluationState.Unsupported : RiskEvaluationState.Unknown;
+            var title = complete ? Name : "Mutation Activity Unavailable";
+            var description = complete
+                ? "The granted write/delete permission was not observed during a complete activity window."
+                : "Activity coverage is insufficient to assess use of this write/delete permission.";
+            var evidence = $"Action={action}; ObservationWindow={windowStart:O}..{windowEnd:O}; Coverage={coverage?.Status.ToString() ?? "Unavailable"}; Details={coverage?.Details ?? "No activity coverage."}";
+            findings.Add(Finding(context, access, state, title, description, evidence));
+        }
+
+        return Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(findings);
+    }
+}
 public sealed class WildcardPermissionRule : RiskRuleBase { public override string RuleId => "CIEM-003"; public override string Name => "Wildcard Permission"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.ExcessiveAccess; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => { var p = Permission(c, a.PermissionId); return p?.Action == "*" || p?.Action?.EndsWith(":*", StringComparison.Ordinal) == true; }).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "The effective permission contains a wildcard action.", $"Action={Permission(c, a.PermissionId)?.Action}")).ToArray()); }
 public sealed class BroadScopeRule : RiskRuleBase { public override string RuleId => "CIEM-004"; public override string Name => "Broad Scope"; public override RiskSeverity DefaultSeverity => RiskSeverity.Medium; public override RiskCategory Category => RiskCategory.Scope; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => Entitlement(c, a)?.Scope.Type is NormalizedScopeType.Organization or NormalizedScopeType.ManagementGroup or NormalizedScopeType.Account or NormalizedScopeType.Subscription or NormalizedScopeType.Folder or NormalizedScopeType.Project).Select(a => Finding(c, a, RiskEvaluationState.Potential, Name, "Access is granted at a broad hierarchy scope.", $"Scope={Entitlement(c, a)?.Scope.OriginalScope}")).ToArray()); }
 public sealed class DormantPrivilegedIdentityRule : RiskRuleBase { public override string RuleId => "CIEM-005"; public override string Name => "Dormant Privileged Identity"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.Dormancy; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged).Select(a => (a, p: Principal(c, a.PrincipalId))).Where(x => x.p != null && x.p.LastActivityAt == null || x.p?.LastActivityAt < c.EvaluatedAt.AddDays(-c.Options.DormancyDays)).Select(x => Finding(c, x.a, x.p!.LastActivityAt == null ? RiskEvaluationState.Unknown : RiskEvaluationState.Confirmed, Name, "The privileged identity has insufficient or stale activity evidence.", $"LastActivity={x.p!.LastActivityAt?.ToString("O") ?? "Unknown"}")).ToArray()); }
 public sealed class ExternalPrivilegedIdentityRule : RiskRuleBase { public override string RuleId => "CIEM-006"; public override string Name => "External Privileged Identity"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.ExternalAccess; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged && Principal(c, a.PrincipalId)?.IsExternal == true).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "An external identity has privileged effective access.", "Principal.IsExternal=true")).ToArray()); }
 public sealed class PrivilegedServiceAccountRule : RiskRuleBase { public override string RuleId => "CIEM-007"; public override string Name => "Privileged Service Account"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.ServiceIdentity; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged && Principal(c, a.PrincipalId)?.IdentityType is IdentityType.ServiceAccount or IdentityType.ServicePrincipal or IdentityType.ManagedIdentity).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "A non-human identity has privileged effective access.", $"IdentityType={Principal(c, a.PrincipalId)?.IdentityType}")).ToArray()); }
-public sealed class UnusedEntitlementRule : RiskRuleBase { public override string RuleId => "CIEM-008"; public override string Name => "Unused Entitlement"; public override RiskSeverity DefaultSeverity => RiskSeverity.Low; public override RiskCategory Category => RiskCategory.Dormancy; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => !c.Request.ActivityRecords.Any(x => x.PrincipalId == a.PrincipalId && x.ResourceId == a.ResourceId)).Select(a => Finding(c, a, c.Request.ActivityRecords.Any(x => x.PrincipalId == a.PrincipalId) ? RiskEvaluationState.Confirmed : RiskEvaluationState.Unknown, Name, "The entitlement has no matching activity evidence.", c.Request.ActivityRecords.Count == 0 ? "Activity data unavailable" : "No matching activity record")).ToArray()); }
+public sealed class UnusedEntitlementRule : RiskRuleBase
+{
+    public override string RuleId => "CIEM-008";
+    public override string Name => "Unused Entitlement";
+    public override RiskSeverity DefaultSeverity => RiskSeverity.Low;
+    public override RiskCategory Category => RiskCategory.Dormancy;
+
+    public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext context, CancellationToken cancellationToken = default)
+    {
+        var findings = new List<RiskFindingModel>();
+        var windowEnd = context.EvaluatedAt.ToUniversalTime();
+        var windowStart = windowEnd.AddDays(-Math.Max(1, context.Options.UsageObservationDays));
+        foreach (var access in context.Request.EffectiveAccess.Where(item => item.Decision == AccessDecision.Allow))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var coverage = context.Request.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == access.CloudAccountId && item.Provider == access.Provider);
+            var permission = Permission(context, access.PermissionId);
+            var hasResourceScopedAccess = access.ResourceId.HasValue;
+            var fullyCovered = ActivityUsageEvaluator.Covers(coverage, windowStart, windowEnd, requiresActions: true, requiresResourceIds: hasResourceScopedAccess, requiresRoleIds: access.RoleId.HasValue);
+            var matchingActions = context.Request.ActivityRecords.Where(activity =>
+                activity.CloudAccountId == access.CloudAccountId
+                && activity.PrincipalId == access.PrincipalId
+                && activity.Success
+                && activity.Timestamp.ToUniversalTime() >= windowStart
+                && activity.Timestamp.ToUniversalTime() <= windowEnd
+                && permission?.Action is string actionPattern
+                && ActivityUsageEvaluator.ActionMatches(access.Provider, actionPattern, activity.Action)).ToArray();
+            var matchingUse = matchingActions.Any(activity => (!access.RoleId.HasValue || activity.RoleId == access.RoleId) && (!hasResourceScopedAccess || activity.ResourceId == access.ResourceId));
+            if (matchingUse) continue;
+
+            var unattributedUse = (hasResourceScopedAccess && matchingActions.Any(activity => !activity.ResourceId.HasValue))
+                || (access.RoleId.HasValue && matchingActions.Any(activity => !activity.RoleId.HasValue));
+            var state = fullyCovered && !unattributedUse
+                ? RiskEvaluationState.Confirmed
+                : coverage?.Status == ActivityCoverageStatus.Unsupported
+                    ? RiskEvaluationState.Unsupported
+                    : RiskEvaluationState.Unknown;
+            var coverageDetails = coverage is null
+                ? "Activity coverage was not supplied."
+                : $"Coverage={coverage.Status}; ObservedFrom={coverage.ObservedFromUtc:O}; ObservedThrough={coverage.ObservedThroughUtc:O}; Details={coverage.Details ?? "not provided"}";
+            var evidence = $"ObservationWindow={windowStart:O}..{windowEnd:O}; MatchingSuccessfulActions={matchingActions.Length}; {coverageDetails}";
+            if (unattributedUse) evidence += "; matching activity lacked resource attribution.";
+            findings.Add(Finding(context, access, state, state == RiskEvaluationState.Confirmed ? Name : "Usage Evidence Unavailable",
+                state == RiskEvaluationState.Confirmed
+                    ? "No successful matching action was observed during a complete activity window."
+                    : "Activity coverage is insufficient to determine whether this entitlement is unused.", evidence));
+        }
+
+        return Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(findings);
+    }
+}
+
+public sealed class UnusedRoleAssignmentRule : RiskRuleBase
+{
+    public override string RuleId => "CIEM-016";
+    public override string Name => "Unused Role Assignment";
+    public override RiskSeverity DefaultSeverity => RiskSeverity.Low;
+    public override RiskCategory Category => RiskCategory.Dormancy;
+
+    public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext context, CancellationToken cancellationToken = default)
+    {
+        var findings = new List<RiskFindingModel>();
+        var windowEnd = context.EvaluatedAt.ToUniversalTime();
+        var windowStart = windowEnd.AddDays(-Math.Max(1, context.Options.UsageObservationDays));
+        foreach (var roleAccess in Allowed(context).Where(item => item.RoleId.HasValue).GroupBy(item => (item.CloudAccountId, item.Provider, item.RoleId)).Select(group => group.First()))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var coverage = context.Request.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == roleAccess.CloudAccountId && item.Provider == roleAccess.Provider);
+            var roleUsage = context.Request.ActivityRecords.Any(activity => activity.CloudAccountId == roleAccess.CloudAccountId
+                && activity.RoleId == roleAccess.RoleId
+                && activity.Success
+                && activity.Timestamp.ToUniversalTime() >= windowStart
+                && activity.Timestamp.ToUniversalTime() <= windowEnd);
+            if (roleUsage) continue;
+
+            var complete = ActivityUsageEvaluator.Covers(coverage, windowStart, windowEnd, requiresRoleIds: true);
+            var state = complete ? RiskEvaluationState.Confirmed
+                : coverage?.Status == ActivityCoverageStatus.Unsupported ? RiskEvaluationState.Unsupported : RiskEvaluationState.Unknown;
+            var evidence = $"RoleId={roleAccess.RoleId}; ObservationWindow={windowStart:O}..{windowEnd:O}; Coverage={coverage?.Status.ToString() ?? "Unavailable"}; Details={coverage?.Details ?? "No role-attributed activity coverage."}";
+            findings.Add(Finding(context, roleAccess, state, state == RiskEvaluationState.Confirmed ? Name : "Role Activity Unavailable",
+                state == RiskEvaluationState.Confirmed
+                    ? "No successful use of this role was observed during a complete role-activity window."
+                    : "Role-attributed activity coverage is insufficient to determine whether this role is unused.", evidence));
+        }
+
+        return Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(findings);
+    }
+}
 public sealed class ProductionAdministrativeAccessRule : RiskRuleBase { public override string RuleId => "CIEM-009"; public override string Name => "Production Administrative Access"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.Scope; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged && Resource(c, a.ResourceId)?.Tags.TryGetValue("Environment", out var environment) == true && string.Equals(environment, "Production", StringComparison.OrdinalIgnoreCase)).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "Privileged effective access reaches a production resource.", "Resource tag Environment=Production")).ToArray()); }
 public sealed class ExcessiveServicePermissionRule : RiskRuleBase { public override string RuleId => "CIEM-010"; public override string Name => "Potentially Excessive Service Permissions"; public override RiskSeverity DefaultSeverity => RiskSeverity.Medium; public override RiskCategory Category => RiskCategory.ServiceIdentity; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => Principal(c, a.PrincipalId)?.IdentityType is IdentityType.ServiceAccount or IdentityType.ServicePrincipal or IdentityType.ManagedIdentity).Where(a => Permission(c, a.PermissionId)?.Action?.Contains("write", StringComparison.OrdinalIgnoreCase) == true || Permission(c, a.PermissionId)?.Action?.Contains("delete", StringComparison.OrdinalIgnoreCase) == true).Select(a => Finding(c, a, RiskEvaluationState.Potential, Name, "A service identity has write/delete capability requiring review.", "Service permission breadth exceeds read-only operations evidence.")).ToArray()); }
 public sealed class RedundantAccessPathRule : RiskRuleBase { public override string RuleId => "CIEM-011"; public override string Name => "Redundant Access Paths"; public override RiskSeverity DefaultSeverity => RiskSeverity.Low; public override RiskCategory Category => RiskCategory.AccessPathComplexity; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(c.Request.AccessPaths.GroupBy(a => a.EffectiveAccessId).Where(g => g.Key.HasValue && g.Count() > 1).SelectMany(g => g.Take(1).Select(path => { var access = c.Request.EffectiveAccess.FirstOrDefault(a => a.Id == g.Key); return access == null ? null : Finding(c, access, RiskEvaluationState.Confirmed, Name, "Multiple independent access paths provide the same effective access.", $"PathCount={g.Count()}", path.Id); })).Where(x => x != null)!.ToArray()!); }
