@@ -101,7 +101,8 @@ public sealed class DemoDataService : IDemoDataService
         {
             Roles = await context.CloudRoles.AsNoTracking().Where(item => ids.Contains(item.AccountId)).ToListAsync(cancellationToken),
             Permissions = await context.CloudPermissions.AsNoTracking().Where(item => ids.Contains(item.AccountId)).ToListAsync(cancellationToken),
-            GroupMemberships = await context.GroupMemberships.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken)
+            GroupMemberships = await context.GroupMemberships.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken),
+            AccessPaths = await context.AccessPaths.AsNoTracking().Where(item => ids.Contains(item.CloudAccountId)).ToListAsync(cancellationToken)
         };
     }
 

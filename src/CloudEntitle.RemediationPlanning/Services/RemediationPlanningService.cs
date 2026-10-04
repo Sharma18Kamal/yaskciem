@@ -23,8 +23,21 @@ public sealed class RemediationPlanner : IRemediationPlanner
             recommendation.CurrentState,
             recommendation.SuggestedState,
             false,
-            "Review-only proposal. No provider mutation or executable remediation is generated.");
-        return new RemediationPlan(Guid.NewGuid(), recommendation, recommendation.Provider, status, new[] { change }, DateTime.UtcNow, DateTime.UtcNow, "This plan is non-executable and requires human review.");
+            "Review-only proposal. No provider mutation or executable remediation is generated.")
+        {
+            RollbackState = recommendation.CurrentState
+        };
+        var rollback = new RemediationChange(Guid.NewGuid(), $"Rollback{recommendation.RecommendationType}", change.Target, change.ProposedState, change.BeforeState, false,
+            "Non-executable rollback draft. Revalidate the original state and review before any provider action.")
+        {
+            RollbackState = change.ProposedState
+        };
+        var createdAt = DateTime.UtcNow;
+        return new RemediationPlan(Guid.NewGuid(), recommendation, recommendation.Provider, status, new[] { change }, createdAt, createdAt, "This plan is non-executable and requires human review.")
+        {
+            RollbackChanges = new[] { rollback },
+            AuditTrail = new[] { new RemediationAuditEntry(createdAt, "System", "PlanCreated", "Non-executable remediation and rollback drafts created from recommendation evidence.") }
+        };
     }
 }
 

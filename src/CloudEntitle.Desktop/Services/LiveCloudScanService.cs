@@ -3,6 +3,7 @@ using CloudEntitle.Application.Services;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.Desktop.ViewModels;
+using ApplicationRiskEngine = CloudEntitle.Application.Services.RiskEngine;
 
 namespace CloudEntitle.Desktop.Services;
 
@@ -50,7 +51,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
     private readonly CloudConnectionState? _cloudConnectionState;
     private readonly PostureHistoryService _postureHistoryService = new();
     private readonly IPostureNotificationChannel _postureNotificationChannel;
-    private readonly RiskEngine _riskEngine = new();
+    private readonly ApplicationRiskEngine _riskEngine = new();
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
     public event EventHandler? ScanCompleted;

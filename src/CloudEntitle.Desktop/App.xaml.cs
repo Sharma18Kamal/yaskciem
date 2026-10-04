@@ -14,6 +14,8 @@ using CloudEntitle.Licensing;
 using CloudEntitle.IdentityGovernance.Services;
 using CloudEntitle.EffectiveAccess.Abstractions;
 using CloudEntitle.EffectiveAccess.Services;
+using CloudEntitle.RemediationPlanning.Abstractions;
+using CloudEntitle.RemediationPlanning.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -51,6 +53,11 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<ITrialService, TrialService>();
 		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 		services.AddSingleton<IPostureNotificationChannel>(_ => new WebhookPostureNotificationChannel());
+		services.AddSingleton<IRemediationPlanner, RemediationPlanner>();
+		services.AddSingleton<IRemediationSimulator, RemediationSimulator>();
+		services.AddSingleton<IRemediationEngine, RemediationEngine>();
+		services.AddSingleton<IRemediationPlanStore, LocalRemediationPlanStore>();
+		services.AddSingleton<RemediationWorkflowService>();
 		services.AddSingleton<IdentityGovernanceService>();
 		services.AddSingleton<IAccessReviewStore, LocalAccessReviewStore>();
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
@@ -73,6 +80,7 @@ public partial class App : System.Windows.Application
 		services.AddTransient<AccessPathExplorerViewModel>();
 		services.AddTransient<RiskFindingsViewModel>();
 		services.AddTransient<RecommendationsViewModel>();
+		services.AddTransient<RemediationViewModel>();
 		services.AddTransient<AccessReviewViewModel>();
 		services.AddTransient<ScanHistoryViewModel>();
 		services.AddTransient<FeedbackViewModel>();

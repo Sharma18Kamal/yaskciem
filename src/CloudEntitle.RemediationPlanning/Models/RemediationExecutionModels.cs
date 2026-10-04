@@ -3,7 +3,7 @@ using CloudEntitle.Domain;
 namespace CloudEntitle.RemediationPlanning.Models;
 
 public enum RemediationExecutionMode { DryRun, Live }
-public enum RemediationExecutionStatus { NotStarted, Blocked, DryRunCompleted, Approved, Executed, Verified, Failed }
+public enum RemediationExecutionStatus { NotStarted, Blocked, DryRunCompleted, Approved, Executed, Verified, VerificationFailed, Failed }
 
 public sealed record RemediationExecutionRequest(
     RemediationPlan Plan,
@@ -21,7 +21,10 @@ public sealed record RemediationExecution(
     bool MutatedCloud,
     IReadOnlyList<string> Diagnostics,
     DateTime StartedAt,
-    DateTime CompletedAt);
+    DateTime CompletedAt)
+{
+    public RemediationVerification? Verification { get; init; }
+}
 
 public sealed record ProviderChangeValidation(bool IsValid, IReadOnlyList<string> Diagnostics);
 public sealed record ProviderChangeResult(bool Succeeded, bool MutatedCloud, IReadOnlyList<string> Diagnostics);

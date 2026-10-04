@@ -47,6 +47,81 @@ public sealed class RemediationPlanningTests
         Assert.Contains(simulation.Diagnostics, diagnostic => diagnostic.Contains("incomplete", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task Workflow_ShouldRequireApprovalAndKeepDryRunNonMutating()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);
+        var workflow = new RemediationWorkflowService(new RemediationPlanner(), new RemediationSimulator(), new RemediationEngine());
+        var plan = workflow.CreatePlan(fixture.Recommendation, fixture.Context, "requester");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RunDryRunAsync(plan, fixture.Context, "requester"));
+
+        var approved = workflow.Approve(plan, "reviewer", "Reviewed evidence and approved the proposed change.");
+        var dryRun = await workflow.RunDryRunAsync(approved, fixture.Context, "requester");
+
+        Assert.Equal(RemediationPlanStatus.DryRunCompleted, dryRun.Status);
+        Assert.Equal("reviewer", dryRun.ApprovedBy);
+        Assert.Equal(RemediationExecutionStatus.DryRunCompleted, dryRun.LastExecution?.Status);
+        Assert.False(dryRun.LastExecution?.MutatedCloud);
+        Assert.Contains(dryRun.AuditTrail, entry => entry.Action == "Approved" && entry.Actor == "reviewer");
+    }
+
+    [Fact]
+    public async Task VerificationAfterNonMutatingDryRun_ShouldBeUnavailable()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);
+        var workflow = new RemediationWorkflowService(new RemediationPlanner(), new RemediationSimulator(), new RemediationEngine());
+        var plan = workflow.CreatePlan(fixture.Recommendation, fixture.Context, "requester");
+        var approved = workflow.Approve(plan, "reviewer", "Approved for dry-run only.");
+        var dryRun = await workflow.RunDryRunAsync(approved, fixture.Context, "requester");
+
+        var verification = await workflow.VerifyAsync(dryRun, "verifier");
+
+        Assert.Equal(RemediationVerificationStatus.Unavailable, verification.Verification?.Status);
+        Assert.Equal(RemediationPlanStatus.DryRunCompleted, verification.Status);
+        Assert.Contains(verification.AuditTrail, entry => entry.Action == "VerificationUnavailable");
+    }
+
+    [Fact]
+    public void Rejection_ShouldRequireAndRecordReviewerRationale()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);
+        var workflow = new RemediationWorkflowService(new RemediationPlanner(), new RemediationSimulator(), new RemediationEngine());
+        var plan = workflow.CreatePlan(fixture.Recommendation, fixture.Context, "requester");
+
+        var rejected = workflow.Reject(plan, "reviewer", "Owner evidence does not support this change.");
+
+        Assert.Equal(RemediationPlanStatus.Rejected, rejected.Status);
+        var audit = Assert.Single(rejected.AuditTrail, entry => entry.Action == "Rejected");
+        Assert.Equal("reviewer", audit.Actor);
+        Assert.Equal("Owner evidence does not support this change.", audit.Details);
+    }
+
+    [Fact]
+    public void RollbackPreparation_ShouldCreateSeparateNonExecutableApprovalDraft()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);
+        var planner = new RemediationPlanner();
+        var workflow = new RemediationWorkflowService(planner, new RemediationSimulator(), new RemediationEngine());
+        var plan = planner.CreatePlan(fixture.Recommendation, fixture.Context) with
+        {
+            Status = RemediationPlanStatus.DryRunCompleted,
+            RollbackChanges = new[] { new RemediationChange(Guid.NewGuid(), "RestoreState", "test-target", "reduced", "original", false, "Captured original state.") }
+        };
+
+        var rollback = workflow.PrepareRollback(plan, "operator", "Prepare an independently reviewed rollback.");
+
+        Assert.NotEqual(plan.Id, rollback.Id);
+        Assert.True(rollback.IsRollbackDraft);
+        Assert.Equal(RemediationPlanStatus.RequiresReview, rollback.Status);
+        Assert.All(rollback.Changes, change => Assert.False(change.Executable));
+        Assert.Null(rollback.ApprovedBy);
+        Assert.Contains(rollback.AuditTrail, entry => entry.Action == "RollbackDraftPrepared");
+
+        var separatelyApproved = workflow.Approve(rollback, "rollback-reviewer", "Rollback reviewed independently.");
+        Assert.Equal("rollback-reviewer", separatelyApproved.ApprovedBy);
+    }
+
     private sealed record FixtureData(RecommendationModel Recommendation, RemediationContext Context)
     {
         public static FixtureData Create(RiskEvaluationState state)
