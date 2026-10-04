@@ -49,4 +49,53 @@ public sealed class IdentityGovernanceTests
         Assert.Equal(ReviewDecision.Certified, updated.Items[0].Decision);
         Assert.Equal(access.Id, updated.Items[0].EffectiveAccessId);
     }
+
+    [Fact]
+    public void AccessReview_ShouldAssignReviewerCaptureEvidenceAndEscalateOverdueItem()
+    {
+        var now = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var service = new IdentityGovernanceService();
+        var candidate = new AccessReviewCandidate(Guid.NewGuid(), Guid.NewGuid(), null, CloudProvider.Azure,
+            "Owner at subscription scope", "Decision=Allow; Source=Azure RBAC; LastChanged=2026-09-01T00:00:00Z");
+        var campaign = service.CreateCampaign("Quarterly review", new[] { candidate }, TimeSpan.FromDays(30), assignedReviewer: "initial-reviewer", asOf: now);
+        var item = Assert.Single(campaign.Items);
+        Assert.Equal("initial-reviewer", item.AssignedReviewer);
+        Assert.Contains("Azure RBAC", item.EvidenceSnapshot);
+
+        var assigned = service.AssignReviewer(campaign, item.Id, "security-reviewer", now.AddDays(2), "campaign-admin", now);
+        var escalated = service.ReevaluateCampaign(assigned, now.AddDays(3));
+        var escalatedItem = Assert.Single(escalated.Items);
+
+        Assert.Equal(CampaignStatus.Escalated, escalated.Status);
+        Assert.Equal("security-reviewer", escalatedItem.AssignedReviewer);
+        Assert.NotNull(escalatedItem.EscalatedAt);
+        Assert.Contains(escalatedItem.AuditTrail, entry => entry.Action == "ReviewerAssigned");
+        Assert.Contains(escalatedItem.AuditTrail, entry => entry.Action == "Escalated");
+    }
+
+    [Fact]
+    public void AccessReview_ExceptionMustExpireAndEscalatesAfterExpiry()
+    {
+        var now = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var service = new IdentityGovernanceService();
+        var candidate = new AccessReviewCandidate(Guid.NewGuid(), Guid.NewGuid(), null, CloudProvider.Aws,
+            "ReadOnly at account scope", "Provider=AWS; Source=IAM role assignment");
+        var campaign = service.CreateCampaign("Temporary exception review", new[] { candidate }, TimeSpan.FromDays(30), asOf: now);
+        var item = Assert.Single(campaign.Items);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => service.RecordDecision(campaign, item.Id, ReviewDecision.ExceptionGranted, "reviewer", "Temporary exception" , asOf: now));
+
+        var expiry = now.AddDays(2);
+        var approved = service.RecordDecision(campaign, item.Id, ReviewDecision.ExceptionGranted, "reviewer", "Approved temporary exception", expiry, now);
+        Assert.Equal(CampaignStatus.Completed, approved.Status);
+        Assert.Equal(expiry, Assert.Single(approved.Items).DueAt);
+
+        var expired = service.ReevaluateCampaign(approved, expiry.AddMinutes(1));
+        var expiredItem = Assert.Single(expired.Items);
+        Assert.Equal(CampaignStatus.Escalated, expired.Status);
+        Assert.NotNull(expiredItem.ExceptionExpiredAt);
+        Assert.NotNull(expiredItem.EscalatedAt);
+        Assert.Contains(expiredItem.AuditTrail, entry => entry.Action == "ExceptionExpired");
+        Assert.Contains(expiredItem.AuditTrail, entry => entry.Action == "Escalated");
+    }
 }

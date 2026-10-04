@@ -11,6 +11,7 @@ using CloudEntitle.Cloud.Gcp;
 using CloudEntitle.Infrastructure;
 using CloudEntitle.Infrastructure.Persistence;
 using CloudEntitle.Licensing;
+using CloudEntitle.IdentityGovernance.Services;
 using CloudEntitle.EffectiveAccess.Abstractions;
 using CloudEntitle.EffectiveAccess.Services;
 using Microsoft.EntityFrameworkCore;
@@ -50,6 +51,8 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<ITrialService, TrialService>();
 		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 		services.AddSingleton<IPostureNotificationChannel>(_ => new WebhookPostureNotificationChannel());
+		services.AddSingleton<IdentityGovernanceService>();
+		services.AddSingleton<IAccessReviewStore, LocalAccessReviewStore>();
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new AwsProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new GcpProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
@@ -70,6 +73,7 @@ public partial class App : System.Windows.Application
 		services.AddTransient<AccessPathExplorerViewModel>();
 		services.AddTransient<RiskFindingsViewModel>();
 		services.AddTransient<RecommendationsViewModel>();
+		services.AddTransient<AccessReviewViewModel>();
 		services.AddTransient<ScanHistoryViewModel>();
 		services.AddTransient<FeedbackViewModel>();
 		services.AddTransient<SettingsViewModel>();

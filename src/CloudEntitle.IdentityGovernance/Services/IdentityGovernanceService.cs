@@ -42,16 +42,123 @@ public sealed class IdentityGovernanceService
 
     public AccessReviewCampaign CreateCampaign(string name, IReadOnlyList<IdentityGovernanceRecord> identities, IReadOnlyList<DomainEffectiveAccess> effectiveAccess, IReadOnlyList<DomainAccessPath> paths, TimeSpan duration)
     {
-        var campaignId = Guid.NewGuid();
         var principalIds = identities.Select(identity => identity.PrincipalId).ToHashSet();
-        var items = effectiveAccess.Where(access => principalIds.Contains(access.PrincipalId) && access.Decision is AccessDecision.Allow or AccessDecision.Conditional).Select(access => new AccessReviewItem(Guid.NewGuid(), campaignId, access.PrincipalId, access.Id, access.AccessPathId, access.Provider, $"Decision={access.Decision}; Permission={access.PermissionId}; Scope={access.Scope ?? "unknown"}", ReviewDecision.Pending, null, null, null)).ToArray();
-        return new AccessReviewCampaign(campaignId, name, CampaignStatus.Open, DateTime.UtcNow, DateTime.UtcNow.Add(duration), principalIds.ToArray(), items);
+        var candidates = effectiveAccess
+            .Where(access => principalIds.Contains(access.PrincipalId) && access.Decision is AccessDecision.Allow or AccessDecision.Conditional or AccessDecision.Unknown)
+            .Select(access => new AccessReviewCandidate(
+                access.PrincipalId,
+                access.Id,
+                access.AccessPathId,
+                access.Provider,
+                $"Decision={access.Decision}; Permission={access.PermissionId}; Scope={access.Scope ?? "unknown"}",
+                $"Decision={access.Decision}; Evaluation={access.EvaluationStatus}; Assignment={access.AssignmentType}; Source={access.AccessSource ?? "not reported"}; Evidence={access.Evidence ?? "not recorded"}"))
+            .ToArray();
+        return CreateCampaign(name, candidates, duration);
     }
 
-    public AccessReviewCampaign RecordDecision(AccessReviewCampaign campaign, Guid itemId, ReviewDecision decision, string reviewer, string comment)
+    public AccessReviewCampaign CreateCampaign(string name, IReadOnlyList<AccessReviewCandidate> candidates, TimeSpan duration, string? assignedReviewer = null, DateTime? asOf = null)
     {
-        var items = campaign.Items.Select(item => item.Id == itemId ? item with { Decision = decision, Reviewer = reviewer, ReviewComment = comment, DecidedAt = DateTime.UtcNow } : item).ToArray();
-        var status = items.All(item => item.Decision != ReviewDecision.Pending) ? CampaignStatus.Completed : campaign.Status;
-        return campaign with { Items = items, Status = status };
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A campaign name is required.", nameof(name));
+        if (duration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(duration), "Campaign duration must be positive.");
+        var now = asOf ?? DateTime.UtcNow;
+        var campaignId = Guid.NewGuid();
+        var dueAt = now.Add(duration);
+        var items = candidates.Select(candidate => new AccessReviewItem(
+            Guid.NewGuid(), campaignId, candidate.PrincipalId, candidate.EffectiveAccessId, candidate.AccessPathId,
+            candidate.Provider, candidate.AccessSummary, ReviewDecision.Pending, null, null, null)
+        {
+            AssignedReviewer = string.IsNullOrWhiteSpace(assignedReviewer) ? null : assignedReviewer.Trim(),
+            DueAt = dueAt,
+            EvidenceSnapshot = candidate.EvidenceSnapshot,
+            AuditTrail = new[] { new AccessReviewAuditEntry(now, "System", "Created", "Evidence snapshot captured when the review campaign was created.") }
+        }).ToArray();
+        var audit = new[] { new AccessReviewAuditEntry(now, assignedReviewer?.Trim() ?? "System", "CampaignCreated", $"Created {items.Length} review item(s); due {dueAt:O}.") };
+        return new AccessReviewCampaign(campaignId, name.Trim(), CampaignStatus.Open, now, dueAt, candidates.Select(candidate => candidate.PrincipalId).Distinct().ToArray(), items)
+        {
+            CreatedBy = string.IsNullOrWhiteSpace(assignedReviewer) ? null : assignedReviewer.Trim(),
+            AuditTrail = audit
+        };
+    }
+
+    public AccessReviewCampaign AssignReviewer(AccessReviewCampaign campaign, Guid itemId, string reviewer, DateTime dueAt, string actor, DateTime? asOf = null)
+    {
+        if (string.IsNullOrWhiteSpace(reviewer)) throw new ArgumentException("A reviewer is required.", nameof(reviewer));
+        var now = asOf ?? DateTime.UtcNow;
+        if (dueAt <= now) throw new ArgumentOutOfRangeException(nameof(dueAt), "The review deadline must be in the future.");
+        var item = campaign.Items.FirstOrDefault(candidate => candidate.Id == itemId)
+            ?? throw new ArgumentException("The review item does not belong to this campaign.", nameof(itemId));
+        var updated = item with
+        {
+            AssignedReviewer = reviewer.Trim(),
+            DueAt = dueAt,
+            AuditTrail = item.AuditTrail.Append(new AccessReviewAuditEntry(now, actor, "ReviewerAssigned", $"Assigned to {reviewer.Trim()}; due {dueAt:O}.")).ToArray()
+        };
+        return UpdateCampaign(campaign, updated, new AccessReviewAuditEntry(now, actor, "ReviewerAssigned", $"{reviewer.Trim()} assigned to review item {itemId}."), now);
+    }
+
+    public AccessReviewCampaign RecordDecision(AccessReviewCampaign campaign, Guid itemId, ReviewDecision decision, string reviewer, string comment, DateTime? exceptionExpiresAt = null, DateTime? asOf = null)
+    {
+        if (decision == ReviewDecision.Pending) throw new ArgumentException("A decision cannot be Pending.", nameof(decision));
+        if (string.IsNullOrWhiteSpace(reviewer)) throw new ArgumentException("A reviewer is required.", nameof(reviewer));
+        var now = asOf ?? DateTime.UtcNow;
+        if (decision == ReviewDecision.ExceptionGranted && (!exceptionExpiresAt.HasValue || exceptionExpiresAt.Value <= now))
+            throw new ArgumentOutOfRangeException(nameof(exceptionExpiresAt), "An exception must have a future expiration date.");
+        var item = campaign.Items.FirstOrDefault(candidate => candidate.Id == itemId)
+            ?? throw new ArgumentException("The review item does not belong to this campaign.", nameof(itemId));
+        var updated = item with
+        {
+            Decision = decision,
+            Reviewer = reviewer.Trim(),
+            ReviewComment = comment,
+            DecidedAt = now,
+            DueAt = decision == ReviewDecision.ExceptionGranted ? exceptionExpiresAt : item.DueAt,
+            ExceptionExpiresAt = decision == ReviewDecision.ExceptionGranted ? exceptionExpiresAt : null,
+            ExceptionExpiredAt = null,
+            EscalatedAt = null,
+            EscalationReason = null,
+            AuditTrail = item.AuditTrail.Append(new AccessReviewAuditEntry(now, reviewer.Trim(), decision.ToString(), decision == ReviewDecision.ExceptionGranted ? $"{comment}; exception expires {exceptionExpiresAt:O}." : comment)).ToArray()
+        };
+        return UpdateCampaign(campaign, updated, new AccessReviewAuditEntry(now, reviewer.Trim(), decision.ToString(), $"Decision recorded for review item {itemId}."), now);
+    }
+
+    public AccessReviewCampaign ReevaluateCampaign(AccessReviewCampaign campaign, DateTime? asOf = null)
+    {
+        var now = asOf ?? DateTime.UtcNow;
+        var items = campaign.Items.Select(item =>
+        {
+            var updated = item;
+            if (item.Decision == ReviewDecision.ExceptionGranted && item.ExceptionExpiresAt <= now && !item.ExceptionExpiredAt.HasValue)
+            {
+                updated = updated with
+                {
+                    ExceptionExpiredAt = now,
+                    AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "ExceptionExpired", $"Exception expired at {item.ExceptionExpiresAt:O}; access requires a new review decision.")).ToArray()
+                };
+            }
+            var unresolved = updated.Decision == ReviewDecision.Pending || updated.ExceptionExpiredAt.HasValue;
+            var dueAt = updated.DueAt ?? campaign.DueAt;
+            if (unresolved && dueAt <= now && !updated.EscalatedAt.HasValue)
+            {
+                updated = updated with
+                {
+                    EscalatedAt = now,
+                    EscalationReason = updated.ExceptionExpiredAt.HasValue ? "Expired exception has not been re-reviewed." : "Review deadline passed without a decision.",
+                    AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "Escalated", updated.ExceptionExpiredAt.HasValue ? "Expired exception has not been re-reviewed." : "Review deadline passed without a decision.")).ToArray()
+                };
+            }
+            return updated;
+        }).ToArray();
+        var complete = items.All(item => item.Decision != ReviewDecision.Pending && !item.ExceptionExpiredAt.HasValue);
+        var escalated = items.Any(item => item.EscalatedAt.HasValue);
+        var status = complete ? CampaignStatus.Completed : escalated ? CampaignStatus.Escalated : CampaignStatus.Open;
+        var audit = campaign.AuditTrail;
+        if (status != campaign.Status) audit = audit.Append(new AccessReviewAuditEntry(now, "System", "CampaignStatusChanged", $"{campaign.Status} -> {status}.")).ToArray();
+        return campaign with { Items = items, Status = status, AuditTrail = audit };
+    }
+
+    private AccessReviewCampaign UpdateCampaign(AccessReviewCampaign campaign, AccessReviewItem updatedItem, AccessReviewAuditEntry auditEntry, DateTime now)
+    {
+        var items = campaign.Items.Select(item => item.Id == updatedItem.Id ? updatedItem : item).ToArray();
+        return ReevaluateCampaign(campaign with { Items = items, AuditTrail = campaign.AuditTrail.Append(auditEntry).ToArray() }, now);
     }
 }

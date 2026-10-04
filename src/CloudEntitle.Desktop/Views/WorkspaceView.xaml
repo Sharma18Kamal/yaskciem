@@ -372,6 +372,89 @@
                 </Border>
             </StackPanel>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:AccessReviewViewModel}">
+            <StackPanel>
+                <TextBlock Text="{Binding CoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                <UniformGrid Columns="3" Margin="0,0,0,8">
+                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="OPEN CAMPAIGNS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding OpenCampaigns}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="PENDING ITEMS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding PendingItems}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="ESCALATED ITEMS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding EscalatedItems}" Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                </UniformGrid>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="CREATE ACCESS REVIEW" Style="{StaticResource CardLabel}"/>
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Text="{Binding CampaignName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Campaign name" Margin="0,0,8,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding CampaignDurationDays, UpdateSourceTrigger=PropertyChanged}" ToolTip="Campaign duration in days" Margin="4,0"/>
+                            <TextBox Grid.Column="2" Text="{Binding AssignedReviewerName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Default assigned reviewer" Margin="4,0"/>
+                            <TextBox Grid.Column="3" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" ToolTip="Your audit actor name" Margin="8,0,0,0"/>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="Create from Current Scan" Command="{Binding CreateCampaignCommand}" IsEnabled="{Binding CanCreateCampaign}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="Refresh" Command="{Binding RefreshCampaignsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="0.85*"/><ColumnDefinition Width="1.15*"/></Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                        <TextBlock Text="REVIEW CAMPAIGNS" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
+                        <DataGrid ItemsSource="{Binding FilteredCampaigns}" SelectedItem="{Binding SelectedCampaign, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" MaxHeight="440" SelectionMode="Single">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Campaign" Binding="{Binding Name}" Width="*"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="95"/>
+                                <DataGridTextColumn Header="Due" Binding="{Binding DueAt, StringFormat=d}" Width="95"/>
+                                <DataGridTextColumn Header="Items" Binding="{Binding Items.Count}" Width="60"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="No access review campaigns." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasCampaigns}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                        <TextBlock Text="ACCESS REVIEW ITEMS" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
+                        <DataGrid ItemsSource="{Binding ReviewItems}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" MaxHeight="300" SelectionMode="Single">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80"/>
+                                <DataGridTextColumn Header="Access" Binding="{Binding AccessSummary}" Width="*"/>
+                                <DataGridTextColumn Header="Assigned reviewer" Binding="{Binding AssignedReviewer}" Width="130"/>
+                                <DataGridTextColumn Header="Decision" Binding="{Binding Decision}" Width="115"/>
+                                <DataGridTextColumn Header="Due" Binding="{Binding DueAt, StringFormat=d}" Width="90"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding EscalationReason}" Width="120"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="Select a review item to see evidence and record a decision." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasReviewItems}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="REVIEW EVIDENCE" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="{Binding SelectedItem.EvidenceSnapshot}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,10" TextWrapping="Wrap"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding AssignedReviewerName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Assigned reviewer" Margin="0,0,6,0"/>
+                                    <DatePicker Grid.Column="1" SelectedDate="{Binding ItemDueAt, Mode=TwoWay}" ToolTip="Review deadline" Margin="3,0"/>
+                                    <TextBox Grid.Column="2" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" ToolTip="Actor recording this action" Margin="3,0"/>
+                                    <ComboBox Grid.Column="3" ItemsSource="{Binding Decisions}" SelectedItem="{Binding SelectedDecision, Mode=TwoWay}" Margin="6,0,0,0"/>
+                                </Grid>
+                                <TextBox Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Decision rationale; required for exception, rejection, or investigation" Margin="0,8,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <DatePicker SelectedDate="{Binding ExceptionExpiresAt, Mode=TwoWay}" ToolTip="Exception expiration date; required for exception decision"/>
+                                    <Button Content="Assign reviewer" Command="{Binding AssignReviewerCommand}" IsEnabled="{Binding CanAssignReviewer}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <Button Content="Record decision" Command="{Binding RecordDecisionCommand}" IsEnabled="{Binding CanRecordDecision}" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0"/>
+                                </StackPanel>
+                                <TextBlock Text="AUDIT HISTORY" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
+                                <ItemsControl ItemsSource="{Binding SelectedAuditTrail}">
+                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor}"/><Run Text=" | "/><Run Text="{Binding Action}"/><Run Text=" | "/><Run Text="{Binding Details}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ScanHistoryViewModel}">
             <StackPanel>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search scan history"/>

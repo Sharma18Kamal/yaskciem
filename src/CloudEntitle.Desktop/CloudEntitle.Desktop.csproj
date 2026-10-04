@@ -19,6 +19,7 @@
     <ProjectReference Include="..\CloudEntitle.Analytics\CloudEntitle.Analytics.csproj" />
     <ProjectReference Include="..\CloudEntitle.EffectiveAccess\CloudEntitle.EffectiveAccess.csproj" />
     <ProjectReference Include="..\CloudEntitle.Normalization\CloudEntitle.Normalization.csproj" />
+    <ProjectReference Include="..\CloudEntitle.IdentityGovernance\CloudEntitle.IdentityGovernance.csproj" />
   </ItemGroup>
 
   <ItemGroup>
