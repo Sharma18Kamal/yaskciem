@@ -18,7 +18,8 @@ internal static class Program
 
     private static async Task<int> Main()
     {
-        var certificateAdded = false;
+        var rootCertificateAdded = false;
+        var trustedPeopleCertificateAdded = false;
         X509Certificate2? certificate = null;
         var extractedPackagePath = Path.Combine(Path.GetTempPath(), $"YASK-CIEM-{Guid.NewGuid():N}.msix");
 
@@ -34,27 +35,28 @@ internal static class Program
             Console.WriteLine($"Package version: {packageVersion}");
             Console.WriteLine($"Publisher: {certificate.Subject}");
             Console.WriteLine();
-            Console.WriteLine("Installing the YASK-CIEM publisher certificate for your Windows account and installing the app.");
-
-            using (var store = new X509Store(StoreName.TrustedPeople, StoreLocation.CurrentUser))
+            if (!ContainsCertificate(StoreName.Root, certificate))
             {
-                store.Open(OpenFlags.ReadWrite);
-                var installedCertificate = store.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, validOnly: false).Count > 0;
-                if (!installedCertificate)
+                Console.WriteLine("This is a self-signed development code-signing certificate.");
+                Console.WriteLine("Trusting it in Current User\\Root allows packages signed by this key to be trusted by this Windows account.");
+                Console.Write("Only continue if you received this installer from a trusted source. Type TRUST to continue: ");
+                if (Console.IsInputRedirected || !string.Equals(Console.ReadLine(), "TRUST", StringComparison.Ordinal))
                 {
-                    store.Add(certificate);
-                    certificateAdded = true;
+                    Console.WriteLine("Certificate trust was not approved; no certificate or app was installed.");
+                    WaitForUser();
+                    return 2;
                 }
             }
+
+            rootCertificateAdded = AddCertificateIfMissing(StoreName.Root, certificate);
+            trustedPeopleCertificateAdded = AddCertificateIfMissing(StoreName.TrustedPeople, certificate);
 
             await File.WriteAllBytesAsync(extractedPackagePath, packageBytes);
             var installResult = await InstallPackageAsync(extractedPackagePath);
             if (installResult.ExitCode != 0)
             {
-                if (certificateAdded)
-                {
-                    RemoveCertificate(certificate);
-                }
+                if (trustedPeopleCertificateAdded) RemoveCertificate(StoreName.TrustedPeople, certificate);
+                if (rootCertificateAdded) RemoveCertificate(StoreName.Root, certificate);
 
                 Console.Error.WriteLine("Windows could not install the MSIX package.");
                 if (!string.IsNullOrWhiteSpace(installResult.StandardError)) Console.Error.WriteLine(installResult.StandardError.Trim());
@@ -70,9 +72,10 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            if (certificateAdded && certificate is not null)
+            if (certificate is not null)
             {
-                RemoveCertificate(certificate);
+                if (trustedPeopleCertificateAdded) RemoveCertificate(StoreName.TrustedPeople, certificate);
+                if (rootCertificateAdded) RemoveCertificate(StoreName.Root, certificate);
             }
 
             Console.Error.WriteLine($"Setup failed: {exception.Message}");
@@ -113,6 +116,28 @@ internal static class Program
         {
             throw new InvalidOperationException("The bundled publisher certificate is not currently valid.");
         }
+
+        var allowsCodeSigning = certificate.Extensions
+            .OfType<X509EnhancedKeyUsageExtension>()
+            .SelectMany(extension => extension.EnhancedKeyUsages.Cast<Oid>())
+            .Any(oid => string.Equals(oid.Value, "1.3.6.1.5.5.7.3.3", StringComparison.Ordinal));
+        if (!allowsCodeSigning) throw new InvalidOperationException("The bundled certificate is not valid for code signing.");
+    }
+
+    private static bool ContainsCertificate(StoreName storeName, X509Certificate2 certificate)
+    {
+        using var store = new X509Store(storeName, StoreLocation.CurrentUser);
+        store.Open(OpenFlags.ReadOnly);
+        return store.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, validOnly: false).Count > 0;
+    }
+
+    private static bool AddCertificateIfMissing(StoreName storeName, X509Certificate2 certificate)
+    {
+        if (ContainsCertificate(storeName, certificate)) return false;
+        using var store = new X509Store(storeName, StoreLocation.CurrentUser);
+        store.Open(OpenFlags.ReadWrite);
+        store.Add(certificate);
+        return true;
     }
 
     private static string ValidatePackageManifest(byte[] packageBytes, string certificateSubject)
@@ -168,11 +193,11 @@ internal static class Program
         return (process.ExitCode, await outputTask, await errorTask);
     }
 
-    private static void RemoveCertificate(X509Certificate2 certificate)
+    private static void RemoveCertificate(StoreName storeName, X509Certificate2 certificate)
     {
         try
         {
-            using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.CurrentUser);
+            using var store = new X509Store(storeName, StoreLocation.CurrentUser);
             store.Open(OpenFlags.ReadWrite);
             store.Remove(certificate);
         }

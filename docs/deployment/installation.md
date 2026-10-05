@@ -11,9 +11,15 @@ YASK-CIEM supports Windows 10/11. Choose the installation method supplied by you
 
 ## Current Setup EXE
 
-The current local build is [YASK-CIEM-Setup-1.0.0.38.exe](../../artifacts/installer-1.0.0.38/YASK-CIEM-Setup-1.0.0.38.exe). It contains the self-contained MSIX, the matching public publisher certificate, and the .NET runtime; a separate .NET Desktop Runtime installation is not required. Run it and follow the Windows prompts, then launch **YASK-CIEM** from Start.
+The current local build is [YASK-CIEM-Setup-1.0.0.39.exe](../../artifacts/installer-1.0.0.39/YASK-CIEM-Setup-1.0.0.39.exe). It contains the self-contained MSIX, the matching public publisher certificate, and the .NET runtime; a separate .NET Desktop Runtime installation is not required. Run it and follow the Windows prompts, then launch **YASK-CIEM** from Start.
 
-This package uses the YASK-CIEM development certificate. On a clean PC, Windows may require the public [development certificate](../../artifacts/certs/yask-ciem-dev.cer) to be trusted before the signed Setup EXE will launch. Only if you received it through a trusted channel, open the `.cer`, choose **Current User**, select **Place all certificates in the following store**, and choose **Trusted People**. The setup then verifies and imports the same public certificate for MSIX installation. It never contains the signing private key. Use this build only in a trusted development/test environment. Public distribution requires an organization-trusted code-signing certificate. The generated executable is local build output and is not automatically uploaded to GitHub; at 106 MB, it also exceeds GitHub's 100 MB single-file limit.
+This package uses the YASK-CIEM development certificate. On a clean PC, Windows may block the Setup EXE until its signer is trusted. Only if you received the installer and [public development certificate](../../artifacts/certs/yask-ciem-dev.cer) through a trusted channel, verify that the certificate thumbprint is `537C64CF83CF2C6C1EBC89553B7B4EDD13E7F104`, then import it into the **Current User > Trusted Root Certification Authorities** store. For example, from the certificate's folder in PowerShell:
+
+```powershell
+Import-Certificate -FilePath .\yask-ciem-dev.cer -CertStoreLocation Cert:\CurrentUser\Root
+```
+
+Then run Setup. If the certificate is not already in the current user's Root store, Setup asks you to type `TRUST` before adding it. Setup also adds the public certificate to `TrustedPeople` for MSIX installation and removes trust entries it added if installation fails. It never contains the signing private key. Use this development certificate only in a trusted development/test environment; public distribution requires an organization-trusted code-signing certificate. The generated executable is local build output and is not automatically uploaded to GitHub; at about 106 MB, it exceeds GitHub's 100 MB single-file limit.
 
 ## Option 1: Install from an App Installer feed
 
