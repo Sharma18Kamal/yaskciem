@@ -9,6 +9,7 @@ public sealed class OrganizationManagementService
     private readonly Dictionary<Guid, OrganizationProfile> _organizations = new();
     private readonly Dictionary<Guid, OrganizationMember> _members = new();
     private readonly Dictionary<Guid, TenantBinding> _bindings = new();
+    private readonly Dictionary<Guid, OrganizationCustomRole> _customRoles = new();
     private readonly List<OrganizationAuditEntry> _auditEntries = new();
     private readonly IOrganizationStore? _store;
 
@@ -20,6 +21,7 @@ public sealed class OrganizationManagementService
         foreach (var organization in state.Organizations) _organizations[organization.Id] = organization;
         foreach (var member in state.Members) _members[member.Id] = member;
         foreach (var binding in state.Bindings) _bindings[binding.Id] = binding;
+        foreach (var role in state.CustomRoles) _customRoles[role.Id] = role;
         _auditEntries.AddRange(state.AuditEntries);
     }
 
@@ -46,15 +48,23 @@ public sealed class OrganizationManagementService
     }
 
     public OrganizationMember AddMember(Guid organizationId, OrganizationIdentity actor, string email, OrganizationMemberRole role)
+        => AddMember(organizationId, actor, email, new OrganizationRoleOption(role.ToString(), role, null));
+
+    public OrganizationMember AddMember(Guid organizationId, OrganizationIdentity actor, string email, OrganizationRoleOption role)
     {
         EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
         if (string.IsNullOrWhiteSpace(email)) throw new ArgumentException("Member email is required.", nameof(email));
+        var assignedRole = ResolveRole(organizationId, role);
         var normalizedEmail = email.Trim();
         if (_members.Values.Any(item => item.OrganizationId == organizationId && string.Equals(item.Email, normalizedEmail, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("This email is already a member of the organization.");
-        var member = new OrganizationMember(Guid.NewGuid(), organizationId, Guid.Empty, normalizedEmail, role, true, DateTime.UtcNow);
+        var member = new OrganizationMember(Guid.NewGuid(), organizationId, Guid.Empty, normalizedEmail, assignedRole.BuiltInRole ?? OrganizationMemberRole.Viewer, true, DateTime.UtcNow)
+        {
+            CustomRoleId = assignedRole.CustomRoleId,
+            CustomRoleName = assignedRole.CustomRoleId is null ? null : assignedRole.Name
+        };
         _members.Add(member.Id, member);
-        RecordAudit(organizationId, actor, "MemberAdded", normalizedEmail, $"Role: {role}.");
+        RecordAudit(organizationId, actor, "MemberAdded", normalizedEmail, $"Role: {member.AssignedRoleName}.");
         Persist();
         return member;
     }
@@ -107,13 +117,11 @@ public sealed class OrganizationManagementService
                 && item.UserId == identity.UserId);
         if (member == null) return new(false, "User is not an active organization member.");
         if (organization.Status != OrganizationStatus.Active) return new(false, $"Organization is {organization.Status}.");
-        var allowed = action switch
-        {
-            OrganizationAction.ViewInventory or OrganizationAction.ViewFindings => true,
-            OrganizationAction.RunScan or OrganizationAction.ExportReports => member.Role is not OrganizationMemberRole.Viewer,
-            OrganizationAction.ManageMembers or OrganizationAction.ManageConnections or OrganizationAction.ManagePolicies => member.Role == OrganizationMemberRole.OrganizationAdmin,
-            _ => false
-        };
+        var allowed = member.CustomRoleId is Guid customRoleId
+            ? _customRoles.TryGetValue(customRoleId, out var customRole)
+                && customRole.OrganizationId == organizationId
+                && customRole.Permissions.Contains(action)
+            : BuiltInRoleAllows(member.Role, action);
         return new(allowed, allowed ? "Organization role permits this action." : "Organization role does not permit this action.");
     }
 
@@ -136,17 +144,86 @@ public sealed class OrganizationManagementService
         return _members.Values.Where(member => member.OrganizationId == organizationId).ToArray();
     }
 
+    public IReadOnlyList<OrganizationRoleOption> GetRoleOptions(Guid organizationId, OrganizationIdentity identity)
+    {
+        EnsureAuthorized(organizationId, identity, OrganizationAction.ManageMembers);
+        var builtInRoles = Enum.GetValues<OrganizationMemberRole>()
+            .Select(role => new OrganizationRoleOption(role.ToString(), role, null));
+        var customRoles = _customRoles.Values.Where(role => role.OrganizationId == organizationId)
+            .OrderBy(role => role.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(role => new OrganizationRoleOption(role.Name, null, role.Id));
+        return builtInRoles.Concat(customRoles).ToArray();
+    }
+
+    public IReadOnlyList<OrganizationCustomRole> GetCustomRoles(Guid organizationId, OrganizationIdentity identity)
+    {
+        EnsureAuthorized(organizationId, identity, OrganizationAction.ManageMembers);
+        return _customRoles.Values.Where(role => role.OrganizationId == organizationId)
+            .OrderBy(role => role.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public OrganizationCustomRole CreateCustomRole(Guid organizationId, OrganizationIdentity actor, string name, IEnumerable<OrganizationAction> permissions)
+    {
+        EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
+        var normalizedName = ValidateCustomRoleName(organizationId, name, null);
+        var normalizedPermissions = NormalizePermissions(permissions);
+        var now = DateTime.UtcNow;
+        var role = new OrganizationCustomRole(Guid.NewGuid(), organizationId, normalizedName, normalizedPermissions, now, now);
+        _customRoles.Add(role.Id, role);
+        RecordAudit(organizationId, actor, "CustomRoleCreated", role.Name, $"Permissions: {string.Join(", ", role.Permissions)}.");
+        Persist();
+        return role;
+    }
+
+    public OrganizationCustomRole UpdateCustomRole(Guid organizationId, OrganizationIdentity actor, Guid roleId, string name, IEnumerable<OrganizationAction> permissions)
+    {
+        EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
+        if (!_customRoles.TryGetValue(roleId, out var role) || role.OrganizationId != organizationId)
+            throw new KeyNotFoundException("Custom organization role was not found.");
+        var normalizedName = ValidateCustomRoleName(organizationId, name, roleId);
+        var normalizedPermissions = NormalizePermissions(permissions);
+        var updated = role with { Name = normalizedName, Permissions = normalizedPermissions, UpdatedAt = DateTime.UtcNow };
+        _customRoles[roleId] = updated;
+        foreach (var member in _members.Values.Where(item => item.OrganizationId == organizationId && item.CustomRoleId == roleId).ToArray())
+            _members[member.Id] = member with { CustomRoleName = normalizedName };
+        RecordAudit(organizationId, actor, "CustomRoleUpdated", normalizedName, $"Permissions: {string.Join(", ", normalizedPermissions)}.");
+        Persist();
+        return updated;
+    }
+
+    public void DeleteCustomRole(Guid organizationId, OrganizationIdentity actor, Guid roleId)
+    {
+        EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
+        if (!_customRoles.TryGetValue(roleId, out var role) || role.OrganizationId != organizationId)
+            throw new KeyNotFoundException("Custom organization role was not found.");
+        if (_members.Values.Any(member => member.OrganizationId == organizationId && member.CustomRoleId == roleId))
+            throw new InvalidOperationException("A custom role assigned to members cannot be deleted.");
+        _customRoles.Remove(roleId);
+        RecordAudit(organizationId, actor, "CustomRoleDeleted", role.Name, "Custom role deleted.");
+        Persist();
+    }
+
     public OrganizationMember UpdateMemberRole(Guid organizationId, OrganizationIdentity actor, Guid memberId, OrganizationMemberRole role)
+        => UpdateMemberRole(organizationId, actor, memberId, new OrganizationRoleOption(role.ToString(), role, null));
+
+    public OrganizationMember UpdateMemberRole(Guid organizationId, OrganizationIdentity actor, Guid memberId, OrganizationRoleOption role)
     {
         EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
         if (!_members.TryGetValue(memberId, out var member) || member.OrganizationId != organizationId)
             throw new KeyNotFoundException("Organization member was not found.");
-        if (member.Role == OrganizationMemberRole.OrganizationAdmin && role != OrganizationMemberRole.OrganizationAdmin
+        var assignedRole = ResolveRole(organizationId, role);
+        if (member.CustomRoleId is null && member.Role == OrganizationMemberRole.OrganizationAdmin
+            && assignedRole.BuiltInRole != OrganizationMemberRole.OrganizationAdmin
             && _members.Values.Count(item => item.OrganizationId == organizationId && item.IsActive && item.Role == OrganizationMemberRole.OrganizationAdmin) <= 1)
             throw new InvalidOperationException("An organization must retain at least one active administrator.");
-        var updated = member with { Role = role };
+        var updated = member with
+        {
+            Role = assignedRole.BuiltInRole ?? OrganizationMemberRole.Viewer,
+            CustomRoleId = assignedRole.CustomRoleId,
+            CustomRoleName = assignedRole.CustomRoleId is null ? null : assignedRole.Name
+        };
         _members[memberId] = updated;
-        RecordAudit(organizationId, actor, "MemberRoleChanged", member.Email, $"{member.Role} -> {role}.");
+        RecordAudit(organizationId, actor, "MemberRoleChanged", member.Email, $"{member.AssignedRoleName} -> {updated.AssignedRoleName}.");
         Persist();
         return updated;
     }
@@ -156,7 +233,7 @@ public sealed class OrganizationManagementService
         EnsureAuthorized(organizationId, actor, OrganizationAction.ManageMembers);
         if (!_members.TryGetValue(memberId, out var member) || member.OrganizationId != organizationId)
             throw new KeyNotFoundException("Organization member was not found.");
-        if (member.IsActive && !isActive && member.Role == OrganizationMemberRole.OrganizationAdmin
+        if (member.IsActive && !isActive && member.CustomRoleId is null && member.Role == OrganizationMemberRole.OrganizationAdmin
             && _members.Values.Count(item => item.OrganizationId == organizationId && item.IsActive && item.Role == OrganizationMemberRole.OrganizationAdmin) <= 1)
             throw new InvalidOperationException("An organization must retain at least one active administrator.");
         var updated = member with { IsActive = isActive };
@@ -195,6 +272,48 @@ public sealed class OrganizationManagementService
     private static bool IsTenantMatch(OrganizationProfile organization, OrganizationIdentity identity)
         => string.Equals(organization.EntraTenantId, identity.TenantId, StringComparison.OrdinalIgnoreCase);
 
+    private static bool BuiltInRoleAllows(OrganizationMemberRole role, OrganizationAction action) => action switch
+    {
+        OrganizationAction.ViewInventory or OrganizationAction.ViewFindings => true,
+        OrganizationAction.RunScan or OrganizationAction.ExportReports => role is not OrganizationMemberRole.Viewer,
+        OrganizationAction.ManageMembers or OrganizationAction.ManageConnections or OrganizationAction.ManagePolicies => role == OrganizationMemberRole.OrganizationAdmin,
+        _ => false
+    };
+
+    private OrganizationRoleOption ResolveRole(Guid organizationId, OrganizationRoleOption role)
+    {
+        ArgumentNullException.ThrowIfNull(role);
+        if (role.CustomRoleId is Guid customRoleId)
+        {
+            if (role.BuiltInRole is not null || !_customRoles.TryGetValue(customRoleId, out var customRole) || customRole.OrganizationId != organizationId)
+                throw new ArgumentException("The selected custom role is invalid for this organization.", nameof(role));
+            return new OrganizationRoleOption(customRole.Name, null, customRoleId);
+        }
+        if (role.BuiltInRole is not OrganizationMemberRole builtInRole || !Enum.IsDefined(builtInRole))
+            throw new ArgumentException("A valid built-in or organization custom role is required.", nameof(role));
+        return new OrganizationRoleOption(builtInRole.ToString(), builtInRole, null);
+    }
+
+    private string ValidateCustomRoleName(Guid organizationId, string name, Guid? exceptRoleId)
+    {
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Custom role name is required.", nameof(name));
+        var normalizedName = name.Trim();
+        if (Enum.GetNames<OrganizationMemberRole>().Contains(normalizedName, StringComparer.OrdinalIgnoreCase)
+            || _customRoles.Values.Any(role => role.OrganizationId == organizationId && role.Id != exceptRoleId
+                && string.Equals(role.Name, normalizedName, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("A built-in or custom role already uses this name.");
+        return normalizedName;
+    }
+
+    private static IReadOnlyList<OrganizationAction> NormalizePermissions(IEnumerable<OrganizationAction> permissions)
+    {
+        ArgumentNullException.ThrowIfNull(permissions);
+        var normalized = permissions.Distinct().ToArray();
+        if (normalized.Any(action => !Enum.IsDefined(action)))
+            throw new ArgumentException("Custom roles can contain only defined organization actions.", nameof(permissions));
+        return normalized;
+    }
+
     private static void ValidateIdentity(OrganizationIdentity identity)
     {
         if (identity.UserId == Guid.Empty || string.IsNullOrWhiteSpace(identity.Subject)
@@ -205,7 +324,8 @@ public sealed class OrganizationManagementService
     private void Persist() => _store?.Save(new OrganizationDirectoryState(
         _organizations.Values.ToArray(), _members.Values.ToArray(), _bindings.Values.ToArray())
     {
-        AuditEntries = _auditEntries.ToArray()
+        AuditEntries = _auditEntries.ToArray(),
+        CustomRoles = _customRoles.Values.ToArray()
     });
 
     private void RecordAudit(Guid organizationId, OrganizationIdentity actor, string action, string target, string details)

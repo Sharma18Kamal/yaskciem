@@ -5,6 +5,8 @@ namespace CloudEntitle.OrganizationManagement.Models;
 public enum OrganizationStatus { Active, Suspended, Archived }
 public enum OrganizationMemberRole { OrganizationAdmin, SecurityAnalyst, Auditor, Viewer }
 public enum OrganizationAction { ViewInventory, RunScan, ViewFindings, ManageMembers, ManageConnections, ManagePolicies, ExportReports }
+public sealed record OrganizationRoleOption(string Name, OrganizationMemberRole? BuiltInRole, Guid? CustomRoleId);
+public sealed record OrganizationCustomRole(Guid Id, Guid OrganizationId, string Name, IReadOnlyList<OrganizationAction> Permissions, DateTime CreatedAt, DateTime UpdatedAt);
 
 public sealed record OrganizationProfile(Guid Id, string Name, string TenantKey, OrganizationStatus Status, DateTime CreatedAt)
 {
@@ -13,6 +15,9 @@ public sealed record OrganizationProfile(Guid Id, string Name, string TenantKey,
 public sealed record OrganizationMember(Guid Id, Guid OrganizationId, Guid UserId, string Email, OrganizationMemberRole Role, bool IsActive, DateTime AddedAt)
 {
 	public bool IsPending => UserId == Guid.Empty;
+	public Guid? CustomRoleId { get; init; }
+	public string? CustomRoleName { get; init; }
+	public string AssignedRoleName => CustomRoleName ?? Role.ToString();
 }
 public sealed record TenantBinding(Guid Id, Guid OrganizationId, CloudProvider Provider, Guid CloudAccountId, string ExternalTenantId, string DisplayName, DateTime BoundAt);
 public sealed record OrganizationScope(Guid OrganizationId, IReadOnlySet<Guid> CloudAccountIds, IReadOnlySet<CloudProvider> Providers);
@@ -25,4 +30,5 @@ public sealed record OrganizationDirectoryState(
 	IReadOnlyList<TenantBinding> Bindings)
 {
 	public IReadOnlyList<OrganizationAuditEntry> AuditEntries { get; init; } = Array.Empty<OrganizationAuditEntry>();
+	public IReadOnlyList<OrganizationCustomRole> CustomRoles { get; init; } = Array.Empty<OrganizationCustomRole>();
 }

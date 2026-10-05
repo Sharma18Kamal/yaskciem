@@ -70,12 +70,16 @@ public sealed class OrganizationManagementTests
             var owner = CreateIdentity(Guid.NewGuid().ToString(), "admin@example.invalid");
             var organization = service.CreateOrganization("Acme Security", "acme-tenant", owner.TenantId, owner);
             var member = Assert.Single(service.GetMembers(organization.Id, owner));
+            var role = service.CreateCustomRole(organization.Id, owner, "Read Only", new[] { OrganizationAction.ViewInventory });
+            service.AddMember(organization.Id, owner, "reader@example.invalid", new OrganizationRoleOption(role.Name, null, role.Id));
             var binding = service.BindCloudAccount(organization.Id, owner, CloudProvider.Azure, Guid.NewGuid(), "tenant-1", "Production Azure");
 
             var restored = new OrganizationManagementService(new LocalOrganizationStore(filePath));
 
             Assert.Equal(organization, Assert.Single(restored.GetOrganizations()));
-            Assert.Equal(member, Assert.Single(restored.GetMembers(organization.Id, owner)));
+            Assert.Equal(member, Assert.Single(restored.GetMembers(organization.Id, owner), item => item.Id == member.Id));
+            Assert.Equal("Read Only", Assert.Single(restored.GetCustomRoles(organization.Id, owner)).Name);
+            Assert.Equal("Read Only", Assert.Single(restored.GetMembers(organization.Id, owner), item => item.CustomRoleId is not null).AssignedRoleName);
             Assert.Equal(binding, Assert.Single(restored.GetTenantBindings(organization.Id, owner)));
             Assert.Contains(restored.GetAuditTrail(organization.Id, owner), entry => entry.Action == "AccountBound");
         }
@@ -139,6 +143,52 @@ public sealed class OrganizationManagementTests
         Assert.True(service.Authorize(organization.Id, analyst, OrganizationAction.RunScan).Allowed);
         Assert.Throws<InvalidOperationException>(() => service.UpdateMemberRole(organization.Id, owner, Assert.Single(service.GetMembers(organization.Id, owner), item => item.Role == OrganizationMemberRole.OrganizationAdmin).Id, OrganizationMemberRole.Viewer));
         Assert.Throws<InvalidOperationException>(() => service.SetMemberActive(organization.Id, owner, Assert.Single(service.GetMembers(organization.Id, owner), item => item.Role == OrganizationMemberRole.OrganizationAdmin).Id, false));
+    }
+
+    [Fact]
+    public void CustomRole_ShouldGrantOnlyConfiguredActionsAndCannotBeDeletedWhileAssigned()
+    {
+        var service = new OrganizationManagementService();
+        var tenantId = Guid.NewGuid().ToString();
+        var owner = CreateIdentity(tenantId, "owner@example.invalid");
+        var organization = service.CreateOrganization("Acme Security", "acme-tenant", tenantId, owner);
+        var role = service.CreateCustomRole(organization.Id, owner, "Findings Reviewer", new[]
+        {
+            OrganizationAction.ViewInventory,
+            OrganizationAction.ViewFindings,
+            OrganizationAction.ExportReports
+        });
+        var member = service.AddMember(organization.Id, owner, "reviewer@example.invalid", new OrganizationRoleOption(role.Name, null, role.Id));
+        var reviewer = CreateIdentity(tenantId, member.Email);
+        Assert.NotNull(service.AcceptInvitation(organization.Id, reviewer));
+
+        Assert.True(service.Authorize(organization.Id, reviewer, OrganizationAction.ViewInventory).Allowed);
+        Assert.True(service.Authorize(organization.Id, reviewer, OrganizationAction.ViewFindings).Allowed);
+        Assert.True(service.Authorize(organization.Id, reviewer, OrganizationAction.ExportReports).Allowed);
+        Assert.False(service.Authorize(organization.Id, reviewer, OrganizationAction.RunScan).Allowed);
+        Assert.False(service.Authorize(organization.Id, reviewer, OrganizationAction.ManageMembers).Allowed);
+        Assert.Equal("Findings Reviewer", Assert.Single(service.GetMembers(organization.Id, owner), item => item.Id == member.Id).AssignedRoleName);
+        Assert.Throws<InvalidOperationException>(() => service.DeleteCustomRole(organization.Id, owner, role.Id));
+    }
+
+    [Fact]
+    public void CustomRoleChanges_ShouldUpdateAssignedPermissionsAndMemberLabel()
+    {
+        var service = new OrganizationManagementService();
+        var tenantId = Guid.NewGuid().ToString();
+        var owner = CreateIdentity(tenantId, "owner@example.invalid");
+        var organization = service.CreateOrganization("Acme Security", "acme-tenant", tenantId, owner);
+        var role = service.CreateCustomRole(organization.Id, owner, "Read Only", new[] { OrganizationAction.ViewInventory });
+        var member = service.AddMember(organization.Id, owner, "reader@example.invalid", new OrganizationRoleOption(role.Name, null, role.Id));
+        var reader = CreateIdentity(tenantId, member.Email);
+        Assert.NotNull(service.AcceptInvitation(organization.Id, reader));
+
+        service.UpdateCustomRole(organization.Id, owner, role.Id, "Scan Operator", new[] { OrganizationAction.RunScan });
+
+        Assert.Equal("Scan Operator", Assert.Single(service.GetMembers(organization.Id, owner), item => item.Id == member.Id).AssignedRoleName);
+        Assert.False(service.Authorize(organization.Id, reader, OrganizationAction.ViewInventory).Allowed);
+        Assert.True(service.Authorize(organization.Id, reader, OrganizationAction.RunScan).Allowed);
+        Assert.Contains(service.GetAuditTrail(organization.Id, owner), entry => entry.Action == "CustomRoleUpdated");
     }
 
     private static OrganizationIdentity CreateIdentity(string tenantId, string email)

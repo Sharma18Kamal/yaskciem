@@ -56,6 +56,7 @@ public sealed class LocalOrganizationStore : IOrganizationStore
         state.Members ?? Array.Empty<OrganizationMember>(),
         state.Bindings ?? Array.Empty<TenantBinding>())
     {
-        AuditEntries = state.AuditEntries ?? Array.Empty<OrganizationAuditEntry>()
+        AuditEntries = state.AuditEntries ?? Array.Empty<OrganizationAuditEntry>(),
+        CustomRoles = state.CustomRoles ?? Array.Empty<OrganizationCustomRole>()
     };
 }

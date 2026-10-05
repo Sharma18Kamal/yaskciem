@@ -14,6 +14,9 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private readonly ILiveCloudScanService _liveScan;
     private IReadOnlyList<OrganizationProfile> _organizations = Array.Empty<OrganizationProfile>();
     private IReadOnlyList<OrganizationMember> _members = Array.Empty<OrganizationMember>();
+    private IReadOnlyList<OrganizationRoleOption> _memberRoles = Enum.GetValues<OrganizationMemberRole>()
+        .Select(role => new OrganizationRoleOption(role.ToString(), role, null)).ToArray();
+    private IReadOnlyList<OrganizationCustomRole> _customRoles = Array.Empty<OrganizationCustomRole>();
     private IReadOnlyList<TenantBinding> _bindings = Array.Empty<TenantBinding>();
     private IReadOnlyList<OrganizationAuditEntry> _auditTrail = Array.Empty<OrganizationAuditEntry>();
     private IReadOnlyList<LiveScanAccountRecord> _availableAccounts = Array.Empty<LiveScanAccountRecord>();
@@ -21,15 +24,24 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private OrganizationProfile? _selectedOrganization;
     private OrganizationIdentity? _identity;
     private OrganizationMember? _selectedMember;
-    private OrganizationMemberRole _newMemberRole = OrganizationMemberRole.Viewer;
-    private OrganizationMemberRole _selectedMemberRole = OrganizationMemberRole.Viewer;
+    private OrganizationRoleOption _newMemberRoleOption = new(OrganizationMemberRole.Viewer.ToString(), OrganizationMemberRole.Viewer, null);
+    private OrganizationRoleOption _selectedMemberRoleOption = new(OrganizationMemberRole.Viewer.ToString(), OrganizationMemberRole.Viewer, null);
+    private OrganizationCustomRole? _selectedCustomRole;
     private LiveScanAccountRecord? _selectedAccount;
     private string _organizationName = string.Empty;
     private string _tenantKey = string.Empty;
     private string _organizationTenantId = string.Empty;
     private string _signInTenantId = string.Empty;
     private string _newMemberEmail = string.Empty;
+    private string _customRoleName = string.Empty;
     private string _statusMessage = "Sign in with Microsoft Entra ID to manage organizations and view tenant data.";
+    private bool _customRoleViewInventory;
+    private bool _customRoleRunScan;
+    private bool _customRoleViewFindings;
+    private bool _customRoleManageMembers;
+    private bool _customRoleManageConnections;
+    private bool _customRoleManagePolicies;
+    private bool _customRoleExportReports;
     private int _consolidatedIdentities;
     private int _consolidatedResources;
     private int _consolidatedFindings;
@@ -52,6 +64,9 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         AddMemberCommand = new AsyncRelayCommand(AddMemberAsync);
         UpdateMemberRoleCommand = new AsyncRelayCommand(UpdateMemberRoleAsync);
         ToggleMemberActiveCommand = new AsyncRelayCommand(ToggleMemberActiveAsync);
+        NewCustomRoleCommand = new AsyncRelayCommand(NewCustomRoleAsync);
+        SaveCustomRoleCommand = new AsyncRelayCommand(SaveCustomRoleAsync);
+        DeleteCustomRoleCommand = new AsyncRelayCommand(DeleteCustomRoleAsync);
         BindAccountCommand = new AsyncRelayCommand(BindAccountAsync);
         _liveScan.ScanCompleted += (_, _) => RefreshTenantView();
         _ = RefreshAsync();
@@ -65,7 +80,8 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public IReadOnlyList<OrganizationAuditEntry> AuditTrail => _auditTrail;
     public IReadOnlyList<LiveScanAccountRecord> AvailableAccounts => _availableAccounts;
     public IReadOnlyList<LiveScanAccountRecord> ConsolidatedAccounts => _consolidatedAccounts;
-    public IReadOnlyList<OrganizationMemberRole> MemberRoles { get; } = Enum.GetValues<OrganizationMemberRole>();
+    public IReadOnlyList<OrganizationRoleOption> MemberRoles => _memberRoles;
+    public IReadOnlyList<OrganizationCustomRole> CustomRoles => _customRoles;
     public OrganizationProfile? SelectedOrganization
     {
         get => _selectedOrganization;
@@ -95,12 +111,35 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         set
         {
             if (!SetProperty(ref _selectedMember, value)) return;
-            SelectedMemberRole = value?.Role ?? OrganizationMemberRole.Viewer;
+            SelectedMemberRoleOption = value is null
+                ? MemberRoles.First(role => role.BuiltInRole == OrganizationMemberRole.Viewer)
+                : MemberRoles.FirstOrDefault(role => value.CustomRoleId is not null && role.CustomRoleId == value.CustomRoleId)
+                    ?? MemberRoles.FirstOrDefault(role => role.BuiltInRole == value.Role)
+                    ?? MemberRoles.First(role => role.BuiltInRole == OrganizationMemberRole.Viewer);
             NotifyAuthorization();
         }
     }
-    public OrganizationMemberRole NewMemberRole { get => _newMemberRole; set { if (SetProperty(ref _newMemberRole, value)) NotifyAuthorization(); } }
-    public OrganizationMemberRole SelectedMemberRole { get => _selectedMemberRole; set { if (SetProperty(ref _selectedMemberRole, value)) NotifyAuthorization(); } }
+    public OrganizationRoleOption NewMemberRoleOption { get => _newMemberRoleOption; set { if (SetProperty(ref _newMemberRoleOption, value)) NotifyAuthorization(); } }
+    public OrganizationRoleOption SelectedMemberRoleOption { get => _selectedMemberRoleOption; set { if (SetProperty(ref _selectedMemberRoleOption, value)) NotifyAuthorization(); } }
+    public OrganizationCustomRole? SelectedCustomRole
+    {
+        get => _selectedCustomRole;
+        set
+        {
+            if (!SetProperty(ref _selectedCustomRole, value)) return;
+            CustomRoleName = value?.Name ?? string.Empty;
+            SetCustomRolePermissions(value?.Permissions ?? Array.Empty<OrganizationAction>());
+            NotifyAuthorization();
+        }
+    }
+    public string CustomRoleName { get => _customRoleName; set { if (SetProperty(ref _customRoleName, value)) NotifyAuthorization(); } }
+    public bool CustomRoleViewInventory { get => _customRoleViewInventory; set => SetProperty(ref _customRoleViewInventory, value); }
+    public bool CustomRoleRunScan { get => _customRoleRunScan; set => SetProperty(ref _customRoleRunScan, value); }
+    public bool CustomRoleViewFindings { get => _customRoleViewFindings; set => SetProperty(ref _customRoleViewFindings, value); }
+    public bool CustomRoleManageMembers { get => _customRoleManageMembers; set => SetProperty(ref _customRoleManageMembers, value); }
+    public bool CustomRoleManageConnections { get => _customRoleManageConnections; set => SetProperty(ref _customRoleManageConnections, value); }
+    public bool CustomRoleManagePolicies { get => _customRoleManagePolicies; set => SetProperty(ref _customRoleManagePolicies, value); }
+    public bool CustomRoleExportReports { get => _customRoleExportReports; set => SetProperty(ref _customRoleExportReports, value); }
     public LiveScanAccountRecord? SelectedAccount { get => _selectedAccount; set { if (SetProperty(ref _selectedAccount, value)) NotifyAuthorization(); } }
     public string OrganizationName { get => _organizationName; set { if (SetProperty(ref _organizationName, value)) NotifyAuthorization(); } }
     public string TenantKey { get => _tenantKey; set { if (SetProperty(ref _tenantKey, value)) NotifyAuthorization(); } }
@@ -132,6 +171,8 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public bool CanChangeMemberRole => CanManageMembers && SelectedMember is not null;
     public bool CanToggleMember => CanManageMembers && SelectedMember is not null;
     public bool CanBindAccount => CanManageConnections && SelectedAccount is not null && SelectedOrganization is not null;
+    public bool CanSaveCustomRole => CanManageMembers && !string.IsNullOrWhiteSpace(CustomRoleName);
+    public bool CanDeleteCustomRole => CanManageMembers && SelectedCustomRole is not null;
 
     public AsyncRelayCommand CreateOrganizationCommand { get; }
     public AsyncRelayCommand SignInCommand { get; }
@@ -139,6 +180,9 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public AsyncRelayCommand AddMemberCommand { get; }
     public AsyncRelayCommand UpdateMemberRoleCommand { get; }
     public AsyncRelayCommand ToggleMemberActiveCommand { get; }
+    public AsyncRelayCommand NewCustomRoleCommand { get; }
+    public AsyncRelayCommand SaveCustomRoleCommand { get; }
+    public AsyncRelayCommand DeleteCustomRoleCommand { get; }
     public AsyncRelayCommand BindAccountCommand { get; }
 
     public Task RefreshAsync()
@@ -221,7 +265,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         if (!CanAddMember || _identity is null || SelectedOrganization is null) return;
         try
         {
-            _organizationsService.AddMember(SelectedOrganization.Id, _identity, NewMemberEmail, NewMemberRole);
+            _organizationsService.AddMember(SelectedOrganization.Id, _identity, NewMemberEmail, NewMemberRoleOption);
             NewMemberEmail = string.Empty;
             StatusMessage = "Organization membership saved. The invited user must sign in through Entra before receiving access.";
             await RefreshAsync();
@@ -237,7 +281,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         if (!CanChangeMemberRole || _identity is null || SelectedOrganization is null || SelectedMember is null) return;
         try
         {
-            _organizationsService.UpdateMemberRole(SelectedOrganization.Id, _identity, SelectedMember.Id, SelectedMemberRole);
+            _organizationsService.UpdateMemberRole(SelectedOrganization.Id, _identity, SelectedMember.Id, SelectedMemberRoleOption);
             StatusMessage = "Member role updated and saved.";
             await RefreshAsync();
         }
@@ -260,6 +304,53 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         {
             ErrorMessage = $"Unable to update member status: {exception.Message}";
         }
+    }
+
+    public Task NewCustomRoleAsync()
+    {
+        SelectedCustomRole = null;
+        CustomRoleName = string.Empty;
+        SetCustomRolePermissions(Array.Empty<OrganizationAction>());
+        return Task.CompletedTask;
+    }
+
+    public Task SaveCustomRoleAsync()
+    {
+        if (!CanSaveCustomRole || _identity is null || SelectedOrganization is null) return Task.CompletedTask;
+        try
+        {
+            var isNewRole = SelectedCustomRole is null;
+            var permissions = GetSelectedCustomRolePermissions();
+            var savedRole = isNewRole
+                ? _organizationsService.CreateCustomRole(SelectedOrganization.Id, _identity, CustomRoleName, permissions)
+                : _organizationsService.UpdateCustomRole(SelectedOrganization.Id, _identity, SelectedCustomRole!.Id, CustomRoleName, permissions);
+            StatusMessage = isNewRole ? "Custom role created." : "Custom role updated.";
+            RefreshTenantView();
+            SelectedCustomRole = _customRoles.FirstOrDefault(role => role.Id == savedRole.Id);
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to save custom role: {exception.Message}";
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteCustomRoleAsync()
+    {
+        if (!CanDeleteCustomRole || _identity is null || SelectedOrganization is null || SelectedCustomRole is null)
+            return Task.CompletedTask;
+        try
+        {
+            _organizationsService.DeleteCustomRole(SelectedOrganization.Id, _identity, SelectedCustomRole.Id);
+            StatusMessage = "Custom role deleted.";
+            _ = NewCustomRoleAsync();
+            RefreshTenantView();
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to delete custom role: {exception.Message}";
+        }
+        return Task.CompletedTask;
     }
 
     public async Task BindAccountAsync()
@@ -292,6 +383,12 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     {
         try
         {
+            _memberRoles = CanManageMembers && _identity is not null && SelectedOrganization is not null
+                ? _organizationsService.GetRoleOptions(SelectedOrganization.Id, _identity)
+                : Enum.GetValues<OrganizationMemberRole>().Select(role => new OrganizationRoleOption(role.ToString(), role, null)).ToArray();
+            _customRoles = CanManageMembers && _identity is not null && SelectedOrganization is not null
+                ? _organizationsService.GetCustomRoles(SelectedOrganization.Id, _identity)
+                : Array.Empty<OrganizationCustomRole>();
             _members = CanManageMembers && _identity is not null && SelectedOrganization is not null
                 ? _organizationsService.GetMembers(SelectedOrganization.Id, _identity)
                 : Array.Empty<OrganizationMember>();
@@ -331,7 +428,34 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         _unmatchedBoundAccounts = Math.Max(0, _bindings.Count - _consolidatedAccounts.Count);
         foreach (var property in new[] { nameof(Members), nameof(Bindings), nameof(AuditTrail), nameof(AvailableAccounts), nameof(ConsolidatedAccounts), nameof(BoundAccountCount), nameof(ConsolidatedAccountCount), nameof(ConsolidatedIdentities), nameof(ConsolidatedResources), nameof(ConsolidatedFindings), nameof(ConsolidatedCriticalFindings), nameof(ConsolidatedEffectiveAccess), nameof(UnmatchedBoundAccounts), nameof(ConsolidatedCoverage) })
             OnPropertyChanged(property);
+        OnPropertyChanged(nameof(MemberRoles));
+        OnPropertyChanged(nameof(CustomRoles));
         NotifyAuthorization();
+    }
+
+    private IReadOnlyList<OrganizationAction> GetSelectedCustomRolePermissions()
+    {
+        var permissions = new List<OrganizationAction>();
+        if (CustomRoleViewInventory) permissions.Add(OrganizationAction.ViewInventory);
+        if (CustomRoleRunScan) permissions.Add(OrganizationAction.RunScan);
+        if (CustomRoleViewFindings) permissions.Add(OrganizationAction.ViewFindings);
+        if (CustomRoleManageMembers) permissions.Add(OrganizationAction.ManageMembers);
+        if (CustomRoleManageConnections) permissions.Add(OrganizationAction.ManageConnections);
+        if (CustomRoleManagePolicies) permissions.Add(OrganizationAction.ManagePolicies);
+        if (CustomRoleExportReports) permissions.Add(OrganizationAction.ExportReports);
+        return permissions;
+    }
+
+    private void SetCustomRolePermissions(IEnumerable<OrganizationAction> permissions)
+    {
+        var selected = permissions.ToHashSet();
+        CustomRoleViewInventory = selected.Contains(OrganizationAction.ViewInventory);
+        CustomRoleRunScan = selected.Contains(OrganizationAction.RunScan);
+        CustomRoleViewFindings = selected.Contains(OrganizationAction.ViewFindings);
+        CustomRoleManageMembers = selected.Contains(OrganizationAction.ManageMembers);
+        CustomRoleManageConnections = selected.Contains(OrganizationAction.ManageConnections);
+        CustomRoleManagePolicies = selected.Contains(OrganizationAction.ManagePolicies);
+        CustomRoleExportReports = selected.Contains(OrganizationAction.ExportReports);
     }
 
     private bool IsBoundAccount(LiveScanAccountRecord account)
@@ -353,7 +477,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
 
     private void NotifyAuthorization()
     {
-        foreach (var property in new[] { nameof(SignedInAs), nameof(CurrentRole), nameof(CanCreateOrganization), nameof(CanSignIn), nameof(CanManageMembers), nameof(CanManageConnections), nameof(CanViewTenant), nameof(CanAddMember), nameof(CanChangeMemberRole), nameof(CanToggleMember), nameof(CanBindAccount), nameof(Identity) })
+        foreach (var property in new[] { nameof(SignedInAs), nameof(CurrentRole), nameof(CanCreateOrganization), nameof(CanSignIn), nameof(CanManageMembers), nameof(CanManageConnections), nameof(CanViewTenant), nameof(CanAddMember), nameof(CanChangeMemberRole), nameof(CanToggleMember), nameof(CanBindAccount), nameof(CanSaveCustomRole), nameof(CanDeleteCustomRole), nameof(Identity) })
             OnPropertyChanged(property);
     }
 }

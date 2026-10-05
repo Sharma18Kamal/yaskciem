@@ -534,21 +534,52 @@
                                 <Grid Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" Text="{Binding NewMemberEmail, UpdateSourceTrigger=PropertyChanged}" ToolTip="Invite by Entra sign-in email" Margin="0,0,8,0"/>
-                                    <ComboBox Grid.Column="1" ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding NewMemberRole, Mode=TwoWay}" Margin="4,0"/>
+                                    <ComboBox Grid.Column="1" ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding NewMemberRoleOption, Mode=TwoWay}" DisplayMemberPath="Name" Margin="4,0"/>
                                     <Button Grid.Column="2" Content="Add member" Command="{Binding AddMemberCommand}" IsEnabled="{Binding CanAddMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                                 </Grid>
                                 <DataGrid ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="80" MaxHeight="180" SelectionMode="Single" Margin="0,8,0,0">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Email" Binding="{Binding Email}" Width="*"/>
-                                        <DataGridTextColumn Header="Role" Binding="{Binding Role}" Width="150"/>
+                                        <DataGridTextColumn Header="Role" Binding="{Binding AssignedRoleName}" Width="150"/>
                                         <DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" Width="70"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                    <ComboBox ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding SelectedMemberRole, Mode=TwoWay}" IsEnabled="{Binding CanChangeMemberRole}" MinWidth="180"/>
+                                    <ComboBox ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding SelectedMemberRoleOption, Mode=TwoWay}" DisplayMemberPath="Name" IsEnabled="{Binding CanChangeMemberRole}" MinWidth="180"/>
                                     <Button Content="Update role" Command="{Binding UpdateMemberRoleCommand}" IsEnabled="{Binding CanChangeMemberRole}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                                     <Button Content="Toggle active" Command="{Binding ToggleMemberActiveCommand}" IsEnabled="{Binding CanToggleMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                                 </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="CUSTOM ROLES" Style="{StaticResource CardLabel}"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="1.5*"/></Grid.ColumnDefinitions>
+                                    <DataGrid Grid.Column="0" ItemsSource="{Binding CustomRoles}" SelectedItem="{Binding SelectedCustomRole, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="190" SelectionMode="Single" Margin="0,0,8,0">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Role" Binding="{Binding Name}" Width="*"/>
+                                            <DataGridTextColumn Header="Permissions" Binding="{Binding Permissions.Count}" Width="100"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBox Text="{Binding CustomRoleName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Custom role name"/>
+                                        <WrapPanel Margin="0,6,0,0">
+                                            <CheckBox Content="View inventory" IsChecked="{Binding CustomRoleViewInventory}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="Run scans" IsChecked="{Binding CustomRoleRunScan}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="View findings" IsChecked="{Binding CustomRoleViewFindings}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="Manage members" IsChecked="{Binding CustomRoleManageMembers}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="Manage connections" IsChecked="{Binding CustomRoleManageConnections}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="Manage policies" IsChecked="{Binding CustomRoleManagePolicies}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="Export reports" IsChecked="{Binding CustomRoleExportReports}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                        </WrapPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                            <Button Content="New role" Command="{Binding NewCustomRoleCommand}" IsEnabled="{Binding CanManageMembers}" Style="{StaticResource QuietButton}"/>
+                                            <Button Content="Save role" Command="{Binding SaveCustomRoleCommand}" IsEnabled="{Binding CanSaveCustomRole}" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0"/>
+                                            <Button Content="Delete role" Command="{Binding DeleteCustomRoleCommand}" IsEnabled="{Binding CanDeleteCustomRole}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">

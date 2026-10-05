@@ -17,6 +17,8 @@ Organization creation requires an authenticated user from the configured tenant 
 - Auditor: review inventory, findings, and evidence.
 - Viewer: read-only visibility.
 
+Organization administrators can also create reusable custom roles, select any combination of the supported organization actions, and assign those roles to members. Custom role changes take effect immediately for assigned members. Roles in use cannot be deleted; built-in roles remain available and retain their existing authorization behavior.
+
 Authorization is enforced by `OrganizationManagementService`, not only by UI state. Unknown, inactive, pending, cross-tenant, and non-member identities are denied. Analysts can run read-only scans and export reports; auditors can review; viewers have read-only visibility; only admins can manage memberships and account bindings. The final active admin cannot be demoted or deactivated. Organization changes are recorded with actor, timestamp, action, target, and details; only admins can read the audit trail.
 
 ## Tenant Scope
