@@ -410,10 +410,11 @@
                             </DataGrid.Columns>
                         </DataGrid>
                         <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0" Text="{Binding RequestedBy, UpdateSourceTrigger=PropertyChanged}" ToolTip="Actor recorded in the audit trail" Margin="0,0,8,0"/>
-                            <TextBox Grid.Column="1" Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Approval or rejection rationale" Margin="4,0,8,0"/>
-                            <Button Grid.Column="2" Content="Create plan" Command="{Binding CreatePlanCommand}" IsEnabled="{Binding CanCreatePlan}" Style="{StaticResource PrimaryButton}"/>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Text="{Binding RequestedBy, UpdateSourceTrigger=PropertyChanged}" ToolTip="Plan creator and dry-run actor" Margin="0,0,8,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding Reviewer, UpdateSourceTrigger=PropertyChanged}" ToolTip="Independent reviewer. Must differ from the plan creator." Margin="4,0,8,0"/>
+                            <TextBox Grid.Column="2" Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Approval or rejection rationale" Margin="4,0,8,0"/>
+                            <Button Grid.Column="3" Content="Create plan" Command="{Binding CreatePlanCommand}" IsEnabled="{Binding CanCreatePlan}" Style="{StaticResource PrimaryButton}"/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -432,8 +433,9 @@
                     <StackPanel Grid.Column="1" Margin="8,0,0,0">
                         <TextBlock Text="APPROVAL-GATED WORKFLOW" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
                         <TextBlock Text="{Binding SelectedPlan.SafetyNotice}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding PreviewFingerprint}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="Approve" Command="{Binding ApprovePlanCommand}" IsEnabled="{Binding CanApprovePlan}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="{Binding ApprovalButtonText}" Command="{Binding ApprovePlanCommand}" IsEnabled="{Binding CanApprovePlan}" Style="{StaticResource PrimaryButton}"/>
                             <Button Content="Reject" Command="{Binding RejectPlanCommand}" IsEnabled="{Binding CanRejectPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                             <Button Content="Run dry run" Command="{Binding RunDryRunCommand}" IsEnabled="{Binding CanRunDryRun}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                             <Button Content="Verify" Command="{Binding VerifyPlanCommand}" IsEnabled="{Binding CanVerifyPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
@@ -444,7 +446,7 @@
                         <TextBlock Text="{Binding VerificationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="PROPOSED CHANGES" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                         <ItemsControl ItemsSource="{Binding SelectedChanges}">
-                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding ChangeType, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Target, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding BeforeState, Mode=OneWay}"/><Run Text=" -> "/><Run Text="{Binding ProposedState, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                            <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,2"><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"><Run Text="{Binding ChangeType, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Target, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding BeforeState, Mode=OneWay}"/><Run Text=" -> "/><Run Text="{Binding ProposedState, Mode=OneWay}"/><Run Text=" | Executable: "/><Run Text="{Binding Executable, Mode=OneWay}"/></TextBlock><TextBlock Text="{Binding Rationale}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap"/></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <TextBlock Text="ROLLBACK DRAFT CHANGES" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                         <ItemsControl ItemsSource="{Binding SelectedRollbackChanges}">

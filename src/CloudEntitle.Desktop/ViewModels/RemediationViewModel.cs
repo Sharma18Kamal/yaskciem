@@ -25,6 +25,7 @@ public sealed class RemediationViewModel : WorkspaceViewModel
     private RemediationPlan? _selectedPlan;
     private string _searchText = string.Empty;
     private string _requestedBy = Environment.UserName;
+    private string _reviewer = string.Empty;
     private string _reviewComment = string.Empty;
     private string _statusMessage = "Create a review plan from an evidence-backed recommendation.";
 
@@ -69,6 +70,7 @@ public sealed class RemediationViewModel : WorkspaceViewModel
     public bool HasRecommendations => Recommendations.Count > 0;
     public string SearchText { get => _searchText; set { if (SetProperty(ref _searchText, value)) NotifyCollections(); } }
     public string RequestedBy { get => _requestedBy; set { if (SetProperty(ref _requestedBy, value)) NotifyActions(); } }
+    public string Reviewer { get => _reviewer; set { if (SetProperty(ref _reviewer, value)) NotifyActions(); } }
     public string ReviewComment { get => _reviewComment; set { if (SetProperty(ref _reviewComment, value)) NotifyActions(); } }
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public RecommendationModel? SelectedRecommendation
@@ -89,19 +91,40 @@ public sealed class RemediationViewModel : WorkspaceViewModel
             OnPropertyChanged(nameof(SelectedAuditTrail));
             OnPropertyChanged(nameof(SelectedChanges));
             OnPropertyChanged(nameof(SelectedRollbackChanges));
+            OnPropertyChanged(nameof(PreviewFingerprint));
             OnPropertyChanged(nameof(CanApprovePlan));
             OnPropertyChanged(nameof(CanRejectPlan));
+            OnPropertyChanged(nameof(ApprovalButtonText));
             OnPropertyChanged(nameof(CanRunDryRun));
             OnPropertyChanged(nameof(CanVerifyPlan));
             OnPropertyChanged(nameof(CanPrepareRollback));
         }
     }
     public bool CanCreatePlan => SelectedRecommendation is not null && !string.IsNullOrWhiteSpace(RequestedBy);
-    public bool CanApprovePlan => SelectedPlan is { Status: RemediationPlanStatus.RequiresReview or RemediationPlanStatus.Draft }
-        && !string.IsNullOrWhiteSpace(RequestedBy) && !string.IsNullOrWhiteSpace(ReviewComment);
-    public bool CanRejectPlan => SelectedPlan is { Status: RemediationPlanStatus.RequiresReview or RemediationPlanStatus.Draft }
-        && !string.IsNullOrWhiteSpace(RequestedBy) && !string.IsNullOrWhiteSpace(ReviewComment);
+    public bool CanApprovePlan
+    {
+        get
+        {
+            var plan = SelectedPlan;
+            if (plan is null || plan.Recommendation.EvaluationState != RiskEvaluationState.Confirmed
+                || string.IsNullOrWhiteSpace(plan.CreatedBy)
+                || string.IsNullOrWhiteSpace(Reviewer)
+                || string.Equals(plan.CreatedBy.Trim(), Reviewer.Trim(), StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(ReviewComment)) return false;
+            if (plan.Status == RemediationPlanStatus.RequiresReview) return true;
+            return plan.Status == RemediationPlanStatus.DryRunCompleted
+                && RemediationPlanIntegrity.HasAuditedApproval(plan)
+                && plan.LastExecution is { Mode: RemediationExecutionMode.DryRun, Status: RemediationExecutionStatus.DryRunCompleted, MutatedCloud: false }
+                && plan.Simulation is not null
+                && !string.Equals(plan.ApprovedBy, Reviewer.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+    }
+    public bool CanRejectPlan => SelectedPlan is { Status: RemediationPlanStatus.RequiresReview or RemediationPlanStatus.Draft or RemediationPlanStatus.DryRunCompleted }
+        && !string.IsNullOrWhiteSpace(Reviewer)
+        && !string.Equals(SelectedPlan.CreatedBy?.Trim(), Reviewer.Trim(), StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(ReviewComment);
     public bool CanRunDryRun => SelectedPlan is { Status: RemediationPlanStatus.Approved }
+        && RemediationPlanIntegrity.HasAuditedApproval(SelectedPlan)
         && !string.IsNullOrWhiteSpace(RequestedBy) && ContextHasEvidence(SelectedPlan);
     public bool CanVerifyPlan => SelectedPlan?.LastExecution?.MutatedCloud == true
         && SelectedPlan.LastExecution.Status is RemediationExecutionStatus.Executed or RemediationExecutionStatus.VerificationFailed;
@@ -113,6 +136,8 @@ public sealed class RemediationViewModel : WorkspaceViewModel
     public string VerificationSummary => SelectedPlan?.Verification is not { } verification
         ? "Verification has not run. Dry runs do not change cloud access."
         : $"{verification.Status}: {verification.Details}";
+    public string ApprovalButtonText => SelectedPlan?.Status == RemediationPlanStatus.DryRunCompleted ? "Approve for execution" : "Approve preview";
+    public string PreviewFingerprint => SelectedPlan is null ? "No preview selected." : $"SHA-256 {RemediationPlanIntegrity.ComputeChangeSetFingerprint(SelectedPlan)}";
     public AsyncRelayCommand CreatePlanCommand { get; }
     public AsyncRelayCommand ApprovePlanCommand { get; }
     public AsyncRelayCommand RejectPlanCommand { get; }
@@ -173,9 +198,12 @@ public sealed class RemediationViewModel : WorkspaceViewModel
         if (!CanApprovePlan || SelectedPlan is null) return;
         try
         {
-            var plan = _workflow.Approve(SelectedPlan, RequestedBy, ReviewComment);
+            var isFinalApproval = SelectedPlan.Status == RemediationPlanStatus.DryRunCompleted;
+            var plan = _workflow.Approve(SelectedPlan, Reviewer, ReviewComment);
             await _planStore.SaveAsync(plan);
-            StatusMessage = "Approval recorded locally. The next step is a non-mutating dry run.";
+            StatusMessage = isFinalApproval
+                ? "Final approval recorded for this dry-run fingerprint. Provider changes remain disabled in this build."
+                : "Approval recorded locally. The next step is a non-mutating dry run.";
             await RefreshAsync();
             SelectedPlan = Plans.FirstOrDefault(item => item.Id == plan.Id);
         }
@@ -190,7 +218,7 @@ public sealed class RemediationViewModel : WorkspaceViewModel
         if (!CanRejectPlan || SelectedPlan is null) return;
         try
         {
-            var plan = _workflow.Reject(SelectedPlan, RequestedBy, ReviewComment);
+            var plan = _workflow.Reject(SelectedPlan, Reviewer, ReviewComment);
             await _planStore.SaveAsync(plan);
             StatusMessage = "Rejection and rationale recorded in the local audit trail.";
             await RefreshAsync();
@@ -273,6 +301,7 @@ public sealed class RemediationViewModel : WorkspaceViewModel
     {
         OnPropertyChanged(nameof(CanCreatePlan));
         OnPropertyChanged(nameof(CanApprovePlan));
+        OnPropertyChanged(nameof(CanRejectPlan));
         OnPropertyChanged(nameof(CanRunDryRun));
         OnPropertyChanged(nameof(CanVerifyPlan));
         OnPropertyChanged(nameof(CanPrepareRollback));

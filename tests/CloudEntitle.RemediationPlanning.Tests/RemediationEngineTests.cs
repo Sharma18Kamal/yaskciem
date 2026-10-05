@@ -13,7 +13,7 @@ public sealed class RemediationEngineTests
     public async Task DryRun_ShouldCompleteWithoutMutation()
     {
         var plan = CreatePlan(RemediationPlanStatus.Approved);
-        var execution = await new RemediationEngine().ExecuteAsync(new RemediationExecutionRequest(plan, RemediationExecutionMode.DryRun, "tester", false));
+        var execution = await new RemediationEngine().ExecuteAsync(new RemediationExecutionRequest(plan, RemediationExecutionMode.DryRun, "tester", true));
 
         Assert.Equal(RemediationExecutionStatus.DryRunCompleted, execution.Status);
         Assert.False(execution.MutatedCloud);
@@ -27,7 +27,7 @@ public sealed class RemediationEngineTests
 
         Assert.Equal(RemediationExecutionStatus.Blocked, execution.Status);
         Assert.False(execution.MutatedCloud);
-        Assert.Contains(execution.Diagnostics, item => item.Contains("dry run requires an explicitly approved plan", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(execution.Diagnostics, item => item.Contains("independent approval", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public sealed class RemediationEngineTests
 
         Assert.Equal(RemediationExecutionStatus.Blocked, execution.Status);
         Assert.False(execution.MutatedCloud);
-        Assert.Contains(execution.Diagnostics, item => item.Contains("approved", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(execution.Diagnostics, item => item.Contains("approval", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -49,7 +49,20 @@ public sealed class RemediationEngineTests
 
         Assert.Equal(RemediationExecutionStatus.Blocked, execution.Status);
         Assert.False(execution.MutatedCloud);
-        Assert.Contains(execution.Diagnostics, item => item.Contains("audited approval", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(execution.Diagnostics, item => item.Contains("independent approval", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ChangedPlanAfterApproval_ShouldBlockDryRun()
+    {
+        var plan = CreatePlan(RemediationPlanStatus.Approved);
+        var modified = plan with { Changes = new[] { plan.Changes[0] with { ProposedState = "unreviewed policy" } } };
+
+        var execution = await new RemediationEngine().ExecuteAsync(new RemediationExecutionRequest(modified, RemediationExecutionMode.DryRun, "requester", true));
+
+        Assert.Equal(RemediationExecutionStatus.Blocked, execution.Status);
+        Assert.False(execution.MutatedCloud);
+        Assert.Contains(execution.Diagnostics, item => item.Contains("independent approval", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -60,16 +73,19 @@ public sealed class RemediationEngineTests
 
         Assert.Equal(RemediationExecutionStatus.Blocked, execution.Status);
         Assert.False(execution.MutatedCloud);
-        Assert.Contains(execution.Diagnostics, item => item.Contains("no provider-approved executable changes", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(execution.Diagnostics, item => item.Contains("dry-run", StringComparison.OrdinalIgnoreCase));
     }
 
     private static RemediationPlan CreatePlan(RemediationPlanStatus status)
     {
         var recommendation = new RecommendationModel { Id = Guid.NewGuid(), Provider = CloudProvider.Azure, CloudAccountId = Guid.NewGuid(), RecommendationType = RecommendationType.NarrowWildcardPermission, CurrentState = "*", SuggestedState = "read", Status = RecommendationStatus.New, EvaluationState = RiskEvaluationState.Confirmed };
         var change = new RemediationChange(Guid.NewGuid(), "NarrowWildcardPermission", "azure:demo", "*", "read", false, "Review only.");
-        var plan = new RemediationPlan(Guid.NewGuid(), recommendation, CloudProvider.Azure, status, new[] { change }, DateTime.UtcNow, DateTime.UtcNow, "Non-executable.");
-        return status == RemediationPlanStatus.Approved
-            ? plan with { ApprovedBy = "security-reviewer", ApprovedAt = DateTime.UtcNow, ApprovalComment = "Approved after owner review." }
-            : plan;
+        var plan = new RemediationPlan(Guid.NewGuid(), recommendation, CloudProvider.Azure, status, new[] { change }, DateTime.UtcNow, DateTime.UtcNow, "Non-executable.")
+        {
+            CreatedBy = "requester"
+        };
+        if (status != RemediationPlanStatus.Approved) return plan;
+        var approved = plan with { ApprovedBy = "security-reviewer", ApprovedAt = DateTime.UtcNow, ApprovalComment = "Approved after owner review." };
+        return approved with { ApprovedChangeSetFingerprint = RemediationPlanIntegrity.ComputeChangeSetFingerprint(approved) };
     }
 }

@@ -31,21 +31,25 @@ public sealed class RemediationPlanStoreTests
             new[] { new RemediationChange(Guid.NewGuid(), "NarrowWildcardPermission", "test-target", "*", "read", false, "Review only.") },
             DateTime.UtcNow, DateTime.UtcNow, "Non-executable.")
         {
+            CreatedBy = "requester",
             ApprovedBy = "reviewer",
             ApprovedAt = DateTime.UtcNow,
             ApprovalComment = "Approved after review.",
             AuditTrail = new[] { new RemediationAuditEntry(DateTime.UtcNow, "reviewer", "Approved", "Approved after review.") }
         };
+        var approvedPlan = plan with { ApprovedChangeSetFingerprint = RemediationPlanIntegrity.ComputeChangeSetFingerprint(plan) };
 
         try
         {
             var store = new LocalRemediationPlanStore(filePath);
-            await store.SaveAsync(plan);
+            await store.SaveAsync(approvedPlan);
 
             var loaded = Assert.Single(await store.GetAsync());
             Assert.Equal(planId, loaded.Id);
             Assert.Equal("reviewer", loaded.ApprovedBy);
+            Assert.Equal("requester", loaded.CreatedBy);
             Assert.Equal("Approved after review.", loaded.ApprovalComment);
+            Assert.Equal(approvedPlan.ApprovedChangeSetFingerprint, loaded.ApprovedChangeSetFingerprint);
             Assert.Equal("Approved", Assert.Single(loaded.AuditTrail).Action);
             Assert.False(Assert.Single(loaded.Changes).Executable);
         }

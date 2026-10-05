@@ -5,9 +5,15 @@ YASK-CIEM supports Windows 10/11. Choose the installation method supplied by you
 ## Before you start
 
 - Use a Windows account allowed to install applications.
-- Install the .NET 9 Desktop Runtime on the target PC. Current packages are framework-dependent; the .NET SDK is needed only for the source-based installation.
+- The current self-contained Setup EXE includes the .NET 9 runtime. Framework-dependent ZIP/native packages need the .NET 9 Desktop Runtime; source builds need the .NET 9 SDK.
 - Install only the cloud CLI tools you plan to use: Azure CLI (`az`), AWS CLI (`aws`), and/or Google Cloud CLI (`gcloud`). Cloud discovery is optional until you configure a provider.
 - Obtain installation files from your organization’s trusted release location. Do not install unsigned packages or trust a signing certificate from an unknown source.
+
+## Current Setup EXE
+
+The current local build is [YASK-CIEM-Setup-1.0.0.38.exe](../../artifacts/installer-1.0.0.38/YASK-CIEM-Setup-1.0.0.38.exe). It contains the self-contained MSIX, the matching public publisher certificate, and the .NET runtime; a separate .NET Desktop Runtime installation is not required. Run it and follow the Windows prompts, then launch **YASK-CIEM** from Start.
+
+This package uses the YASK-CIEM development certificate. On a clean PC, Windows may require the public [development certificate](../../artifacts/certs/yask-ciem-dev.cer) to be trusted before the signed Setup EXE will launch. Only if you received it through a trusted channel, open the `.cer`, choose **Current User**, select **Place all certificates in the following store**, and choose **Trusted People**. The setup then verifies and imports the same public certificate for MSIX installation. It never contains the signing private key. Use this build only in a trusted development/test environment. Public distribution requires an organization-trusted code-signing certificate. The generated executable is local build output and is not automatically uploaded to GitHub; at 106 MB, it also exceeds GitHub's 100 MB single-file limit.
 
 ## Option 1: Install from an App Installer feed
 

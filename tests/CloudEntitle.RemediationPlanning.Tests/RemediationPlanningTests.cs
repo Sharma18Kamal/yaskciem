@@ -67,6 +67,58 @@ public sealed class RemediationPlanningTests
     }
 
     [Fact]
+    public async Task LiveAttempt_ShouldRequireFinalApprovalAndRemainBlockedForReviewOnlyChanges()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);
+        var workflow = new RemediationWorkflowService(new RemediationPlanner(), new RemediationSimulator(), new RemediationEngine());
+        var plan = workflow.CreatePlan(fixture.Recommendation, fixture.Context, "requester");
+        var approvedForDryRun = workflow.Approve(plan, "reviewer-one", "Approve non-mutating preview.");
+        var dryRun = await workflow.RunDryRunAsync(approvedForDryRun, fixture.Context, "requester");
+        var finalApproval = workflow.Approve(dryRun, "reviewer-two", "Approve the reviewed dry-run result.");
+
+        Assert.True(RemediationPlanIntegrity.HasAuditedLiveApproval(finalApproval));
+        var execution = await new RemediationEngine().ExecuteAsync(new RemediationExecutionRequest(finalApproval, RemediationExecutionMode.Live, "operator", true));
+
+        Assert.Equal(RemediationExecutionStatus.Blocked, execution.Status);
+        Assert.False(execution.MutatedCloud);
+        Assert.Contains(execution.Diagnostics, item => item.Contains("no provider-approved executable changes", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PlanCreator_ShouldNotApproveOwnPlan()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);
+        var workflow = new RemediationWorkflowService(new RemediationPlanner(), new RemediationSimulator(), new RemediationEngine());
+        var plan = workflow.CreatePlan(fixture.Recommendation, fixture.Context, "requester");
+
+        Assert.Throws<InvalidOperationException>(() => workflow.Approve(plan, "REQUESTER", "Self approval is not allowed."));
+    }
+
+    [Fact]
+    public void RollbackPreviewChange_ShouldInvalidatePriorApproval()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);
+        var workflow = new RemediationWorkflowService(new RemediationPlanner(), new RemediationSimulator(), new RemediationEngine());
+        var plan = workflow.CreatePlan(fixture.Recommendation, fixture.Context, "requester");
+        var approved = workflow.Approve(plan, "reviewer", "Reviewed the change and rollback preview.");
+        var changed = approved with { RollbackChanges = new[] { approved.RollbackChanges[0] with { ProposedState = "modified rollback" } } };
+
+        Assert.True(RemediationPlanIntegrity.HasAuditedApproval(approved));
+        Assert.False(RemediationPlanIntegrity.HasAuditedApproval(changed));
+    }
+
+    [Fact]
+    public void IncompleteEvidenceDraft_ShouldNotBeApproved()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Unknown);
+        var workflow = new RemediationWorkflowService(new RemediationPlanner(), new RemediationSimulator(), new RemediationEngine());
+        var plan = workflow.CreatePlan(fixture.Recommendation, fixture.Context, "requester");
+
+        Assert.Equal(RemediationPlanStatus.Draft, plan.Status);
+        Assert.Throws<InvalidOperationException>(() => workflow.Approve(plan, "reviewer", "Evidence is not complete."));
+    }
+
+    [Fact]
     public async Task VerificationAfterNonMutatingDryRun_ShouldBeUnavailable()
     {
         var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);

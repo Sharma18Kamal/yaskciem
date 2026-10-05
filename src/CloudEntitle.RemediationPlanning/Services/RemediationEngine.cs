@@ -28,11 +28,11 @@ public sealed class RemediationEngine : IRemediationEngine
         if (request.Mode == RemediationExecutionMode.Live
             && (!request.ExplicitApproval
                 || request.Plan.Status != RemediationPlanStatus.Approved
-                || string.IsNullOrWhiteSpace(request.Plan.ApprovedBy)
-                || !request.Plan.ApprovedAt.HasValue
-                || string.IsNullOrWhiteSpace(request.Plan.ApprovalComment)))
+                || !RemediationPlanIntegrity.HasAuditedLiveApproval(request.Plan)
+                || string.IsNullOrWhiteSpace(request.RequestedBy)
+                || string.Equals(request.RequestedBy.Trim(), request.Plan.ApprovedBy?.Trim(), StringComparison.OrdinalIgnoreCase)))
         {
-            return Result(request, RemediationExecutionStatus.Blocked, false, new[] { "Live execution requires an audited approval: approved plan, approver, approval time, and rationale." }, started);
+            return Result(request, RemediationExecutionStatus.Blocked, false, new[] { "Live execution requires an independent approval bound to an unchanged dry-run result and change set." }, started);
         }
 
         var validation = await adapter.ValidateAsync(request.Plan, cancellationToken);
@@ -44,8 +44,8 @@ public sealed class RemediationEngine : IRemediationEngine
 
         if (request.Mode == RemediationExecutionMode.DryRun)
         {
-            if (!HasAuditedApproval(request.Plan))
-                return Result(request, RemediationExecutionStatus.Blocked, false, diagnostics.Append("Dry run requires an explicitly approved plan with approver, time, and rationale.").ToArray(), started);
+            if (!request.ExplicitApproval || !RemediationPlanIntegrity.HasAuditedApproval(request.Plan))
+                return Result(request, RemediationExecutionStatus.Blocked, false, diagnostics.Append("Dry run requires an explicit independent approval bound to the unchanged change set.").ToArray(), started);
             var dryRun = await adapter.DryRunAsync(request.Plan, cancellationToken);
             diagnostics.AddRange(dryRun.Diagnostics);
             if (!dryRun.IsValid) return Result(request, RemediationExecutionStatus.Blocked, false, diagnostics, started);
@@ -83,12 +83,6 @@ public sealed class RemediationEngine : IRemediationEngine
         => _adapters.TryGetValue(plan.Provider, out var adapter)
             ? adapter.VerifyAsync(plan, cancellationToken)
             : Task.FromResult(new ProviderChangeValidation(false, new[] { "No provider adapter is registered for verification." }));
-
-    private static bool HasAuditedApproval(RemediationPlan plan)
-        => plan.Status is RemediationPlanStatus.Approved or RemediationPlanStatus.DryRunCompleted
-            && !string.IsNullOrWhiteSpace(plan.ApprovedBy)
-            && plan.ApprovedAt.HasValue
-            && !string.IsNullOrWhiteSpace(plan.ApprovalComment);
 
     private static RemediationExecution Result(RemediationExecutionRequest request, RemediationExecutionStatus status, bool mutated, IReadOnlyList<string> diagnostics, DateTime started) =>
         new(Guid.NewGuid(), request.Plan.Id, request.Plan.Provider, request.Mode, status, mutated, diagnostics, started, DateTime.UtcNow);
