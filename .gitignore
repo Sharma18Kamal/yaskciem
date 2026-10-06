@@ -32,6 +32,7 @@ appsettings.Development.json
 *.msi
 *.msix
 *.appx
+*.zip
 
 # NuGet
 *.nupkg
