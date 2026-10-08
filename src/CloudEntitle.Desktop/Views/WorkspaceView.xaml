@@ -14,19 +14,33 @@
                 <TextBlock Grid.Column="4" Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxWidth="180" MaxHeight="48" ToolTip="Cloud CLI connection status"/>
                 <ComboBox Grid.Column="5" ItemsSource="{Binding ComplianceFrameworks}" SelectedItem="{Binding SelectedComplianceFramework, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="145" Margin="8,0,0,0" ToolTip="Compliance framework for the exported evidence bundle"/>
                 <Button Grid.Column="6" Content="Export evidence bundle" Command="{Binding ExportComplianceBundleCommand}" IsEnabled="{Binding CanExportComplianceBundle}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Export organization-scoped controls, evidence, gaps, and assessment metadata"/>
-            <ProgressBar Height="4" IsIndeterminate="True" Background="{StaticResource LineBrush}" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,14" ToolTip="Scan in progress">
-                <ProgressBar.Style>
-                    <Style TargetType="ProgressBar">
-                        <Setter Property="Visibility" Value="Collapsed"/>
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsScanning}" Value="True">
-                                <Setter Property="Visibility" Value="Visible"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </ProgressBar.Style>
-            </ProgressBar>
                 <TextBlock Grid.Column="7" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
+            </Grid>
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="250"/></Grid.ColumnDefinitions>
+                <Border Grid.Column="1" HorizontalAlignment="Stretch">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource SectionCard}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Setter Property="Padding" Value="12"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsScanning}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="&#x2601;&#x231B;" FontSize="24" Foreground="{StaticResource AccentBrush}" Margin="0,0,10,0"/>
+                            <StackPanel>
+                                <TextBlock Text="Cloud scan in progress" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding ScanWaitingMessage}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <ProgressBar Height="6" IsIndeterminate="True" Background="{StaticResource LineBrush}" Foreground="{StaticResource AccentBrush}" Margin="0,10,0,0" ToolTip="Scan in progress"/>
+                    </StackPanel>
+                </Border>
             </Grid>
             <Expander Header="{Binding AccountSelectionMessage}" IsExpanded="False" Margin="0,0,0,14">
                 <StackPanel>
@@ -392,15 +406,17 @@
                 </Border>
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <TextBlock Text="JIRA CONNECTION" Style="{StaticResource CardLabel}"/>
-                        <TextBlock Text="Jira site URL" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
-                        <TextBox Text="{Binding JiraBaseUrl, UpdateSourceTrigger=PropertyChanged}" ToolTip="HTTPS Jira site URL. Do not include credentials, query parameters, or fragments."/>
+                        <TextBlock Text="TICKETING CONNECTION" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="Ticketing system" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
+                        <ComboBox ItemsSource="{Binding TicketingProviders}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedTicketingProviderOption, Mode=TwoWay}"/>
+                        <TextBlock Text="Site URL" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
+                        <TextBox Text="{Binding TicketingSiteUrl, UpdateSourceTrigger=PropertyChanged}" ToolTip="HTTPS site URL for the selected ticketing tool. Do not include credentials, query parameters, or fragments."/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="Save URL" Command="{Binding SaveJiraConnectionCommand}" Style="{StaticResource PrimaryButton}"/>
-                            <Button Content="Connect to Jira" Command="{Binding OpenJiraCommand}" IsEnabled="{Binding CanConnectToJira}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <Button Content="Save URL" Command="{Binding SaveTicketingConnectionCommand}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="{Binding TicketingRequestButtonText}" Command="{Binding OpenTicketingRequestCommand}" IsEnabled="{Binding CanOpenTicketingRequest}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                         </StackPanel>
-                        <TextBlock Text="{Binding JiraConnectionStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                        <TextBlock Text="Connect opens the site in your browser. Jira API authentication and ticket creation are not configured." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding TicketingConnectionStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="Opens a known create-request form when available, otherwise the selected tool portal. Sign in there to submit; credentials are not stored by this app." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
                 <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>

@@ -60,14 +60,18 @@ public sealed class WorkspaceViewBindingTests
         var document = XDocument.Load(xamlPath);
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
 
+        Assert.Contains(document.Descendants(presentation + "ComboBox"), comboBox =>
+            ((string?)comboBox.Attribute("ItemsSource"))?.Contains("TicketingProviders", StringComparison.Ordinal) == true
+            && ((string?)comboBox.Attribute("SelectedItem"))?.Contains("SelectedTicketingProviderOption", StringComparison.Ordinal) == true
+            && (string?)comboBox.Attribute("DisplayMemberPath") == "DisplayName");
         Assert.Contains(document.Descendants(presentation + "TextBox"), textBox =>
-            ((string?)textBox.Attribute("Text"))?.Contains("JiraBaseUrl", StringComparison.Ordinal) == true);
+            ((string?)textBox.Attribute("Text"))?.Contains("TicketingSiteUrl", StringComparison.Ordinal) == true);
         Assert.Contains(document.Descendants(presentation + "Button"), button =>
             (string?)button.Attribute("Content") == "Save URL"
-            && ((string?)button.Attribute("Command"))?.Contains("SaveJiraConnectionCommand", StringComparison.Ordinal) == true);
+            && ((string?)button.Attribute("Command"))?.Contains("SaveTicketingConnectionCommand", StringComparison.Ordinal) == true);
         Assert.Contains(document.Descendants(presentation + "Button"), button =>
-            (string?)button.Attribute("Content") == "Connect to Jira"
-            && ((string?)button.Attribute("IsEnabled"))?.Contains("CanConnectToJira", StringComparison.Ordinal) == true);
+            ((string?)button.Attribute("Content"))?.Contains("TicketingRequestButtonText", StringComparison.Ordinal) == true
+            && ((string?)button.Attribute("IsEnabled"))?.Contains("CanOpenTicketingRequest", StringComparison.Ordinal) == true);
     }
 
     [Fact]
@@ -101,7 +105,13 @@ public sealed class WorkspaceViewBindingTests
 
         var progress = Assert.Single(document.Descendants(presentation + "ProgressBar"));
         Assert.Equal("True", (string?)progress.Attribute("IsIndeterminate"));
-        Assert.Contains(progress.Descendants(presentation + "DataTrigger"), trigger =>
+        var scanPanel = progress.Ancestors(presentation + "Border").First();
+        Assert.Equal("1", (string?)scanPanel.Attribute("Grid.Column"));
+        Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
+            ((string?)textBlock.Attribute("Text"))?.Contains("ScanWaitingMessage", StringComparison.Ordinal) == true);
+        Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
+            ((string?)textBlock.Attribute("Text"))?.Contains("\u2601\u231B", StringComparison.Ordinal) == true);
+        Assert.Contains(scanPanel.Descendants(presentation + "DataTrigger"), trigger =>
             (string?)trigger.Attribute("Binding") == "{Binding IsScanning}"
             && (string?)trigger.Attribute("Value") == "True"
             && trigger.Descendants(presentation + "Setter").Any(setter =>

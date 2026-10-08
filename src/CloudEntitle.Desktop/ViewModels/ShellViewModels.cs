@@ -12,6 +12,7 @@ using CloudEntitle.EffectiveAccess.Models;
 using CloudEntitle.EffectiveAccess.Services;
 using CloudEntitle.Normalization.Models;
 using CloudEntitle.Compliance.Models;
+using System.Windows.Threading;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
@@ -378,6 +379,14 @@ public abstract class WorkspaceViewModel : ObservableObject
 
 public sealed class DashboardViewModel : WorkspaceViewModel
 {
+    private static readonly string[] ScanWaitingMessages =
+    {
+        "Counting permissions. We did not skip the footnotes.",
+        "Checking who gave that role administrator powers.",
+        "Negotiating with the cloud. It says it is busy.",
+        "Untangling access paths. Dramatic music optional.",
+        "Checking the last account. It was hiding in plain sight."
+    };
     private readonly IDemoDataService _demoData;
     private readonly IAnalyticsService _analytics;
     private readonly ILiveCloudScanService? _liveCloudScanService;
@@ -385,6 +394,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private readonly IDialogService? _dialogService;
     private readonly IComplianceExportWorkflow? _complianceExportWorkflow;
     private readonly AuthenticatedOrganizationContext? _authenticatedOrganizationContext;
+    private readonly DispatcherTimer _scanWaitingTimer;
     private AnalyticsSnapshot _analyticsSnapshot = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
     private LiveCloudScanResult? _liveScan;
     private IReadOnlyList<ScanAccountSelection> _availableAccounts = Array.Empty<ScanAccountSelection>();
@@ -393,6 +403,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private string _accountSelectionMessage = "Discover accounts to choose the scope for this scan.";
     private CancellationTokenSource? _scanCancellation;
     private bool _isScanning;
+    private int _scanWaitingMessageIndex;
 
     public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null, IReportService? reportService = null, IDialogService? dialogService = null, IComplianceExportWorkflow? complianceExportWorkflow = null, AuthenticatedOrganizationContext? authenticatedOrganizationContext = null)
     {
@@ -403,6 +414,12 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         _dialogService = dialogService;
         _complianceExportWorkflow = complianceExportWorkflow;
         _authenticatedOrganizationContext = authenticatedOrganizationContext;
+        _scanWaitingTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _scanWaitingTimer.Tick += (_, _) =>
+        {
+            _scanWaitingMessageIndex = (_scanWaitingMessageIndex + 1) % ScanWaitingMessages.Length;
+            OnPropertyChanged(nameof(ScanWaitingMessage));
+        };
         ScanCommand = new AsyncRelayCommand(RunScanAsync);
         DiscoverAccountsCommand = new AsyncRelayCommand(DiscoverAccountsAsync);
         SelectAllAccountsCommand = new RelayCommand(() => SetAccountSelection(true));
@@ -438,9 +455,21 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         get => _isScanning;
         private set
         {
-            if (SetProperty(ref _isScanning, value)) StopScanCommand.Refresh();
+            if (!SetProperty(ref _isScanning, value)) return;
+            StopScanCommand.Refresh();
+            if (value)
+            {
+                _scanWaitingMessageIndex = 0;
+                OnPropertyChanged(nameof(ScanWaitingMessage));
+                _scanWaitingTimer.Start();
+            }
+            else
+            {
+                _scanWaitingTimer.Stop();
+            }
         }
     }
+    public string ScanWaitingMessage => ScanWaitingMessages[_scanWaitingMessageIndex];
     public string ScanStatusMessage { get => _scanStatusMessage; private set => SetProperty(ref _scanStatusMessage, value); }
     public int CloudAccounts => _analyticsSnapshot.CloudAccounts + (_liveScan?.AccountCount ?? 0);
     public int Identities => _analyticsSnapshot.Identities + (_liveScan?.IdentityCount ?? 0);
@@ -1778,9 +1807,11 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     private readonly IDemoDataService _demoData;
     private readonly ContinuousMonitoringService? _monitoringService;
     private readonly IJiraConnectionSettingsStore _jiraSettingsStore;
+    private readonly Dictionary<TicketingProvider, string> _ticketingProviderUrls = new();
     private string _demoModeState = "Demo Mode is off";
-    private string _jiraBaseUrl = string.Empty;
-    private string _jiraConnectionStatus = "Jira is not configured.";
+    private string _ticketingSiteUrl = string.Empty;
+    private string _ticketingConnectionStatus = "Ticketing is not configured.";
+    private TicketingProvider _selectedTicketingProvider = TicketingProvider.Jira;
     private bool _scheduledScansEnabled;
     private int _selectedScanIntervalMinutes = 1440;
     public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null, IJiraConnectionSettingsStore? jiraSettingsStore = null)
@@ -1792,8 +1823,14 @@ public sealed class SettingsViewModel : WorkspaceViewModel
         _selectedScanIntervalMinutes = monitoringService?.Schedule.IntervalMinutes ?? 1440;
         try
         {
-            _jiraBaseUrl = _jiraSettingsStore.Load().BaseUrl;
-            _jiraConnectionStatus = string.IsNullOrWhiteSpace(_jiraBaseUrl) ? "Jira is not configured." : "Jira site URL loaded.";
+            var ticketingSettings = _jiraSettingsStore.Load();
+            foreach (var option in TicketingProviders)
+                _ticketingProviderUrls[option.Provider] = ticketingSettings.GetBaseUrl(option.Provider);
+            _selectedTicketingProvider = ticketingSettings.SelectedProvider;
+            _ticketingSiteUrl = _ticketingProviderUrls.GetValueOrDefault(_selectedTicketingProvider, string.Empty);
+            _ticketingConnectionStatus = string.IsNullOrWhiteSpace(TicketingSiteUrl)
+                ? $"{SelectedTicketingProvider} is not configured."
+                : $"{SelectedTicketingProvider} site URL loaded.";
         }
         catch (Exception exception)
         {
@@ -1802,25 +1839,74 @@ public sealed class SettingsViewModel : WorkspaceViewModel
         LoadDemoDataCommand = new AsyncRelayCommand(LoadDemoDataAsync);
         ResetDemoDataCommand = new AsyncRelayCommand(ResetDemoDataAsync);
         SaveMonitoringScheduleCommand = new AsyncRelayCommand(SaveMonitoringScheduleAsync);
-        SaveJiraConnectionCommand = new AsyncRelayCommand(SaveJiraConnectionAsync);
-        OpenJiraCommand = new AsyncRelayCommand(OpenJiraAsync);
+        SaveTicketingConnectionCommand = new AsyncRelayCommand(SaveTicketingConnectionAsync);
+        OpenTicketingRequestCommand = new AsyncRelayCommand(OpenTicketingRequestAsync);
         _demoData.DataChanged += (_, _) => { DemoModeState = _demoData.IsDemoMode ? "DEMO MODE active: synthetic data only" : "Demo Mode is off"; };
     }
     public override string Title => "Settings";
     public override string Subtitle => "Application, database, connection, and security preferences.";
     public string DataLocation => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     public string DemoModeState { get => _demoModeState; private set => SetProperty(ref _demoModeState, value); }
-    public string JiraBaseUrl
+    public string JiraBaseUrl { get => _ticketingProviderUrls.GetValueOrDefault(TicketingProvider.Jira, string.Empty); set => SetProviderUrl(TicketingProvider.Jira, value); }
+    public string ServiceNowBaseUrl { get => _ticketingProviderUrls.GetValueOrDefault(TicketingProvider.ServiceNow, string.Empty); set => SetProviderUrl(TicketingProvider.ServiceNow, value); }
+    public TicketingProvider SelectedTicketingProvider
     {
-        get => _jiraBaseUrl;
+        get => _selectedTicketingProvider;
         set
         {
-            if (!SetProperty(ref _jiraBaseUrl, value)) return;
-            OnPropertyChanged(nameof(CanConnectToJira));
+            if (!SetProperty(ref _selectedTicketingProvider, value)) return;
+            TicketingSiteUrl = _ticketingProviderUrls.GetValueOrDefault(value, string.Empty);
+            OnPropertyChanged(nameof(SelectedTicketingProviderOption));
+            OnPropertyChanged(nameof(TicketingSiteUrl));
+            OnPropertyChanged(nameof(CanOpenTicketingRequest));
+            OnPropertyChanged(nameof(TicketingRequestButtonText));
+            TicketingConnectionStatus = string.IsNullOrWhiteSpace(TicketingSiteUrl)
+                ? $"{SelectedTicketingProvider} is not configured."
+                : $"{SelectedTicketingProvider} site URL loaded.";
         }
     }
-    public string JiraConnectionStatus { get => _jiraConnectionStatus; private set => SetProperty(ref _jiraConnectionStatus, value); }
-    public bool CanConnectToJira => TryGetJiraUri(JiraBaseUrl, out _);
+    public IReadOnlyList<TicketingProviderOption> TicketingProviders { get; } = new[]
+    {
+        new TicketingProviderOption(TicketingProvider.ServiceNow, "ServiceNow ITSM"),
+        new TicketingProviderOption(TicketingProvider.JiraServiceManagement, "Jira Service Management"),
+        new TicketingProviderOption(TicketingProvider.Jira, "Jira Software"),
+        new TicketingProviderOption(TicketingProvider.BmcHelixItsm, "BMC Helix ITSM"),
+        new TicketingProviderOption(TicketingProvider.ManageEngineServiceDeskPlus, "ManageEngine ServiceDesk Plus"),
+        new TicketingProviderOption(TicketingProvider.IvantiNeuronsItsm, "Ivanti Neurons for ITSM"),
+        new TicketingProviderOption(TicketingProvider.Zendesk, "Zendesk"),
+        new TicketingProviderOption(TicketingProvider.SolarWindsServiceDesk, "SolarWinds Service Desk"),
+        new TicketingProviderOption(TicketingProvider.Dynamics365CustomerService, "Dynamics 365 Customer Service"),
+        new TicketingProviderOption(TicketingProvider.AzureDevOpsBoards, "Azure DevOps Boards"),
+        new TicketingProviderOption(TicketingProvider.Other, "Other ticketing portal")
+    };
+    public TicketingProviderOption SelectedTicketingProviderOption
+    {
+        get => TicketingProviders.First(option => option.Provider == SelectedTicketingProvider);
+        set { if (value is not null) SelectedTicketingProvider = value.Provider; }
+    }
+    public string TicketingSiteUrl
+    {
+        get => _ticketingSiteUrl;
+        set
+        {
+            if (!SetProperty(ref _ticketingSiteUrl, value)) return;
+            _ticketingProviderUrls[SelectedTicketingProvider] = value;
+            NotifyTicketingUrlChanged();
+        }
+    }
+    public string TicketingConnectionStatus { get => _ticketingConnectionStatus; private set => SetProperty(ref _ticketingConnectionStatus, value); }
+    public string TicketingRequestButtonText => SelectedTicketingProvider switch
+    {
+        TicketingProvider.Jira => "Open Jira issue form",
+        TicketingProvider.JiraServiceManagement => "Open service request portal",
+        TicketingProvider.ServiceNow => "Open ServiceNow incident form",
+        TicketingProvider.Zendesk => "Open Zendesk ticket form",
+        TicketingProvider.AzureDevOpsBoards => "Create Azure Boards work item",
+        _ => $"Open {SelectedTicketingProviderOption.DisplayName} portal"
+    };
+    public bool CanOpenTicketingRequest => TryGetTicketingUri(SelectedTicketingProvider, TicketingSiteUrl, out _);
+    public bool CanConnectToJira => SelectedTicketingProvider == TicketingProvider.Jira && TryGetTicketingUri(TicketingProvider.Jira, JiraBaseUrl, out _);
+    public string JiraConnectionStatus => TicketingConnectionStatus;
     public bool ScheduledScansEnabled { get => _scheduledScansEnabled; set => SetProperty(ref _scheduledScansEnabled, value); }
     public int SelectedScanIntervalMinutes { get => _selectedScanIntervalMinutes; set => SetProperty(ref _selectedScanIntervalMinutes, value); }
     public IReadOnlyList<MonitoringIntervalOption> ScanIntervals { get; } = new[]
@@ -1834,8 +1920,10 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     public AsyncRelayCommand LoadDemoDataCommand { get; }
     public AsyncRelayCommand ResetDemoDataCommand { get; }
     public AsyncRelayCommand SaveMonitoringScheduleCommand { get; }
-    public AsyncRelayCommand SaveJiraConnectionCommand { get; }
-    public AsyncRelayCommand OpenJiraCommand { get; }
+    public AsyncRelayCommand SaveTicketingConnectionCommand { get; }
+    public AsyncRelayCommand OpenTicketingRequestCommand { get; }
+    public AsyncRelayCommand SaveJiraConnectionCommand => SaveTicketingConnectionCommand;
+    public AsyncRelayCommand OpenJiraCommand => OpenTicketingRequestCommand;
     private async Task SaveMonitoringScheduleAsync()
     {
         if (_monitoringService is null)
@@ -1854,49 +1942,89 @@ public sealed class SettingsViewModel : WorkspaceViewModel
             ErrorMessage = $"Unable to save monitoring schedule: {exception.Message}";
         }
     }
-    public Task SaveJiraConnectionAsync()
+    public Task SaveJiraConnectionAsync() => SaveTicketingConnectionAsync();
+
+    public Task SaveTicketingConnectionAsync()
     {
         try
         {
-            var normalized = string.IsNullOrWhiteSpace(JiraBaseUrl)
-                ? string.Empty
-                : LocalJiraConnectionSettingsStore.NormalizeBaseUrl(JiraBaseUrl);
-            _jiraSettingsStore.Save(normalized);
-            JiraBaseUrl = normalized;
-            JiraConnectionStatus = string.IsNullOrEmpty(normalized) ? "Jira URL cleared." : "Jira site URL saved on this device.";
+            var normalizedUrls = _ticketingProviderUrls
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
+                .ToDictionary(pair => pair.Key, pair => LocalJiraConnectionSettingsStore.NormalizeBaseUrl(pair.Value));
+            if (!string.IsNullOrWhiteSpace(TicketingSiteUrl))
+                normalizedUrls[SelectedTicketingProvider] = LocalJiraConnectionSettingsStore.NormalizeBaseUrl(TicketingSiteUrl);
+            else
+                normalizedUrls.Remove(SelectedTicketingProvider);
+            _jiraSettingsStore.Save(new JiraConnectionSettings(
+                normalizedUrls.GetValueOrDefault(TicketingProvider.Jira, string.Empty),
+                normalizedUrls.GetValueOrDefault(TicketingProvider.ServiceNow, string.Empty),
+                SelectedTicketingProvider,
+                normalizedUrls));
+            _ticketingProviderUrls.Clear();
+            foreach (var pair in normalizedUrls) _ticketingProviderUrls[pair.Key] = pair.Value;
+            _ticketingSiteUrl = _ticketingProviderUrls.GetValueOrDefault(SelectedTicketingProvider, string.Empty);
+            OnPropertyChanged(nameof(TicketingSiteUrl));
+            OnPropertyChanged(nameof(JiraBaseUrl));
+            OnPropertyChanged(nameof(ServiceNowBaseUrl));
+            TicketingConnectionStatus = string.IsNullOrEmpty(_ticketingSiteUrl)
+                ? $"{SelectedTicketingProvider} URL cleared."
+                : $"{SelectedTicketingProvider} site URL saved on this device.";
             ErrorMessage = null;
         }
         catch (Exception exception)
         {
-            ErrorMessage = $"Unable to save Jira URL: {exception.Message}";
+            ErrorMessage = $"Unable to save ticketing URL: {exception.Message}";
         }
         return Task.CompletedTask;
     }
-    private Task OpenJiraAsync()
+
+    public Task OpenJiraAsync() => OpenTicketingRequestAsync();
+
+    public Task OpenTicketingRequestAsync()
     {
-        if (!TryGetJiraUri(JiraBaseUrl, out var uri))
+        if (!TryGetTicketingUri(SelectedTicketingProvider, TicketingSiteUrl, out var uri))
         {
-            ErrorMessage = "Enter and save a valid HTTPS Jira site URL first.";
+            ErrorMessage = $"Enter and save a valid HTTPS {SelectedTicketingProvider} site URL first.";
             return Task.CompletedTask;
         }
 
         try
         {
-            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+            var requestForm = LocalJiraConnectionSettingsStore.BuildRequestFormUrl(SelectedTicketingProvider, uri.AbsoluteUri);
+            Process.Start(new ProcessStartInfo(requestForm) { UseShellExecute = true });
             ErrorMessage = null;
-            JiraConnectionStatus = "Opened Jira in the default browser. API authentication is not configured.";
+            TicketingConnectionStatus = $"Opened {SelectedTicketingProvider} request form in the default browser. Sign in there to submit.";
         }
         catch (Exception exception)
         {
-            ErrorMessage = $"Unable to open Jira: {exception.Message}";
+            ErrorMessage = $"Unable to open {SelectedTicketingProvider}: {exception.Message}";
         }
         return Task.CompletedTask;
     }
-    private static bool TryGetJiraUri(string value, out Uri uri)
+
+    private void NotifyTicketingUrlChanged()
+    {
+        OnPropertyChanged(nameof(TicketingSiteUrl));
+        OnPropertyChanged(nameof(CanConnectToJira));
+        OnPropertyChanged(nameof(CanOpenTicketingRequest));
+    }
+
+    private void SetProviderUrl(TicketingProvider provider, string value)
+    {
+        _ticketingProviderUrls[provider] = value;
+        OnPropertyChanged(provider == TicketingProvider.Jira ? nameof(JiraBaseUrl) : nameof(ServiceNowBaseUrl));
+        if (provider != SelectedTicketingProvider) return;
+        _ticketingSiteUrl = value;
+        OnPropertyChanged(nameof(TicketingSiteUrl));
+        NotifyTicketingUrlChanged();
+    }
+
+    private static bool TryGetTicketingUri(TicketingProvider provider, string value, out Uri uri)
     {
         try
         {
             uri = new Uri(LocalJiraConnectionSettingsStore.NormalizeBaseUrl(value));
+            _ = LocalJiraConnectionSettingsStore.BuildRequestFormUrl(provider, uri.AbsoluteUri);
             return true;
         }
         catch (ArgumentException)
