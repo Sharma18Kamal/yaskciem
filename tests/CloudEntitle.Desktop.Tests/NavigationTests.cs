@@ -100,7 +100,7 @@ public sealed class NavigationTests
         var trialService = new RecordingTrialService(existingTrial: null, newTrial: new TrialInfo
         {
             TrialStart = DateTime.UtcNow,
-            TrialEnd = DateTime.UtcNow.AddDays(7),
+            TrialEnd = DateTime.UtcNow.AddDays(14),
             Status = LicenseStatus.Trial
         });
         var viewModel = new MainWindowViewModel(new TestNavigationService(new CloudAccountsViewModel(new NoopDemoDataService())), trialService: trialService, getDeviceIdentifier: () => "stable-machine-id");
@@ -108,7 +108,7 @@ public sealed class NavigationTests
         await viewModel.InitializeTrialAsync();
 
         Assert.True(viewModel.IsTrialActive);
-        Assert.Contains("7 days left", viewModel.TrialStatusText);
+        Assert.Contains("14 days left", viewModel.TrialStatusText);
         Assert.Equal("YASK-LOCAL-DEVICE-stable-machine-id", trialService.StartedUserId);
         Assert.Equal("stable-machine-id", trialService.StartedDeviceIdentifier);
         Assert.DoesNotContain('@', trialService.StartedUserId!);

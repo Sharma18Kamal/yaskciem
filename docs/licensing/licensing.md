@@ -2,9 +2,9 @@
 
 ## Current implementation
 
-- The desktop app starts a seven-day trial before showing the main window and displays the remaining days in the header.
+- The desktop app starts a fourteen-day trial before showing the main window and displays the remaining days in the header.
 - The app derives a stable device identifier from Windows `MachineGuid`, with a network-adapter identifier fallback. It uses a synthetic device-based trial ID and does not ask for a username, email address, or phone number.
-- Trial status checks use that same identifier. Reinstalling the app for the same Windows account continues the original saved trial instead of starting a new seven-day period.
+- Trial status checks use that same identifier. Reinstalling the app for the same Windows account continues the original saved trial instead of starting a new fourteen-day period.
 - Trial status is rechecked every 30 seconds while the app is open, so controls are disabled when the expiry is reached without waiting for a restart.
 - A system clock rollback of more than five minutes expires the local trial and persists that expiration.
 - When the trial expires or trial status cannot be verified, workspace and cloud controls are disabled. Existing local application data is not deleted.

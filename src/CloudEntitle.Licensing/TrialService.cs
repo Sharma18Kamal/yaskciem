@@ -9,7 +9,7 @@ using CloudEntitle.Domain;
 
 public sealed class TrialService : ITrialService
 {
-    private static readonly TimeSpan TrialDuration = TimeSpan.FromDays(7);
+    private static readonly TimeSpan TrialDuration = TimeSpan.FromDays(14);
     private static readonly TimeSpan ClockRollbackTolerance = TimeSpan.FromMinutes(5);
     private readonly ITrialStateStore _stateStore;
     private readonly Func<DateTime> _utcNow;
@@ -72,9 +72,19 @@ public sealed class TrialService : ITrialService
             return ToTrialInfo(record, email);
         }
 
-        if (now > lastObserved)
+        var trialStart = AsUtc(record.TrialStart);
+        var updatedTrialEnd = trialStart.Add(TrialDuration);
+        var shouldExtendTrial = AsUtc(record.TrialEnd) > trialStart
+            && AsUtc(record.TrialEnd) < updatedTrialEnd
+            && now < updatedTrialEnd;
+        var updatedRecord = record with
         {
-            record = record with { LastObservedUtc = now };
+            TrialEnd = shouldExtendTrial ? updatedTrialEnd : record.TrialEnd,
+            LastObservedUtc = now > lastObserved ? now : record.LastObservedUtc
+        };
+        if (updatedRecord != record)
+        {
+            record = updatedRecord;
             await _stateStore.SaveAsync(registrations.Select(registration =>
                 registration.EmailHash == emailHash ? record : registration), cancellationToken);
         }

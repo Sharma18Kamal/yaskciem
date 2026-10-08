@@ -8,7 +8,7 @@ namespace CloudEntitle.Licensing.Tests;
 public class TrialServiceTests
 {
     [Fact]
-    public async Task TrialService_ShouldCreateSevenDayTrial()
+    public async Task TrialService_ShouldCreateFourteenDayTrial()
     {
         var now = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         var service = new TrialService(() => now, new InMemoryTrialStateStore());
@@ -16,7 +16,27 @@ public class TrialServiceTests
         var trial = await service.StartTrialAsync("User@Example.com", "AA:BB:CC:DD:EE:FF");
 
         Assert.Equal(now, trial.TrialStart);
-        Assert.Equal(now.AddDays(7), trial.TrialEnd);
+        Assert.Equal(now.AddDays(14), trial.TrialEnd);
+        Assert.Equal(LicenseStatus.Trial, trial.Status);
+    }
+
+    [Fact]
+    public async Task TrialService_ShouldExtendExistingSevenDayTrialToFourteenDays()
+    {
+        var now = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var store = new InMemoryTrialStateStore();
+        var service = new TrialService(() => now, store);
+        await service.StartTrialAsync("user@example.com", "device-hash");
+        var registration = (await store.LoadAsync())[0];
+        await store.SaveAsync(new[] { registration with { TrialEnd = registration.TrialStart.AddDays(7) } });
+
+        now = now.AddDays(4);
+        var trial = await service.GetTrialStatusAsync("user@example.com", "device-hash");
+        var updatedRegistration = (await store.LoadAsync())[0];
+
+        Assert.NotNull(trial);
+        Assert.Equal(registration.TrialStart.AddDays(14), trial.TrialEnd);
+        Assert.Equal(trial.TrialEnd, updatedRegistration.TrialEnd);
         Assert.Equal(LicenseStatus.Trial, trial.Status);
     }
 
@@ -38,7 +58,7 @@ public class TrialServiceTests
         Assert.NotNull(continuedTrial);
         Assert.Equal(initialTrial.TrialStart, continuedTrial.TrialStart);
         Assert.Equal(initialTrial.TrialEnd, continuedTrial.TrialEnd);
-        Assert.Equal(3, Math.Ceiling((continuedTrial.TrialEnd - now).TotalDays));
+        Assert.Equal(10, Math.Ceiling((continuedTrial.TrialEnd - now).TotalDays));
         await Assert.ThrowsAsync<TrialAlreadyUsedException>(() => reinstalledService.StartTrialAsync(localTrialId, deviceIdentifier));
         Directory.Delete(directory, recursive: true);
     }

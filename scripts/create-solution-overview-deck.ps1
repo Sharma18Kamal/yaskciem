@@ -159,7 +159,7 @@ try {
 
     # 6. Current implementation
     $slide = Add-BaseSlide $presentation '#F6F4EC' 'What the repository says works today' '05 / Current documented implementation' 6 'Sources: README.md; docs/cloud/provider-execution.md; docs/licensing/licensing.md'
-    Add-Card $slide 0.72 1.72 5.75 3.72 'In the documented desktop build' 'WPF desktop shell; local SQLite inventory, rules, and findings; provider-filtered views; read-only CLI discovery for Azure, AWS, and GCP; Azure Entra identities and PIM schedules; JSON report export; seven-day local trial.' '#72B7A1'
+    Add-Card $slide 0.72 1.72 5.75 3.72 'In the documented desktop build' 'WPF desktop shell; local SQLite inventory, rules, and findings; provider-filtered views; read-only CLI discovery for Azure, AWS, and GCP; Azure Entra identities and PIM schedules; JSON report export; fourteen-day local trial.' '#72B7A1'
     Add-Card $slide 6.82 1.72 5.75 3.72 'Architecture already has dedicated modules' 'Normalization, Effective Access, Access Path, Risk Engine, Recommendations, Remediation Planning, Identity Governance, Compliance, Analytics, Monitoring, and more. Module presence is not the same as production validation.' '#D8EF72'
     Add-Rect $slide 0.72 5.8 11.9 0.58 '#F5E8BC' $true '#F5E8BC' | Out-Null
     Add-Text $slide 0.95 5.95 11.3 0.27 'Readiness caveat: the provider guide claims broader scan behavior than the README summary. Verify against a live tenant before making release claims.' 11 '#493E27' 'Aptos' $true | Out-Null
@@ -167,7 +167,7 @@ try {
     # 7. Boundaries and readiness
     $slide = Add-BaseSlide $presentation '#F6F4EC' 'Clear safety boundaries; a few release gaps remain' '06 / Boundaries and readiness' 7 'Sources: README.md; docs/licensing/licensing.md; docs/architecture/architecture.md; CloudEntitle.Desktop.csproj'
     Add-Card $slide 0.72 1.72 5.75 2.0 'Safety posture' 'Current provider scans are read-only. Credentials are not persisted in the domain model. Missing or unauthenticated CLIs should be reported rather than silently treated as empty inventory.' '#72B7A1'
-    Add-Card $slide 6.82 1.72 5.75 2.0 'License enforcement' 'The seven-day trial is local and explicitly not tamper-proof. Remote validation/activation support exists in parts, but the desktop flow is not integrated.' '#F07D5D'
+    Add-Card $slide 6.82 1.72 5.75 2.0 'License enforcement' 'The fourteen-day trial is local and explicitly not tamper-proof. Remote validation/activation support exists in parts, but the desktop flow is not integrated.' '#F07D5D'
     Add-Card $slide 0.72 4.02 5.75 1.72 'Framework target' 'Desktop project targets net9.0-windows; the project brief states .NET 10. Align target framework and CI before production release.' '#D8EF72'
     Add-Card $slide 6.82 4.02 5.75 1.72 'Evidence of readiness' 'Validate end-to-end scans against real cloud tenants, provider permissions, incomplete-data behavior, and exported findings.' '#72B7A1'
 

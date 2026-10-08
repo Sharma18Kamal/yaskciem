@@ -14,7 +14,7 @@
                     <TextBlock Text="Cloud identity exposure management" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Border Style="{StaticResource StatusPill}" ToolTip="Seven-day local trial status. The trial continues across app reinstalls on this Windows installation."><TextBlock Text="{Binding TrialStatusText}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
+                    <Border Style="{StaticResource StatusPill}" ToolTip="Fourteen-day local trial status. The trial continues across app reinstalls on this Windows installation."><TextBlock Text="{Binding TrialStatusText}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
                     <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" IsEnabled="{Binding IsTrialActive}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
                     <Button Content="{Binding DisconnectCloudButtonLabel}" Command="{Binding OpenCloudDisconnectCommand}" IsEnabled="{Binding CanDisconnectCloud}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Disconnect the active CLI or cancel a pending sign-in"/>
                     <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNavigationItem}" IsEnabled="{Binding IsTrialActive}" Style="{StaticResource QuietButton}" Margin="12,0,0,0" ToolTip="Open application settings"/>

@@ -8,7 +8,7 @@ This repository was initialized from the project brief in `CIEM-COmpact-prompt.d
 - Read-only discovery and analysis in v1
 - WPF desktop client using .NET 10, MVVM, EF Core, SQLite, and Serilog
 - Clean Architecture with provider-specific adapters and a shared normalization/risk model
-- Local seven-day trial enforcement bound to a stable Windows device identifier, with no email or username prompt
+- Local fourteen-day trial enforcement bound to a stable Windows device identifier, with no email or username prompt
 - JSON and CSV report export from the persisted findings database
 
 ## Current implementation
@@ -50,4 +50,4 @@ For installation instructions for released Windows packages, see [Install YASK-C
 4. Build with `dotnet build src/CloudEntitle.Desktop/CloudEntitle.Desktop.csproj`.
 5. Test with `dotnet test CloudEntitle.sln`.
 
-On first launch, the desktop app starts a seven-day trial and shows the remaining days in the header. The trial continues from its saved start time when the app is reinstalled under the same Windows account and Windows installation. Trial status is rechecked every 30 seconds; after expiry, cloud and workspace options are disabled without deleting local data. Trial state is local at `%LOCALAPPDATA%\YASK-CIEM\trial-state.json` and is not tamper-proof. Production release still requires remote HTTPS license validation and validation against real cloud tenants. No cloud write operations are performed by the current adapters.
+On first launch, the desktop app starts a fourteen-day trial and shows the remaining days in the header. The trial continues from its saved start time when the app is reinstalled under the same Windows account and Windows installation. Trial status is rechecked every 30 seconds; after expiry, cloud and workspace options are disabled without deleting local data. Trial state is local at `%LOCALAPPDATA%\YASK-CIEM\trial-state.json` and is not tamper-proof. Production release still requires remote HTTPS license validation and validation against real cloud tenants. No cloud write operations are performed by the current adapters.
