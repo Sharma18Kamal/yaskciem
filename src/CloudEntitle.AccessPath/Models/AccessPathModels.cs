@@ -21,7 +21,9 @@ public sealed record AccessPathRequest(
     Guid? EffectiveAccessId = null,
     Guid? PrincipalId = null,
     Guid? ResourceId = null,
-    IReadOnlyList<ResourceSecuritySignal>? ResourceSecuritySignals = null);
+    IReadOnlyList<ResourceSecuritySignal>? ResourceSecuritySignals = null,
+    IReadOnlyList<ResourceSecurityEvidenceCoverage>? ResourceSecurityCoverage = null,
+    DateTime? EvaluatedAt = null);
 
 public sealed record AccessPathDiagnostic(string Code, string Message, Guid? PathId = null);
 public sealed record AccessPathStatistics(int TotalPaths, int CompletePaths, int PartialPaths, int UnknownPaths, int UnsupportedPaths, int DirectPaths, int GroupPaths, int InheritedPaths, int ConditionalPaths);

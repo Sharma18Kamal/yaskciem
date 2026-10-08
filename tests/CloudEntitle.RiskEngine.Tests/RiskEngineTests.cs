@@ -185,23 +185,89 @@ public sealed class RiskEngineTests
     {
         var fixture = FixtureData.Create(action: "storage.read", resource: "production-resource", privileged: true, external: true, identityType: IdentityType.ServiceAccount);
         var resourceId = fixture.Effective.ResourceId!.Value;
-        var signals = new[]
-        {
-            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.PublicExposure, "Public endpoint", "Cloud inventory", RiskSeverity.High),
-            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.SensitiveData, "Restricted customer data", "Data catalog", RiskSeverity.High),
-            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.WorkloadVulnerability, "CVE-2026-1234", "Scanner", RiskSeverity.Critical, IsExploitable: true, CvssScore: 9.8)
-        };
+        var observedAt = DateTime.UtcNow;
+        fixture.Request.Principals[0].UpdatedAt = observedAt;
+        fixture.Effective.CalculatedAt = observedAt;
+        var signals = CreateCurrentRiskSignals(resourceId, observedAt);
 
-        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request with { ResourceSecuritySignals = signals });
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request with
+        {
+            ResourceSecuritySignals = signals,
+            ResourceSecurityCoverage = CompleteResourceCoverage(resourceId, observedAt)
+        });
 
         var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-017"));
         Assert.Equal(100, finding.PriorityScore);
         Assert.Equal(RiskSeverity.Critical, finding.Severity);
+        Assert.Equal(RiskEvaluationState.Confirmed, finding.EvaluationState);
         Assert.Equal(fixture.Request.AccessPaths[0].Id, finding.AccessPathId);
         Assert.Contains("PublicExposure", finding.Evidence.Summary, StringComparison.Ordinal);
         Assert.Contains("SensitiveData", finding.Evidence.Summary, StringComparison.Ordinal);
+        Assert.Contains("CriticalAsset", finding.Evidence.Summary, StringComparison.Ordinal);
         Assert.Contains("CVE-2026-1234", finding.Evidence.Summary, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task StaleSignalsAndPaths_ShouldLowerPriorityAndRemainPotential()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "production-resource", privileged: true, external: true, identityType: IdentityType.ServiceAccount);
+        var resourceId = fixture.Effective.ResourceId!.Value;
+        var now = DateTime.UtcNow;
+        var staleAt = now.AddDays(-60);
+        fixture.Request.Principals[0].UpdatedAt = staleAt;
+        fixture.Effective.CalculatedAt = staleAt;
+        var stalePath = fixture.Request.AccessPaths[0];
+        stalePath.CreatedAt = staleAt;
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request with
+        {
+            EvaluatedAt = now,
+            ResourceSecuritySignals = CreateCurrentRiskSignals(resourceId, staleAt),
+            ResourceSecurityCoverage = CompleteResourceCoverage(resourceId, staleAt)
+        });
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-017"));
+        Assert.True(finding.PriorityScore < 100);
+        Assert.Equal(RiskEvaluationState.Potential, finding.EvaluationState);
+        Assert.Contains("Stale", finding.Evidence.Summary, StringComparison.Ordinal);
+        Assert.Equal("Stale", finding.Evidence.Details["AccessPathFreshness"]);
+    }
+
+    [Fact]
+    public async Task MissingResourceCoverage_ShouldBeVisibleAndReducePriority()
+    {
+        var fixture = FixtureData.Create(action: "storage.read", resource: "production-resource", privileged: true, external: true, identityType: IdentityType.ServiceAccount);
+        var resourceId = fixture.Effective.ResourceId!.Value;
+        var now = DateTime.UtcNow;
+        fixture.Request.Principals[0].UpdatedAt = now;
+        fixture.Effective.CalculatedAt = now;
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request with
+        {
+            EvaluatedAt = now,
+            ResourceSecuritySignals = CreateCurrentRiskSignals(resourceId, now),
+            ResourceSecurityCoverage = Array.Empty<ResourceSecurityEvidenceCoverage>()
+        });
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-017"));
+        Assert.True(finding.PriorityScore < 100);
+        Assert.Equal(RiskEvaluationState.Unknown, finding.EvaluationState);
+        Assert.Contains("EvidenceCoverage=", finding.Evidence.Summary, StringComparison.Ordinal);
+        Assert.Contains("CriticalAsset=Unknown", finding.Evidence.Details["EvidenceCoverage"], StringComparison.Ordinal);
+    }
+
+    private static IReadOnlyList<ResourceSecuritySignal> CreateCurrentRiskSignals(Guid resourceId, DateTime observedAt)
+        => new[]
+        {
+            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.PublicExposure, "Public endpoint", "Cloud inventory", RiskSeverity.High, ObservedAtUtc: observedAt),
+            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.SensitiveData, "Restricted customer data", "Data catalog", RiskSeverity.High, ObservedAtUtc: observedAt),
+            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.WorkloadVulnerability, "CVE-2026-1234", "Scanner", RiskSeverity.Critical, IsExploitable: true, CvssScore: 9.8, ObservedAtUtc: observedAt),
+            new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.CriticalAsset, "Crown-jewel database", "Asset inventory", RiskSeverity.Critical, ObservedAtUtc: observedAt)
+        };
+
+    private static IReadOnlyList<ResourceSecurityEvidenceCoverage> CompleteResourceCoverage(Guid resourceId, DateTime observedThroughUtc)
+        => Enum.GetValues<ResourceSecuritySignalType>()
+            .Select(type => new ResourceSecurityEvidenceCoverage(resourceId, type, SecurityEvidenceCoverageStatus.Complete, observedThroughUtc, "Source query completed."))
+            .ToArray();
 
     [Fact]
     public async Task SecuritySignalsOnUnrelatedResource_ShouldNotCreateAttackPathFinding()
@@ -251,7 +317,7 @@ public sealed class RiskEngineTests
             var entitlement = new NormalizedEntitlement(Guid.NewGuid(), CloudProvider.Aws, account.Id, principal.Id, resourceEntity.Id, role.Id, null, permission.Id, new NormalizedScope(CloudProvider.Aws, NormalizedScopeType.Account, "arn:aws:iam::demo", null, null, false), AssignmentType.Policy, NormalizedAccessType.Allow, true, false, false, null, NormalizationStatus.Normalized, evidence, DateTime.UtcNow, null, resourceName);
             var effective = new DomainEffectiveAccess { Id = Guid.NewGuid(), Provider = CloudProvider.Aws, CloudAccountId = account.Id, PrincipalId = principal.Id, ResourceId = resourceEntity.Id, PermissionId = permission.Id, RoleId = role.Id, Decision = AccessDecision.Allow, EvaluationStatus = EvaluationStatus.FullyEvaluated, AssignmentType = AssignmentType.Policy, IsDirect = true, IsPrivileged = privileged };
             var normalized = new NormalizationResult(new[] { principal }, new[] { role }, Array.Empty<CloudPolicy>(), new[] { permission }, new[] { entitlement }, Array.Empty<NormalizationWarning>(), Array.Empty<string>(), new(1, 1, 0, 0, 0));
-            var path = new DomainAccessPath { Id = Guid.NewGuid(), Provider = CloudProvider.Aws, CloudAccountId = account.Id, PrincipalId = principal.Id, ResourceId = resourceEntity.Id, EffectiveAccessId = effective.Id, PathType = AccessPathType.PolicyBased, PathStatus = AccessPathStatus.Complete, Nodes = Enumerable.Range(0, 3).Select(index => new AccessPathNode { Id = Guid.NewGuid(), NodeType = index == 0 ? "Principal" : index == 1 ? "Policy" : "Resource", Name = index == 0 ? principal.Name : index == 1 ? "DemoPolicy" : resourceEntity.Name, Sequence = index }).ToList() };
+            var path = new DomainAccessPath { Id = Guid.NewGuid(), Provider = CloudProvider.Aws, CloudAccountId = account.Id, PrincipalId = principal.Id, ResourceId = resourceEntity.Id, EffectiveAccessId = effective.Id, PathType = AccessPathType.PolicyBased, PathStatus = AccessPathStatus.Complete, CreatedAt = DateTime.UtcNow, Nodes = Enumerable.Range(0, 3).Select(index => new AccessPathNode { Id = Guid.NewGuid(), NodeType = index == 0 ? "Principal" : index == 1 ? "Policy" : "Resource", Name = index == 0 ? principal.Name : index == 1 ? "DemoPolicy" : resourceEntity.Name, Sequence = index }).ToList() };
             return new(new RiskEvaluationRequest(new[] { account }, new[] { principal }, new[] { resourceEntity }, new[] { role }, Array.Empty<CloudPolicy>(), new[] { permission }, new[] { entitlement }, new[] { effective }, new[] { path }, Array.Empty<ActivityRecord>()), effective);
         }
     }

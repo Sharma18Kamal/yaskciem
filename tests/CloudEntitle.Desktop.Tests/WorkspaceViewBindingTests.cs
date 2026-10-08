@@ -69,4 +69,42 @@ public sealed class WorkspaceViewBindingTests
             (string?)button.Attribute("Content") == "Connect to Jira"
             && ((string?)button.Attribute("IsEnabled"))?.Contains("CanConnectToJira", StringComparison.Ordinal) == true);
     }
+
+    [Fact]
+    public void SearchFields_ShouldAllUseTheSharedSearchIconTemplate()
+    {
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var workspace = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+        var app = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "App.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var searchFields = workspace.Descendants(presentation + "TextBox")
+            .Where(textBox => ((string?)textBox.Attribute("Text"))?.Contains("SearchText", StringComparison.Ordinal) == true)
+            .ToArray();
+        Assert.NotEmpty(searchFields);
+        Assert.All(searchFields, textBox => Assert.Equal("{StaticResource SearchBox}", (string?)textBox.Attribute("Style")));
+
+        var searchStyle = Assert.Single(app.Descendants(presentation + "Style"),
+            style => (string?)style.Attribute(xaml + "Key") == "SearchBox");
+        Assert.Contains(searchStyle.Descendants(presentation + "TextBlock"), icon =>
+            ((string?)icon.Attribute("Text"))?.Contains("\uE721", StringComparison.Ordinal) == true
+            && (string?)icon.Attribute("IsHitTestVisible") == "False");
+    }
+
+    [Fact]
+    public void DashboardScanProgress_ShouldBeIndeterminateAndFollowScanState()
+    {
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+
+        var progress = Assert.Single(document.Descendants(presentation + "ProgressBar"));
+        Assert.Equal("True", (string?)progress.Attribute("IsIndeterminate"));
+        Assert.Contains(progress.Descendants(presentation + "DataTrigger"), trigger =>
+            (string?)trigger.Attribute("Binding") == "{Binding IsScanning}"
+            && (string?)trigger.Attribute("Value") == "True"
+            && trigger.Descendants(presentation + "Setter").Any(setter =>
+                (string?)setter.Attribute("Property") == "Visibility" && (string?)setter.Attribute("Value") == "Visible"));
+    }
 }

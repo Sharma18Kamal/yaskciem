@@ -22,7 +22,7 @@ public abstract class RiskRuleBase : IRiskRule
     protected static CloudPermission? Permission(RiskRuleContext context, Guid id) => context.Request.Permissions.FirstOrDefault(item => item.Id == id);
     protected static CloudResource? Resource(RiskRuleContext context, Guid? id) => id.HasValue ? context.Request.Resources.FirstOrDefault(item => item.Id == id) : null;
     protected static NormalizedEntitlement? Entitlement(RiskRuleContext context, DomainEffectiveAccess access) => context.Request.Entitlements.FirstOrDefault(item => item.PrincipalId == access.PrincipalId && item.PermissionId == access.PermissionId);
-    protected RiskFindingModel Finding(RiskRuleContext context, DomainEffectiveAccess access, RiskEvaluationState state, string title, string description, string evidence, Guid? pathId = null, int priorityScore = 0, RiskSeverity? severity = null)
+    protected RiskFindingModel Finding(RiskRuleContext context, DomainEffectiveAccess access, RiskEvaluationState state, string title, string description, string evidence, Guid? pathId = null, int priorityScore = 0, RiskSeverity? severity = null, IReadOnlyDictionary<string, string>? evidenceDetails = null)
     {
         var principal = Principal(context, access.PrincipalId);
         var resource = Resource(context, access.ResourceId);
@@ -33,7 +33,7 @@ public abstract class RiskRuleBase : IRiskRule
         var ruleGuid = Stable(RuleId);
         return new RiskFindingModel
         {
-            Id = Stable(fingerprint), RuleId = ruleGuid, CloudProvider = provider, CloudAccountId = access.CloudAccountId, PrincipalId = access.PrincipalId, ResourceId = access.ResourceId, EffectiveAccessId = access.Id, AccessPathId = pathId, PermissionId = access.PermissionId, Severity = severity ?? DefaultSeverity, Status = FindingStatus.Open, Category = Category, EvaluationState = state, PriorityScore = priorityScore, RuleVersion = "1.0", Fingerprint = fingerprint, Title = title, Description = description, Evidence = new RiskEvidence($"Principal={principal?.Name ?? "unknown"}; Resource={resource?.Name ?? "unknown"}; Permission={permission?.Name ?? "unknown"}; {evidence}"), CreatedAt = now, UpdatedAt = now, DetectedAt = now, LastEvaluatedAt = now
+            Id = Stable(fingerprint), RuleId = ruleGuid, CloudProvider = provider, CloudAccountId = access.CloudAccountId, PrincipalId = access.PrincipalId, ResourceId = access.ResourceId, EffectiveAccessId = access.Id, AccessPathId = pathId, PermissionId = access.PermissionId, Severity = severity ?? DefaultSeverity, Status = FindingStatus.Open, Category = Category, EvaluationState = state, PriorityScore = priorityScore, RuleVersion = "1.0", Fingerprint = fingerprint, Title = title, Description = description, Evidence = new RiskEvidence($"Principal={principal?.Name ?? "unknown"}; Resource={resource?.Name ?? "unknown"}; Permission={permission?.Name ?? "unknown"}; {evidence}", evidenceDetails), CreatedAt = now, UpdatedAt = now, DetectedAt = now, LastEvaluatedAt = now
         };
     }
 
@@ -205,42 +205,85 @@ public sealed class ExploitableAttackPathRule : RiskRuleBase
             if (principal is null || resource is null || path is null) continue;
 
             var signals = (context.Request.ResourceSecuritySignals ?? Array.Empty<ResourceSecuritySignal>())
-                .Where(signal => signal.ResourceId == resource.Id && signal.IsConfirmed).ToArray();
+                .Where(signal => signal.ResourceId == resource.Id).ToArray();
             var publicSignals = signals.Where(signal => signal.Type == ResourceSecuritySignalType.PublicExposure).ToArray();
             var sensitiveSignals = signals.Where(signal => signal.Type == ResourceSecuritySignalType.SensitiveData).ToArray();
             var vulnerabilities = signals.Where(signal => signal.Type == ResourceSecuritySignalType.WorkloadVulnerability).ToArray();
+            var criticalSignals = signals.Where(signal => signal.Type == ResourceSecuritySignalType.CriticalAsset).ToArray();
             var publicTag = HasTagValue(resource, new[] { "PubliclyAccessible", "InternetFacing", "PublicAccess", "Exposure" }, new[] { "true", "yes", "public", "internet", "internet-facing" });
-            var sensitiveTag = HasTagValue(resource, new[] { "Sensitivity", "DataClassification", "Criticality" }, new[] { "sensitive", "confidential", "restricted", "high", "critical", "tier0" });
+            var sensitiveTag = HasTagValue(resource, new[] { "Sensitivity", "DataClassification" }, new[] { "sensitive", "confidential", "restricted", "high", "critical", "tier0" });
+            var criticalTag = HasTagValue(resource, new[] { "CriticalAsset", "BusinessCriticality", "Criticality", "AssetTier" }, new[] { "true", "yes", "critical", "tier0", "crown-jewel", "crown jewel" });
             var isNonHuman = principal.IdentityType is IdentityType.ServiceAccount or IdentityType.ServicePrincipal or IdentityType.ManagedIdentity or IdentityType.Application;
             var permissionAction = Permission(context, access.PermissionId)?.Action ?? string.Empty;
             var isDangerous = permissionAction.Contains("admin", StringComparison.OrdinalIgnoreCase)
                 || permissionAction.Contains("write", StringComparison.OrdinalIgnoreCase)
                 || permissionAction.Contains("delete", StringComparison.OrdinalIgnoreCase);
             var hasRiskyIdentity = access.IsPrivileged || principal.IsPrivileged || principal.IsExternal || isNonHuman || isDangerous;
-            var hasRiskyResource = publicSignals.Length > 0 || sensitiveSignals.Length > 0 || vulnerabilities.Length > 0 || publicTag || sensitiveTag;
+            var publicWeight = Math.Max(SignalWeight(publicSignals, context), TagWeight(publicTag, resource.UpdatedAt, context));
+            var sensitiveWeight = Math.Max(SignalWeight(sensitiveSignals, context), TagWeight(sensitiveTag, resource.UpdatedAt, context));
+            var criticalWeight = Math.Max(SignalWeight(criticalSignals, context), TagWeight(criticalTag, resource.UpdatedAt, context));
+            var vulnerabilityWeight = SignalWeight(vulnerabilities, context);
+            var hasRiskyResource = publicWeight > 0 || sensitiveWeight > 0 || criticalWeight > 0 || vulnerabilityWeight > 0;
             if (!hasRiskyIdentity || !hasRiskyResource) continue;
 
-            var vulnerabilityScore = vulnerabilities.Select(VulnerabilityPoints).DefaultIfEmpty(0).Max();
+            var vulnerabilityScore = vulnerabilities.Select(signal => (int)Math.Round(VulnerabilityPoints(signal) * SignalConfidence(signal, context))).DefaultIfEmpty(0).Max();
             var points = (access.IsPrivileged || principal.IsPrivileged ? 25 : 0)
                 + (principal.IsExternal ? 20 : 0)
                 + (isNonHuman ? 20 : 0)
                 + (isDangerous ? 10 : 0)
-                + (publicSignals.Length > 0 || publicTag ? 25 : 0)
-                + (sensitiveSignals.Length > 0 || sensitiveTag ? 20 : 0)
+                + (int)Math.Round(25 * publicWeight)
+                + (int)Math.Round(20 * sensitiveWeight)
+                + (int)Math.Round(25 * criticalWeight)
                 + vulnerabilityScore
                 + (path.PathStatus == AccessPathStatus.Complete ? 10 : path.PathStatus == AccessPathStatus.Partial ? 4 : 0);
-            var score = Math.Min(100, points);
+            var coverageStatus = Enum.GetValues<ResourceSecuritySignalType>()
+                .ToDictionary(type => type, type => CoverageFreshness(type, resource.Id, context));
+            var signalFreshness = signals.Select(signal => $"{signal.Type}:{SignalFreshness(signal, context)}").ToArray();
+            var identityFreshness = DateFreshness(principal.UpdatedAt, context);
+            var accessFreshness = DateFreshness(access.CalculatedAt, context);
+            var pathFreshness = DateFreshness(path.CreatedAt, context);
+            var missingCoveragePenalty = coverageStatus.Values.Count(status => status != "Current") * 6;
+            var staleSignalPenalty = signalFreshness.Count(status => status.EndsWith(":Stale", StringComparison.Ordinal)) * 5;
+            var identityAccessFreshnessPenalty = new[] { identityFreshness, accessFreshness }.Sum(status => status switch { "Current" => 0, "Stale" => 8, _ => 4 });
+            var pathFreshnessPenalty = pathFreshness == "Current" ? 0 : pathFreshness == "Stale" ? 8 : 4;
+            var score = Math.Max(0, Math.Min(100, points) - missingCoveragePenalty - staleSignalPenalty - identityAccessFreshnessPenalty - pathFreshnessPenalty);
             if (score < 30) continue;
 
             var severity = score >= 80 ? RiskSeverity.Critical : score >= 60 ? RiskSeverity.High : score >= 40 ? RiskSeverity.Medium : RiskSeverity.Low;
-            var state = path.PathStatus == AccessPathStatus.Complete && !publicTag && !sensitiveTag
-                ? RiskEvaluationState.Confirmed
-                : RiskEvaluationState.Potential;
-            var signalSummary = string.Join("; ", signals.Select(signal => $"{signal.Type}={signal.Name} from {signal.Source}"));
+            var allEvidenceCurrent = path.PathStatus == AccessPathStatus.Complete
+                && pathFreshness == "Current"
+                && identityFreshness == "Current"
+                && accessFreshness == "Current"
+                && signalFreshness.All(status => status.EndsWith(":Current", StringComparison.Ordinal))
+                && coverageStatus.Values.All(status => status == "Current");
+            var hasStaleEvidence = pathFreshness == "Stale"
+                || identityFreshness == "Stale"
+                || accessFreshness == "Stale"
+                || signalFreshness.Any(status => status.EndsWith(":Stale", StringComparison.Ordinal))
+                || coverageStatus.Values.Any(status => status == "Stale");
+            var state = allEvidenceCurrent ? RiskEvaluationState.Confirmed
+                : hasStaleEvidence || coverageStatus.Values.Any(status => status is "Partial" or "Unavailable")
+                    ? RiskEvaluationState.Potential
+                    : RiskEvaluationState.Unknown;
+            var signalSummary = string.Join("; ", signals.Select(signal => $"{signal.Type}={signal.Name} from {signal.Source} ({SignalFreshness(signal, context)})"));
             var identitySummary = $"IdentityType={principal.IdentityType}; Privileged={access.IsPrivileged || principal.IsPrivileged}; External={principal.IsExternal}";
-            var evidence = $"PriorityScore={score}; {identitySummary}; PublicExposure={publicSignals.Length > 0 || publicTag}; SensitiveAsset={sensitiveSignals.Length > 0 || sensitiveTag}; VulnerabilityPoints={vulnerabilityScore}; PathStatus={path.PathStatus}; Signals={signalSummary}";
+            var coverageSummary = string.Join(", ", coverageStatus.Select(item => $"{item.Key}={item.Value}"));
+            var evidence = $"PriorityScore={score}; {identitySummary}; IdentityProfileFreshness={identityFreshness}; EffectiveAccessFreshness={accessFreshness}; PublicExposure={publicWeight > 0}; SensitiveAsset={sensitiveWeight > 0}; CriticalAsset={criticalWeight > 0}; VulnerabilityPoints={vulnerabilityScore}; PathStatus={path.PathStatus}; ModeledAccessPathFreshness={pathFreshness}; EvidenceCoverage={coverageSummary}; Signals={signalSummary}";
+            var evidenceDetails = new Dictionary<string, string>
+            {
+                ["IdentityType"] = principal.IdentityType.ToString(),
+                ["EffectiveAccessDecision"] = access.Decision.ToString(),
+                ["EffectiveAccessEvaluation"] = access.EvaluationStatus.ToString(),
+                ["IdentityProfileFreshness"] = identityFreshness,
+                ["EffectiveAccessFreshness"] = accessFreshness,
+                ["AccessPath"] = "Modeled from effective-access evidence; not observed attacker activity.",
+                ["AccessPathStatus"] = path.PathStatus.ToString(),
+                ["AccessPathFreshness"] = pathFreshness,
+                ["EvidenceCoverage"] = coverageSummary,
+                ["EvidenceFreshness"] = string.Join(", ", signalFreshness)
+            };
             findings.Add(Finding(context, access, state, Name,
-                "A risky identity can reach an exposed, sensitive, or vulnerable workload resource.", evidence, path.Id, score, severity));
+                "A risky identity can reach a critical, exposed, sensitive, or vulnerable resource.", evidence, path.Id, score, severity, evidenceDetails));
         }
 
         return Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(findings);
@@ -252,6 +295,49 @@ public sealed class ExploitableAttackPathRule : RiskRuleBase
         if (signal.CvssScore >= 9) return 30;
         if (signal.CvssScore >= 7) return 22;
         return signal.Severity switch { RiskSeverity.Critical => 28, RiskSeverity.High => 18, RiskSeverity.Medium => 10, _ => 4 };
+    }
+
+    private static double SignalWeight(IEnumerable<ResourceSecuritySignal> signals, RiskRuleContext context)
+        => signals.Select(signal => SignalConfidence(signal, context)).DefaultIfEmpty(0).Max();
+
+    private static double SignalConfidence(ResourceSecuritySignal signal, RiskRuleContext context)
+    {
+        var freshness = SignalFreshness(signal, context);
+        var confidence = freshness switch { "Current" => 1.0, "Stale" => 0.45, _ => 0.65 };
+        return signal.IsConfirmed ? confidence : confidence * 0.5;
+    }
+
+    private static double TagWeight(bool present, DateTime? observedAtUtc, RiskRuleContext context)
+        => !present ? 0 : DateFreshness(observedAtUtc, context) switch
+        {
+            "Current" => 1.0,
+            "Stale" => 0.45,
+            _ => 0.65
+        };
+
+    private static string SignalFreshness(ResourceSecuritySignal signal, RiskRuleContext context)
+    {
+        if (!signal.IsConfirmed || signal.ObservedAtUtc is null) return "Unknown";
+        return DateFreshness(signal.ObservedAtUtc.Value, context);
+    }
+
+    private static string CoverageFreshness(ResourceSecuritySignalType type, Guid resourceId, RiskRuleContext context)
+    {
+        var coverage = context.Request.ResourceSecurityCoverage?
+            .Where(item => item.ResourceId == resourceId && item.SignalType == type)
+            .OrderByDescending(item => item.ObservedThroughUtc)
+            .FirstOrDefault();
+        if (coverage is null) return "Unknown";
+        if (coverage.Status != SecurityEvidenceCoverageStatus.Complete) return coverage.Status.ToString();
+        return DateFreshness(coverage.ObservedThroughUtc, context);
+    }
+
+    private static string DateFreshness(DateTime? observedAtUtc, RiskRuleContext context)
+    {
+        if (observedAtUtc is null || observedAtUtc.Value == default || observedAtUtc.Value.ToUniversalTime() > context.EvaluatedAt.ToUniversalTime().AddMinutes(5)) return "Unknown";
+        return context.EvaluatedAt.ToUniversalTime() - observedAtUtc.Value.ToUniversalTime() <= TimeSpan.FromDays(Math.Max(1, context.Options.EvidenceFreshnessWindowDays))
+            ? "Current"
+            : "Stale";
     }
 
     private static bool HasTagValue(CloudResource resource, IReadOnlyList<string> keys, IReadOnlyList<string> acceptedValues)

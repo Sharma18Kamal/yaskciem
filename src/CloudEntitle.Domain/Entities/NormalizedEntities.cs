@@ -118,8 +118,18 @@ public enum ResourceSecuritySignalType
 {
     PublicExposure,
     SensitiveData,
-    WorkloadVulnerability
+    WorkloadVulnerability,
+    CriticalAsset
 }
+
+public enum SecurityEvidenceCoverageStatus { Complete, Partial, Unavailable, Unsupported, Unknown }
+
+public sealed record ResourceSecurityEvidenceCoverage(
+    Guid ResourceId,
+    ResourceSecuritySignalType SignalType,
+    SecurityEvidenceCoverageStatus Status,
+    DateTime ObservedThroughUtc,
+    string? Details = null);
 
 public sealed record ResourceSecuritySignal(
     Guid ResourceId,
@@ -130,7 +140,8 @@ public sealed record ResourceSecuritySignal(
     bool IsConfirmed = true,
     bool IsExploitable = false,
     double? CvssScore = null,
-    string? Details = null);
+    string? Details = null,
+    DateTime? ObservedAtUtc = null);
 
 public class ActivityRecord
 {

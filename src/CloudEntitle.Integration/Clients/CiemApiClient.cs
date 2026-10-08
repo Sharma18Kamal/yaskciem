@@ -17,4 +17,7 @@ public sealed class CiemApiClient
 
     public async Task<ApiEnvelope<IReadOnlyList<ProviderCapabilityDto>>?> GetProvidersAsync(CancellationToken cancellationToken = default) =>
         await _httpClient.GetFromJsonAsync<ApiEnvelope<IReadOnlyList<ProviderCapabilityDto>>>("api/v1/providers", cancellationToken);
+
+    public async Task<ApiEnvelope<ApiIdentityDto>?> GetIdentityAsync(CancellationToken cancellationToken = default) =>
+        await _httpClient.GetFromJsonAsync<ApiEnvelope<ApiIdentityDto>>("api/v1/identity", cancellationToken);
 }

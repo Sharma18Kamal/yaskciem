@@ -630,6 +630,31 @@ public sealed class NavigationTests
         }
     }
 
+    [Fact]
+    public async Task RiskFindings_ShouldOrderRowsByQualityAdjustedPriority()
+    {
+        var highPriority = new RiskFindingModel
+        {
+            Id = Guid.NewGuid(), RuleId = Guid.NewGuid(), CloudProvider = CloudProvider.Azure,
+            CloudAccountId = Guid.NewGuid(), PrincipalId = Guid.NewGuid(), Severity = RiskSeverity.High,
+            Title = "Fresh, high-priority finding", Evidence = new RiskEvidence("Complete current evidence"), PriorityScore = 78
+        };
+        var lowerPriority = new RiskFindingModel
+        {
+            Id = Guid.NewGuid(), RuleId = Guid.NewGuid(), CloudProvider = CloudProvider.Aws,
+            CloudAccountId = Guid.NewGuid(), PrincipalId = Guid.NewGuid(), Severity = RiskSeverity.Critical,
+            Title = "Stale, lower-priority finding", Evidence = new RiskEvidence("Stale evidence"), PriorityScore = 42
+        };
+        var snapshot = new DemoSnapshot(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(),
+            Array.Empty<Entitlement>(), Array.Empty<CloudEntitle.Domain.Entities.EffectiveAccess>(), new[] { lowerPriority, highPriority },
+            Array.Empty<RecommendationModel>(), Array.Empty<Scan>());
+        var viewModel = new RiskFindingsViewModel(new SnapshotDemoDataService(snapshot));
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(new[] { "Fresh, high-priority finding", "Stale, lower-priority finding" }, viewModel.Findings.Select(item => item.Title));
+    }
+
     private sealed class NoopDemoDataService : IDemoDataService
     {
         public event EventHandler? DataChanged { add { } remove { } }

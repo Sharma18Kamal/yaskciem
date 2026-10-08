@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Identity.Web" Version="4.16.0" />
     <ProjectReference Include="..\CloudEntitle.Licensing\CloudEntitle.Licensing.csproj" />
     <ProjectReference Include="..\CloudEntitle.Integration\CloudEntitle.Integration.csproj" />
     <ProjectReference Include="..\CloudEntitle.Security\CloudEntitle.Security.csproj" />

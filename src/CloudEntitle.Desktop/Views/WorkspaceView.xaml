@@ -14,6 +14,18 @@
                 <TextBlock Grid.Column="4" Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxWidth="180" MaxHeight="48" ToolTip="Cloud CLI connection status"/>
                 <ComboBox Grid.Column="5" ItemsSource="{Binding ComplianceFrameworks}" SelectedItem="{Binding SelectedComplianceFramework, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="145" Margin="8,0,0,0" ToolTip="Compliance framework for the exported evidence bundle"/>
                 <Button Grid.Column="6" Content="Export evidence bundle" Command="{Binding ExportComplianceBundleCommand}" IsEnabled="{Binding CanExportComplianceBundle}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Export organization-scoped controls, evidence, gaps, and assessment metadata"/>
+            <ProgressBar Height="4" IsIndeterminate="True" Background="{StaticResource LineBrush}" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,14" ToolTip="Scan in progress">
+                <ProgressBar.Style>
+                    <Style TargetType="ProgressBar">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsScanning}" Value="True">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ProgressBar.Style>
+            </ProgressBar>
                 <TextBlock Grid.Column="7" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
             </Grid>
             <Expander Header="{Binding AccountSelectionMessage}" IsExpanded="False" Margin="0,0,0,14">

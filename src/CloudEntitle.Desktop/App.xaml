@@ -64,7 +64,34 @@
         <Style x:Key="MetricCard" TargetType="Border"><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="20"/><Setter Property="Margin" Value="0,0,14,14"/></Style>
         <Style x:Key="SectionCard" TargetType="Border" BasedOn="{StaticResource MetricCard}"><Setter Property="Margin" Value="0,0,0,14"/></Style>
         <Style x:Key="EmptyStateCard" TargetType="Border" BasedOn="{StaticResource MetricCard}"><Setter Property="MinHeight" Value="220"/><Setter Property="Padding" Value="40"/></Style>
-        <Style x:Key="SearchBox" TargetType="TextBox"><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/><Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/><Setter Property="Padding" Value="12,9"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
+        <Style x:Key="SearchBox" TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="MinHeight" Value="38"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TextBox}">
+                        <Border x:Name="SearchBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <Grid>
+                                <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource MutedBrush}" Width="16" Margin="12,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                <ScrollViewer x:Name="PART_ContentHost" Margin="36,5,10,5" VerticalAlignment="Stretch"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="SearchBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="SearchBorder" Property="Opacity" Value="0.6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="DataGrid"><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/><Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/><Setter Property="RowBackground" Value="{StaticResource PanelBrush}"/><Setter Property="AlternatingRowBackground" Value="{StaticResource WindowBrush}"/><Setter Property="GridLinesVisibility" Value="Horizontal"/><Setter Property="HorizontalGridLinesBrush" Value="{StaticResource LineBrush}"/><Setter Property="CanUserAddRows" Value="False"/></Style>
         <Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="{StaticResource SidebarBrush}"/><Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/><Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/><Setter Property="Padding" Value="8,7"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
         <DataTemplate DataType="{x:Type vm:WorkspaceViewModel}"><views:WorkspaceView/></DataTemplate>

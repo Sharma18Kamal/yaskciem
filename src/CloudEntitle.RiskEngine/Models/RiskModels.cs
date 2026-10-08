@@ -21,9 +21,10 @@ public sealed record RiskEvaluationRequest(
     DateTime? EvaluatedAt = null,
     RiskRuleOptions? Options = null,
     IReadOnlyList<ActivityEvidenceCoverage>? ActivityCoverage = null,
-    IReadOnlyList<ResourceSecuritySignal>? ResourceSecuritySignals = null);
+    IReadOnlyList<ResourceSecuritySignal>? ResourceSecuritySignals = null,
+    IReadOnlyList<ResourceSecurityEvidenceCoverage>? ResourceSecurityCoverage = null);
 
-public sealed record RiskRuleOptions(int DormancyDays = 90, int MaxPathDepth = 5, bool RequireProductionTag = true, IReadOnlySet<string>? EnabledRules = null, int UsageObservationDays = 30)
+public sealed record RiskRuleOptions(int DormancyDays = 90, int MaxPathDepth = 5, bool RequireProductionTag = true, IReadOnlySet<string>? EnabledRules = null, int UsageObservationDays = 30, int EvidenceFreshnessWindowDays = 30)
 {
     public bool IsEnabled(string ruleId) => EnabledRules == null || EnabledRules.Contains(ruleId);
 }

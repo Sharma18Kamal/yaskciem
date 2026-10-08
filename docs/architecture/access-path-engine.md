@@ -31,7 +31,7 @@ flowchart TD
 
 Paths contain typed nodes for principals, groups, nested groups, roles, policies, permissions, conditions, scopes, and resources. Edges preserve relationships such as `MemberOf`, `AssignedRole`, `AssignedPolicy`, `GrantsPermission`, `ConditionApplies`, `ScopedAt`, and `AppliesTo`. Every node and edge carries an evidence reference where available.
 
-The engine supports all known paths or the shortest complete path. Duplicate logical paths are removed deterministically. Traversal depth, node count, path count, and operation limits prevent graph explosion. Group traversal uses visited sets and cannot recurse indefinitely through circular memberships.
+The engine supports all known paths or the shortest complete path. Duplicate logical paths are removed deterministically. Traversal depth, node count, path count, and operation limits prevent graph explosion. Group traversal uses visited sets and cannot recurse indefinitely through circular memberships. Resource evidence nodes include public exposure, sensitive data, workload vulnerabilities, and critical assets. Unconfirmed signals and unavailable/partial coverage are retained as explicit graph nodes with status/freshness metadata rather than omitted.
 
 ## Decision and Evidence
 
@@ -47,4 +47,4 @@ Kubernetes workload traces add Pod/Deployment → ServiceAccount → Kubernetes 
 
 `AccessPath`, `AccessPathNode`, and `AccessPathEdge` are relationally persisted with provider, principal, resource, permission, effective-access, status, and path-type indexes. Evidence and diagnostics are retained as JSON/text metadata. The engine builds adjacency lookups in memory and does not access cloud APIs.
 
-The current milestone intentionally defers advanced WPF graph visualization, full AssumeRole resolution where trust evidence is incomplete, and risk/recommendation calculations.
+The graph is modeled from effective-access evidence, not observed attacker activity. Provider scan adapters do not yet populate the optional resource-security signal/coverage inputs. Advanced WPF rendering, full AssumeRole resolution where trust evidence is incomplete, and feeding live provider signals into the risk engine remain deferred.

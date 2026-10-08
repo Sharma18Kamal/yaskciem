@@ -44,6 +44,31 @@ public sealed class AccessPathEngineTests
     }
 
     [Fact]
+    public async Task UnconfirmedSignalsAndUnknownCoverage_ShouldRemainVisibleInPathEvidence()
+    {
+        var fixture = FixtureData.Create(AssignmentType.Direct, inherited: false);
+        var now = DateTime.UtcNow;
+        var request = fixture.Request with
+        {
+            EvaluatedAt = now,
+            ResourceSecuritySignals = new[]
+            {
+                new ResourceSecuritySignal(fixture.Resource.Id, ResourceSecuritySignalType.CriticalAsset, "Tier zero data store", "Asset inventory", RiskSeverity.High, IsConfirmed: false)
+            },
+            ResourceSecurityCoverage = new[]
+            {
+                new ResourceSecurityEvidenceCoverage(fixture.Resource.Id, ResourceSecuritySignalType.PublicExposure, SecurityEvidenceCoverageStatus.Unavailable, now, "Source connector is unavailable.")
+            }
+        };
+
+        var result = await new AccessPathEngine().BuildAsync(request);
+        var path = Assert.Single(result.Paths);
+
+        Assert.Contains(path.Nodes, node => node.NodeType == "CriticalAsset" && node.Metadata!.Contains("Confirmed=False", StringComparison.Ordinal));
+        Assert.Contains(path.Nodes, node => node.NodeType == "EvidenceCoverage" && node.Metadata!.Contains("Unavailable", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NestedGroupPath_ShouldPreserveAllGroupsAndAvoidCircularTraversal()
     {
         var fixture = FixtureData.Create(AssignmentType.Group, inherited: false);

@@ -1391,7 +1391,10 @@ public sealed class RiskFindingsViewModel : WorkspaceViewModel
             rows = rows.Concat((_liveCloudScanService?.CurrentResult?.Findings ?? Array.Empty<CloudEntitle.Domain.RiskFinding>()).Select(item => new RiskFindingGridRow(
                 item.CloudProvider.ToString(), item.Severity.ToString(), item.Title,
                 item.Principal, item.Resource, item.Evidence, item.Recommendation)));
-            return rows.Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Severity, row.Title, row.Principal, row.Resource, row.Evidence, row.Recommendation)).ToArray();
+            return rows.Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Severity, row.Title, row.Principal, row.Resource, row.Evidence, row.Recommendation))
+                .OrderByDescending(row => row.PriorityScore)
+                .ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
     }
     public bool HasResults => Findings.Count > 0;

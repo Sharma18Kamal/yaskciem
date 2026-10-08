@@ -66,6 +66,7 @@ public sealed class AccessPathEngine : IAccessPathEngine
     private static DomainAccessPath BuildPath(DomainEffectiveAccess effective, NormalizedEntitlement entitlement, CloudResource resource, IReadOnlyList<Guid> groups, AccessPathRequest request, List<AccessPathDiagnostic> diagnostics)
     {
         var provider = effective.Provider;
+        var evaluatedAt = request.EvaluatedAt ?? DateTime.UtcNow;
         var pathId = Stable($"path|{effective.Id}|{entitlement.Id}|{string.Join(',', groups)}");
         var nodes = new List<AccessPathNode>();
         var edges = new List<AccessPathEdge>();
@@ -85,19 +86,23 @@ public sealed class AccessPathEngine : IAccessPathEngine
         if (entitlement.IsConditional && entitlement.Condition != null) AddNode("Condition", null, entitlement.Condition.Expression ?? "Condition requires evaluation", entitlement.Evidence.SourceId);
         AddNode("Scope", null, entitlement.Scope.OriginalScope, entitlement.Evidence.SourceId);
         AddNode("Resource", resource.Id, resource.Name, resource.ResourceId);
-        foreach (var signal in (request.ResourceSecuritySignals ?? Array.Empty<ResourceSecuritySignal>()).Where(item => item.ResourceId == resource.Id && item.IsConfirmed))
+        foreach (var signal in (request.ResourceSecuritySignals ?? Array.Empty<ResourceSecuritySignal>()).Where(item => item.ResourceId == resource.Id))
         {
             var nodeType = signal.Type switch
             {
                 ResourceSecuritySignalType.PublicExposure => "PublicExposure",
                 ResourceSecuritySignalType.SensitiveData => "SensitiveData",
                 ResourceSecuritySignalType.WorkloadVulnerability => "WorkloadVulnerability",
+                ResourceSecuritySignalType.CriticalAsset => "CriticalAsset",
                 _ => "ResourceSignal"
             };
-            AddNode(nodeType, null, signal.Name, signal.Source, $"Severity={signal.Severity}; Exploitable={signal.IsExploitable}; CVSS={signal.CvssScore?.ToString() ?? "not reported"}; {signal.Details}");
+            AddNode(nodeType, null, signal.Name, signal.Source, $"Severity={signal.Severity}; Confirmed={signal.IsConfirmed}; ObservedAt={signal.ObservedAtUtc?.ToString("O") ?? "unknown"}; Freshness={EvidenceFreshness(signal.ObservedAtUtc, evaluatedAt)}; Exploitable={signal.IsExploitable}; CVSS={signal.CvssScore?.ToString() ?? "not reported"}; {signal.Details}");
         }
 
-        var path = new DomainAccessPath { Id = pathId, Provider = provider, CloudAccountId = effective.CloudAccountId, PrincipalId = effective.PrincipalId, ResourceId = resource.Id, TargetResourceId = resource.Id, PermissionId = effective.PermissionId, EffectiveAccessId = effective.Id, PathType = pathType, PathStatus = status, Description = Explain(effective, nodes), Evidence = JsonSerializer.Serialize(entitlement.Evidence), EngineVersion = "0.1.0", CreatedAt = DateTime.UtcNow, Nodes = nodes, Edges = edges };
+        foreach (var coverage in (request.ResourceSecurityCoverage ?? Array.Empty<ResourceSecurityEvidenceCoverage>()).Where(item => item.ResourceId == resource.Id))
+            AddNode("EvidenceCoverage", null, $"{coverage.SignalType} coverage: {coverage.Status}", "Security evidence coverage", $"Status={coverage.Status}; ObservedThrough={coverage.ObservedThroughUtc:O}; Freshness={EvidenceFreshness(coverage.ObservedThroughUtc, evaluatedAt)}; {coverage.Details}");
+
+        var path = new DomainAccessPath { Id = pathId, Provider = provider, CloudAccountId = effective.CloudAccountId, PrincipalId = effective.PrincipalId, ResourceId = resource.Id, TargetResourceId = resource.Id, PermissionId = effective.PermissionId, EffectiveAccessId = effective.Id, PathType = pathType, PathStatus = status, Description = Explain(effective, nodes), Evidence = JsonSerializer.Serialize(entitlement.Evidence), EngineVersion = "0.1.0", CreatedAt = evaluatedAt, Nodes = nodes, Edges = edges };
         if (nodes.Count > request.MaxNodesPerPath) { path.PathStatus = AccessPathStatus.Partial; diagnostics.Add(new("AP-002", "Maximum nodes per path reached.", path.Id)); path.Nodes = path.Nodes.Take(request.MaxNodesPerPath).ToList(); path.Edges = path.Edges.Where(edge => path.Nodes.Any(node => node.Id == edge.FromNodeId) && path.Nodes.Any(node => node.Id == edge.ToNodeId)).ToList(); }
         return path;
 
@@ -149,6 +154,11 @@ public sealed class AccessPathEngine : IAccessPathEngine
     }
 
     private static string Relationship(string from, string to) => to switch { "Group" or "NestedGroup" => "MemberOf", "Role" => "AssignedRole", "Policy" => "AssignedPolicy", "Permission" => "GrantsPermission", "Condition" => "ConditionApplies", "Scope" => "ScopedAt", "Resource" => "AppliesTo", "PublicExposure" => "ExposedTo", "SensitiveData" => "ContainsSensitiveData", "WorkloadVulnerability" => "AffectedBy", _ => "DerivedFrom" };
+    private static string EvidenceFreshness(DateTime? observedAt, DateTime evaluatedAt)
+    {
+        if (observedAt is null || observedAt.Value == default || observedAt.Value.ToUniversalTime() > evaluatedAt.ToUniversalTime().AddMinutes(5)) return "Unknown";
+        return evaluatedAt.ToUniversalTime() - observedAt.Value.ToUniversalTime() <= TimeSpan.FromDays(30) ? "Current" : "Stale";
+    }
     private static string PathSignature(DomainAccessPath path) => string.Join('|', path.Nodes.OrderBy(node => node.Sequence).Select(node => $"{node.NodeType}:{node.NodeId}"));
     private static string Explain(DomainEffectiveAccess effective, IReadOnlyList<AccessPathNode> nodes) => $"Effective decision {effective.Decision} for {string.Join(" -> ", nodes.Select(node => node.Name))}.";
     private static Guid Stable(string value) => GuidUtility.Create(GuidUtility.Namespace, value);
