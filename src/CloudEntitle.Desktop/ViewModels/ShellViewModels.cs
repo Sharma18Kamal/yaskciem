@@ -1544,7 +1544,8 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
                 .Select(item => new RecommendationGridRow(
                     null, "Risk remediation", item.Title, item.CloudProvider.ToString(), "Review required", "New",
                     item.Permission, item.Recommendation, item.Severity.ToString(), "Impact not evaluated", "Live finding requires a normalized recommendation before policy review.", item.Evidence));
-            Recommendations = rows.Concat(live).ToArray();
+            var usageRecommendations = BuildAwsUnusedRoleRecommendations(_liveCloudScanService?.CurrentResult, SearchText);
+            Recommendations = rows.Concat(live).Concat(usageRecommendations).ToArray();
             if (SelectedRecommendation is not null && !Recommendations.Contains(SelectedRecommendation)) SelectedRecommendation = null;
             OnPropertyChanged(nameof(Recommendations));
             OnPropertyChanged(nameof(HasResults));
@@ -1557,6 +1558,86 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
         {
             IsLoading = false;
         }
+    }
+
+    private static IReadOnlyList<RecommendationGridRow> BuildAwsUnusedRoleRecommendations(LiveCloudScanResult? scan, string searchText)
+    {
+        if (scan is null) return Array.Empty<RecommendationGridRow>();
+        var cutoff = scan.CompletedAt.ToUniversalTime().AddDays(-90);
+        var roleUsageRecords = scan.EffectiveAccessRecords
+            .Where(item => item.Provider.Equals("Aws", StringComparison.OrdinalIgnoreCase)
+                && item.AssignmentType.Equals("Role usage", StringComparison.OrdinalIgnoreCase)
+                && item.UsageHistoryComplete == true
+                && item.UsageHistoryDays >= 90)
+            .ToArray();
+        var recommendations = new List<RecommendationGridRow>();
+        foreach (var roleUsage in roleUsageRecords)
+        {
+            if (roleUsage.LastUsedAt.HasValue && roleUsage.LastUsedAt.Value.ToUniversalTime() > cutoff) continue;
+            var coverage = scan.Coverage.FirstOrDefault(item => item.Provider.Equals("Aws", StringComparison.OrdinalIgnoreCase)
+                && item.DataSource.EndsWith(": AWS IAM role last-used", StringComparison.OrdinalIgnoreCase)
+                && item.DataSource.Contains(roleUsage.AccountId ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+                && item.Status == ScanCoverageStatus.Collected);
+            if (coverage is null) continue;
+
+            var attachedGrants = scan.EffectiveAccessRecords
+                .Where(item => item.Provider.Equals("Aws", StringComparison.OrdinalIgnoreCase)
+                    && item.AssignmentType != "Role usage"
+                    && string.Equals(item.AccountId, roleUsage.AccountId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.Principal, roleUsage.Principal, StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.Role)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (attachedGrants.Length == 0) continue;
+
+            var inactivityDays = roleUsage.LastUsedAt.HasValue
+                ? Math.Max(0, (int)(scan.CompletedAt.ToUniversalTime() - roleUsage.LastUsedAt.Value.ToUniversalTime()).TotalDays)
+                : roleUsage.UsageHistoryDays!.Value;
+            var title = $"Review unused AWS IAM role: {roleUsage.Principal}";
+            var current = $"Role={roleUsage.Principal}; grants={string.Join(", ", attachedGrants)}";
+            var suggested = "Review removing or disabling this role and its attached grants.";
+            var evidence = JsonSerializer.Serialize(new
+            {
+                provider = "AWS",
+                source = roleUsage.UsageEvidenceSource ?? "AWS IAM ListRoles.RoleLastUsed",
+                role = roleUsage.Principal,
+                roleLastUsedAtUtc = roleUsage.LastUsedAt,
+                availableHistoryDays = roleUsage.UsageHistoryDays,
+                inactivityDays,
+                coverageStatus = coverage.Status.ToString(),
+                coverageDetails = coverage.Details,
+                attachedGrants,
+                limitation = "Role-level evidence only; does not prove individual action or resource use. Validate external trust and business ownership before removal."
+            });
+            if (!WorkspaceDataFormatting.Matches(searchText, "AWS", title, current, suggested, evidence)) continue;
+
+            var model = new RecommendationModel
+            {
+                Id = Guid.NewGuid(),
+                RiskFindingId = Guid.NewGuid(),
+                RecommendationType = RecommendationType.RemoveUnusedRole,
+                Provider = CloudProvider.Aws,
+                Title = title,
+                Description = "AWS IAM RoleLastUsed reports no role use during the 90-day review threshold.",
+                CurrentState = current,
+                SuggestedState = suggested,
+                Reason = $"Provider-reported role-level usage is complete for up to {roleUsage.UsageHistoryDays} days; inactivity is at least 90 days.",
+                Evidence = evidence,
+                EvaluationState = RiskEvaluationState.Confirmed,
+                ImpactState = RecommendationImpactState.RequiresReview,
+                Impact = "Impact=RequiresReview",
+                Priority = 1,
+                Status = RecommendationStatus.New,
+                Fingerprint = $"AWS|{roleUsage.AccountId}|{roleUsage.Principal}|{roleUsage.LastUsedAt:O}|{string.Join(",", attachedGrants)}",
+                CreatedAt = scan.CompletedAt,
+                UpdatedAt = scan.CompletedAt
+            };
+            recommendations.Add(new RecommendationGridRow(model, "AWS IAM usage", model.Title, "AWS", "Confirmed", "New", current, suggested,
+                "Review", model.Impact, model.Reason, evidence));
+        }
+
+        return recommendations.OrderBy(item => item.Title, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 }
 

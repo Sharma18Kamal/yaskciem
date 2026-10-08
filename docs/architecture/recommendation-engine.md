@@ -33,6 +33,8 @@ Modular rules cover unused permissions, wildcard narrowing, scope narrowing, bro
 
 Each recommendation stores before/after state, impact state, provider, principal/resource, risk finding, effective access, access path, entitlement, provider evidence, evaluation state, lifecycle status, and a deterministic fingerprint. Exact duplicates are removed within an evaluation and the stable fingerprint supports future cross-scan reconciliation.
 
+The desktop currently adds an AWS-specific, review-only unused-role recommendation from IAM `RoleLastUsed` metadata when scan coverage is complete, an attached grant is present, and the role has no reported use during the 90-day review threshold. AWS exposes at most 400 days of role-level history; evidence includes the source and limitation. This does not identify unused individual actions or resource-level permission use. Azure Activity Log data in this build reflects RBAC changes, not complete permission-use telemetry; GCP Cloud Audit Logs are not ingested. Those providers remain `Unsupported` for usage-based recommendations rather than treating missing events as proof of unused access.
+
 Provider proposal adapters produce non-executable Azure, AWS, and GCP review proposals. Approved is not Implemented; actual implementation belongs to a future remediation workflow with verification and user confirmation.
 
 The desktop Policy Draft Workbench presents the stored current/proposed state, impact assessment, rationale, and evidence. It can export a JSON review draft marked `executable=false` and `approvalRequired=true`. Live findings without a normalized recommendation are not exportable as policy drafts. The workbench does not apply changes or claim an exact provider authorization simulation.

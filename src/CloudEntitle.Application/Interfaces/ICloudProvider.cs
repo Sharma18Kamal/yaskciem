@@ -67,7 +67,19 @@ public interface ICloudEffectiveAccessProvider
     Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default);
 }
 
-public sealed record CloudEffectiveAccessAssignment(string Principal, string Role, string Scope, string Source, bool IsPrivileged, string AssignmentType = "Assigned", DateTime? LastUsedAt = null, DateTime? LastChangedAt = null, string? LastChangedBy = null);
+public sealed record CloudEffectiveAccessAssignment(
+    string Principal,
+    string Role,
+    string Scope,
+    string Source,
+    bool IsPrivileged,
+    string AssignmentType = "Assigned",
+    DateTime? LastUsedAt = null,
+    DateTime? LastChangedAt = null,
+    string? LastChangedBy = null,
+    bool? UsageHistoryComplete = null,
+    int? UsageHistoryDays = null,
+    string? UsageEvidenceSource = null);
 
 public interface ICloudOrganizationProvider
 {

@@ -242,7 +242,28 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     {
                         var access = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Effective access", () => accessProvider.DiscoverEffectiveAccessAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
                         effectiveAccessRecords.AddRange(access.Select(item => new LiveEffectiveAccessRecord(
-                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, account.ExternalAccountId ?? account.SubscriptionId ?? account.ProjectId ?? account.Id.ToString())));
+                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, account.ExternalAccountId ?? account.SubscriptionId ?? account.ProjectId ?? account.Id.ToString(), item.UsageHistoryComplete, item.UsageHistoryDays, item.UsageEvidenceSource)));
+                        if (provider.ProviderType == CloudProviderType.Aws)
+                        {
+                            var roleUsage = access.Where(item => item.AssignmentType.Equals("Role usage", StringComparison.OrdinalIgnoreCase)).ToArray();
+                            var effectiveCoverage = coverage.LastOrDefault(item => item.Provider == provider.ProviderType.ToString()
+                                && item.DataSource == $"{scanScope}: Effective access");
+                            var roleUsageStatus = effectiveCoverage is null ? ScanCoverageStatus.Unavailable
+                                : effectiveCoverage.Status != ScanCoverageStatus.Collected ? effectiveCoverage.Status
+                                : roleUsage.All(item => item.UsageHistoryComplete == true) ? ScanCoverageStatus.Collected
+                                : ScanCoverageStatus.Partial;
+                            coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), $"{scanScope}: AWS IAM role last-used", roleUsageStatus, roleUsage.Length,
+                                "AWS IAM ListRoles.RoleLastUsed; role-level activity only, with at most 400 days of history. This does not prove individual actions or resource usage."));
+                            coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), $"{scanScope}: AWS action-level usage", ScanCoverageStatus.Unsupported, 0,
+                                "Per-action/resource CloudTrail events are not yet normalized into permission usage."));
+                        }
+                        else
+                        {
+                            coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), $"{scanScope}: permission usage", ScanCoverageStatus.Unsupported, 0,
+                                provider.ProviderType == CloudProviderType.Azure
+                                    ? "The current Azure Activity Log integration reports RBAC changes, not complete permission-use telemetry."
+                                    : "GCP Cloud Audit Logs are not yet ingested for permission-use analysis."));
+                        }
                     }
                     else
                     {

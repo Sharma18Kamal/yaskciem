@@ -102,6 +102,11 @@ public class AwsProviderTests
 
             Assert.Contains(findings, finding => finding.Title.Contains("ExternalAccess", StringComparison.Ordinal));
             Assert.Contains(assignments, assignment => assignment.AssignmentType == "Role usage" && assignment.LastUsedAt.HasValue);
+            var unusedRole = Assert.Single(assignments, assignment => assignment.AssignmentType == "Role usage" && assignment.Principal == "UnusedDemoRole");
+            Assert.Null(unusedRole.LastUsedAt);
+            Assert.True(unusedRole.UsageHistoryComplete);
+            Assert.Equal(400, unusedRole.UsageHistoryDays);
+            Assert.Contains("no role use", unusedRole.Source, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(assignments, assignment => assignment.Principal == "demo-user" && assignment.Role == "ReadOnlyAccess" && assignment.LastChangedAt.HasValue && assignment.LastChangedBy == "arn:aws:iam::123456789012:user/auditor" && assignment.Source.Contains("CloudTrail", StringComparison.Ordinal));
             Assert.Contains("Console password used", Assert.Single(users).LastActivity!);
         }
@@ -129,7 +134,7 @@ public class AwsProviderTests
                     : arguments.Contains("list-findings-v2")
                         ? "{\"findings\":[{\"status\":\"ACTIVE\",\"findingType\":\"ExternalAccess\",\"resource\":\"arn:aws:s3:::private-bucket\",\"resourceType\":\"AWS::S3::Bucket\",\"principal\":{\"AWS\":\"*\"},\"createdAt\":\"2026-01-01T00:00:00Z\"}]}"
                         : arguments.Contains("get-account-authorization-details")
-                    ? "{\"UserDetailList\":[{\"UserName\":\"demo-user\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"UserPolicyList\":[{\"UserPolicyName\":\"InlineRead\"}]}],\"GroupDetailList\":[],\"RoleDetailList\":[{\"RoleName\":\"DemoRole\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"RolePolicyList\":[],\"RoleLastUsed\":{\"LastUsedDate\":\"2026-10-01T12:00:00Z\",\"Region\":\"us-east-1\"}}]}"
+                    ? "{\"UserDetailList\":[{\"UserName\":\"demo-user\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"UserPolicyList\":[{\"UserPolicyName\":\"InlineRead\"}]}],\"GroupDetailList\":[],\"RoleDetailList\":[{\"RoleName\":\"DemoRole\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"RolePolicyList\":[],\"RoleLastUsed\":{\"LastUsedDate\":\"2026-10-01T12:00:00Z\",\"Region\":\"us-east-1\"}},{\"RoleName\":\"UnusedDemoRole\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"RolePolicyList\":[],\"RoleLastUsed\":{}}]}"
                     : arguments.Contains("sts")
                     ? "{\"Account\":\"123456789012\",\"Arn\":\"arn:aws:iam::123456789012:user/demo\"}"
                     : arguments.Contains("list-users")

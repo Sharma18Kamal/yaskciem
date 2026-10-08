@@ -256,20 +256,30 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
             if (!document.RootElement.TryGetProperty("RoleDetailList", out var roles) || roles.ValueKind != JsonValueKind.Array) return;
             foreach (var role in roles.EnumerateArray())
             {
-                if (!role.TryGetProperty("RoleLastUsed", out var lastUsed)
-                    || !lastUsed.TryGetProperty("LastUsedDate", out var lastUsedDate)
-                    || lastUsedDate.ValueKind != JsonValueKind.String
-                    || !DateTime.TryParse(lastUsedDate.GetString(), out var parsedDate)) continue;
+                var hasUsageHistory = role.TryGetProperty("RoleLastUsed", out var lastUsed) && lastUsed.ValueKind == JsonValueKind.Object;
+                DateTime? lastUsedAt = null;
+                if (hasUsageHistory && lastUsed.TryGetProperty("LastUsedDate", out var lastUsedDate)
+                    && lastUsedDate.ValueKind == JsonValueKind.String
+                    && DateTime.TryParse(lastUsedDate.GetString(), out var parsedDate))
+                    lastUsedAt = DateTime.SpecifyKind(parsedDate, DateTimeKind.Utc);
                 var roleName = role.TryGetProperty("RoleName", out var name) ? name.GetString() ?? "IAM role" : "IAM role";
-                var region = lastUsed.TryGetProperty("Region", out var regionValue) ? regionValue.GetString() : null;
+                var region = hasUsageHistory && lastUsed.TryGetProperty("Region", out var regionValue) ? regionValue.GetString() : null;
+                var usageDetails = lastUsedAt.HasValue
+                    ? $"AWS IAM role last used {lastUsedAt:O}{(string.IsNullOrWhiteSpace(region) ? string.Empty : $" in {region}")}."
+                    : hasUsageHistory
+                        ? "AWS IAM reports no role use within the available 400-day RoleLastUsed history."
+                        : "AWS did not return RoleLastUsed metadata for this role.";
                 assignments.Add(new CloudEffectiveAccessAssignment(
                     roleName,
                     roleName,
                     "AWS account",
-                    string.IsNullOrWhiteSpace(region) ? "AWS IAM role usage" : $"AWS IAM role usage in {region}",
+                    $"AWS IAM RoleLastUsed; {usageDetails}",
                     roleName.Contains("Administrator", StringComparison.OrdinalIgnoreCase),
                     "Role usage",
-                    DateTime.SpecifyKind(parsedDate, DateTimeKind.Utc)));
+                    lastUsedAt,
+                    UsageHistoryComplete: hasUsageHistory,
+                    UsageHistoryDays: 400,
+                    UsageEvidenceSource: "AWS IAM ListRoles.RoleLastUsed"));
             }
         }
 

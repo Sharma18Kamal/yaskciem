@@ -15,7 +15,10 @@ public sealed record LiveEffectiveAccessRecord(
     DateTime? LastUsedAt = null,
     DateTime? LastChangedAt = null,
     string? LastChangedBy = null,
-    string? AccountId = null);
+    string? AccountId = null,
+    bool? UsageHistoryComplete = null,
+    int? UsageHistoryDays = null,
+    string? UsageEvidenceSource = null);
 
 public enum PostureChangeType { Added, Removed, Changed }
 
