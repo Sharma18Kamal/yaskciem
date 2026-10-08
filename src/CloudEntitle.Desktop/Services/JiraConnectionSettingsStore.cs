@@ -19,12 +19,14 @@ public enum TicketingProvider
 }
 
 public sealed record TicketingProviderOption(TicketingProvider Provider, string DisplayName);
+public sealed record TicketingProviderConfiguration(string UserName = "", string ProjectKey = "", string RequestType = "", string WebhookUrl = "");
 
 public sealed record JiraConnectionSettings(
     string BaseUrl,
     string ServiceNowBaseUrl = "",
     TicketingProvider SelectedProvider = TicketingProvider.Jira,
-    IReadOnlyDictionary<TicketingProvider, string>? ProviderUrls = null)
+    IReadOnlyDictionary<TicketingProvider, string>? ProviderUrls = null,
+    IReadOnlyDictionary<TicketingProvider, TicketingProviderConfiguration>? ProviderConfigurations = null)
 {
     public string GetBaseUrl(TicketingProvider provider)
     {
@@ -82,13 +84,15 @@ public sealed class LocalJiraConnectionSettingsStore : IJiraConnectionSettingsSt
                 urls[TicketingProvider.Jira] = NormalizeBaseUrl(settings.BaseUrl);
             if (!urls.ContainsKey(TicketingProvider.ServiceNow) && !string.IsNullOrWhiteSpace(settings.ServiceNowBaseUrl))
                 urls[TicketingProvider.ServiceNow] = NormalizeBaseUrl(settings.ServiceNowBaseUrl);
+            var providerConfigurations = NormalizeProviderConfigurations(settings.ProviderConfigurations);
 
             return settings with
             {
                 BaseUrl = urls.GetValueOrDefault(TicketingProvider.Jira, string.Empty),
                 ServiceNowBaseUrl = urls.GetValueOrDefault(TicketingProvider.ServiceNow, string.Empty),
                 SelectedProvider = provider,
-                ProviderUrls = urls
+                ProviderUrls = urls,
+                ProviderConfigurations = providerConfigurations
             };
         }
         catch (JsonException exception)
@@ -125,7 +129,8 @@ public sealed class LocalJiraConnectionSettingsStore : IJiraConnectionSettingsSt
             BaseUrl = urls.GetValueOrDefault(TicketingProvider.Jira, string.Empty),
             ServiceNowBaseUrl = urls.GetValueOrDefault(TicketingProvider.ServiceNow, string.Empty),
             SelectedProvider = Enum.IsDefined(settings.SelectedProvider) ? settings.SelectedProvider : TicketingProvider.Jira,
-            ProviderUrls = urls
+            ProviderUrls = urls,
+            ProviderConfigurations = NormalizeProviderConfigurations(settings.ProviderConfigurations)
         };
         var directory = Path.GetDirectoryName(_filePath);
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
@@ -152,6 +157,19 @@ public sealed class LocalJiraConnectionSettingsStore : IJiraConnectionSettingsSt
 
     private static string NormalizeOptionalBaseUrl(string? value)
         => string.IsNullOrWhiteSpace(value) ? string.Empty : NormalizeBaseUrl(value);
+
+    private static IReadOnlyDictionary<TicketingProvider, TicketingProviderConfiguration> NormalizeProviderConfigurations(
+        IReadOnlyDictionary<TicketingProvider, TicketingProviderConfiguration>? configurations)
+    {
+        if (configurations is null) return new Dictionary<TicketingProvider, TicketingProviderConfiguration>();
+        return configurations.Where(pair => Enum.IsDefined(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value with
+        {
+            UserName = pair.Value.UserName?.Trim() ?? string.Empty,
+            ProjectKey = pair.Value.ProjectKey?.Trim() ?? string.Empty,
+            RequestType = pair.Value.RequestType?.Trim() ?? string.Empty,
+            WebhookUrl = NormalizeOptionalBaseUrl(pair.Value.WebhookUrl)
+        });
+    }
 
     public static string NormalizeBaseUrl(string value)
     {

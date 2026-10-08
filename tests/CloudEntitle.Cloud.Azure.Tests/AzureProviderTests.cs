@@ -131,6 +131,20 @@ public class AzureProviderTests
     }
 
     [Fact]
+    public async Task AzureProvider_ShouldPreserveResourceTagsForSecuritySignalMapping()
+    {
+        var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);
+        var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+        var resource = Assert.Single(await provider.GetResourcesAsync(account.Id));
+
+        Assert.Equal("true", resource.Tags["PubliclyAccessible"]);
+        Assert.Equal("confidential", resource.Tags["DataClassification"]);
+        Assert.Equal("Enabled", resource.Tags["PublicNetworkAccess"]);
+        Assert.Equal("Allow", resource.Tags["NetworkDefaultAction"]);
+    }
+
+    [Fact]
     public async Task AzureProvider_ShouldHonorCancellation()
     {
         var provider = new AzureProvider(new FakeCommandRunner(), useLiveDiscovery: true);
@@ -146,6 +160,8 @@ public class AzureProviderTests
     {
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
+            if (arguments[0] == "resource" && arguments.Contains("list"))
+                return Task.FromResult(new CloudCommandResult(0, "[{\"id\":\"/subscriptions/subscription-001/resourceGroups/rg-prod/providers/Microsoft.Storage/storageAccounts/data\",\"name\":\"data\",\"type\":\"Microsoft.Storage/storageAccounts\",\"tags\":{\"PubliclyAccessible\":\"true\",\"DataClassification\":\"confidential\"},\"properties\":{\"publicNetworkAccess\":\"Enabled\",\"allowBlobPublicAccess\":true,\"networkAcls\":{\"defaultAction\":\"Allow\"}}}]", string.Empty));
             if (arguments.Contains("activity-log"))
             {
                 if (denyActivityLog) return Task.FromResult(new CloudCommandResult(1, string.Empty, "Authorization failed."));

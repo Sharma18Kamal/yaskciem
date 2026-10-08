@@ -20,16 +20,16 @@ public abstract class RecommendationRuleBase : IRecommendationRule
     protected static string Resource(RecommendationContext context, Guid? id) => context.Resources.FirstOrDefault(item => item.Id == id)?.Name ?? "unknown";
     protected static string Permission(RecommendationContext context, Guid? id) => context.Permissions.FirstOrDefault(item => item.Id == id)?.Name ?? "unknown";
     protected static DomainAccessPath? Path(RecommendationContext context, RiskFindingModel finding) => context.AccessPaths.FirstOrDefault(path => path.Id == finding.AccessPathId || path.EffectiveAccessId == finding.EffectiveAccessId);
-    protected RecommendationModel Create(RecommendationContext context, RiskFindingModel finding, string title, string description, string current, string recommended, string reason, RecommendationImpactState impact, Guid? pathId = null)
+    protected RecommendationModel Create(RecommendationContext context, RiskFindingModel finding, string title, string description, string current, string recommended, string reason, RecommendationImpactState impact, Guid? pathId = null, string? originalProviderObject = null, NormalizedEntitlement? sourceEntitlement = null)
     {
-        var entitlement = Entitlement(context, finding);
+        var entitlement = sourceEntitlement ?? Entitlement(context, finding);
         var path = pathId.HasValue ? context.AccessPaths.FirstOrDefault(item => item.Id == pathId) : Path(context, finding);
         var state = finding.EvaluationState == RiskEvaluationState.Confirmed && entitlement != null && finding.EffectiveAccessId.HasValue ? RiskEvaluationState.Confirmed : finding.EvaluationState == RiskEvaluationState.Unknown ? RiskEvaluationState.Unknown : RiskEvaluationState.Potential;
         var coverage = context.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == finding.CloudAccountId && item.Provider == finding.CloudProvider);
         var activityEvidence = coverage is null
             ? "Unavailable: no provider/account activity coverage record."
             : $"{coverage.Status}; Window={coverage.ObservedFromUtc:O}..{coverage.ObservedThroughUtc:O}; Records={coverage.RecordCount}; {coverage.Details ?? "No additional details."}";
-        var evidence = new RecommendationEvidence(finding.Id, finding.EffectiveAccessId, path?.Id, entitlement?.Id, finding.CloudProvider, "RiskFinding", finding.Fingerprint, finding.Title, Name(context, finding.PrincipalId), Resource(context, finding.ResourceId), Permission(context, finding.PermissionId), entitlement?.Scope.OriginalScope ?? "unknown", entitlement?.AssignmentType.ToString() ?? "unknown", finding.Evidence.Summary, activityEvidence, $"EffectiveAccess={finding.EffectiveAccessId}; AccessPath={path?.Id}; Entitlement={entitlement?.Id}", finding.Evidence.Summary);
+        var evidence = new RecommendationEvidence(finding.Id, finding.EffectiveAccessId, path?.Id, entitlement?.Id, finding.CloudProvider, "RiskFinding", finding.Fingerprint, finding.Title, Name(context, finding.PrincipalId), Resource(context, finding.ResourceId), Permission(context, finding.PermissionId), entitlement?.Scope.OriginalScope ?? "unknown", entitlement?.AssignmentType.ToString() ?? "unknown", finding.Evidence.Summary, activityEvidence, $"EffectiveAccess={finding.EffectiveAccessId}; AccessPath={path?.Id}; Entitlement={entitlement?.Id}", originalProviderObject ?? finding.Evidence.Summary);
         var fingerprint = string.Join('|', finding.CloudProvider, finding.CloudAccountId, finding.PrincipalId, finding.ResourceId, finding.EffectiveAccessId, path?.Id, finding.Id, RecommendationType);
         return new RecommendationModel
         {
@@ -43,6 +43,7 @@ public abstract class RecommendationRuleBase : IRecommendationRule
 public sealed class GenerateLeastPrivilegePolicyRule : RecommendationRuleBase
 {
     private sealed record ObservedOperation(string Action, string Resource);
+    private sealed record ProviderCondition(string? Title, string Expression, string EvaluationStatus, string? Version);
 
     public override string RuleId => "CIEM-003";
     public override RecommendationType RecommendationType => RecommendationType.GenerateLeastPrivilegePolicy;
@@ -56,7 +57,7 @@ public sealed class GenerateLeastPrivilegePolicyRule : RecommendationRuleBase
         {
             cancellationToken.ThrowIfCancellationRequested();
             var coverage = context.ActivityCoverage?.FirstOrDefault(item => item.CloudAccountId == finding.CloudAccountId && item.Provider == finding.CloudProvider);
-            var entitlement = Entitlement(context, finding);
+            var entitlement = FindPolicyEntitlement(context, finding);
             var permission = context.Permissions.FirstOrDefault(item => item.Id == finding.PermissionId);
             if (entitlement is null || string.IsNullOrWhiteSpace(permission?.Action)) continue;
             if (!ActivityUsageEvaluator.Covers(coverage, windowStart, windowEnd, requiresActions: true, requiresResourceIds: true, requiresRoleIds: entitlement.RoleId.HasValue)) continue;
@@ -83,47 +84,219 @@ public sealed class GenerateLeastPrivilegePolicyRule : RecommendationRuleBase
                 .ToArray();
             if (observed.Length == 0) continue;
 
-            var proposedPolicy = BuildPolicy(finding.CloudProvider, entitlement.Scope.OriginalScope, observed, windowStart, windowEnd);
+            var normalizedPermission = context.NormalizedPermissions.FirstOrDefault(item => item.Id == finding.PermissionId);
+            var condition = GetProviderCondition(finding.CloudProvider, entitlement);
+            var proposedPolicy = BuildPolicy(finding.CloudProvider, entitlement, normalizedPermission, condition, observed, windowStart, windowEnd);
             if (proposedPolicy is null) continue;
-            var description = $"Generated from {observed.Length} successful action/resource observation(s) over {context.ActivityObservationDays} days. Review business requirements and provider constraints before replacing the source policy.";
+            var description = $"Generated from {observed.Length} successful action/resource observation(s) over {context.ActivityObservationDays} days. Source conditions and provider semantics are retained where supported. Possible access loss is unknown because the proposal was not validated by the provider.";
+            var originalProviderObject = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                entitlement.Evidence.OriginalDocument,
+                entitlement.Evidence.OriginalStatement,
+                entitlement.Evidence.ProviderSpecificData,
+                condition
+            });
             recommendations.Add(Create(context, finding, "Generate least-privilege policy proposal", description, permission.Name, proposedPolicy,
-                $"Observed operations only; activity coverage was complete from {windowStart:O} through {windowEnd:O}.", RecommendationImpactState.RequiresReview));
+                $"Observed operations only; activity coverage was complete from {windowStart:O} through {windowEnd:O}. Provider-side impact validation was not available; potential access loss is unknown.",
+                RecommendationImpactState.UnknownImpact, originalProviderObject: originalProviderObject, sourceEntitlement: entitlement));
         }
 
         return Task.FromResult<IReadOnlyCollection<RecommendationModel>>(recommendations);
     }
 
-    private static string? BuildPolicy(CloudProvider provider, string scope, IReadOnlyList<ObservedOperation> observed, DateTime windowStart, DateTime windowEnd)
+    private static string? BuildPolicy(CloudProvider provider, NormalizedEntitlement entitlement, NormalizedPermission? normalizedPermission, ProviderCondition? condition,
+        IReadOnlyList<ObservedOperation> observed, DateTime windowStart, DateTime windowEnd)
     {
         var actions = observed.Select(item => item.Action).Distinct(StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal).ToArray();
-        var resources = observed.Select(item => item.Resource).Distinct(StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal).ToArray();
-        object? document = provider switch
+        var scope = entitlement.Scope.OriginalScope;
+        var conditionExpression = condition?.Expression;
+        if (condition is not null && string.IsNullOrWhiteSpace(conditionExpression)) return null;
+        var azureIsDataAction = provider == CloudProvider.Azure ? ClassifyAzureDataAction(normalizedPermission, actions) : null;
+        if (provider == CloudProvider.Azure && !azureIsDataAction.HasValue) return null;
+        object? providerDocument = provider switch
         {
             CloudProvider.Azure => new
             {
-                Name = "YASK-CIEM least-privilege proposal",
-                IsCustom = true,
-                Description = $"Derived from successful observed activity ({windowStart:O} to {windowEnd:O}); review before use.",
-                Actions = actions,
-                NotActions = Array.Empty<string>(),
-                DataActions = Array.Empty<string>(),
-                NotDataActions = Array.Empty<string>(),
-                AssignableScopes = new[] { scope }
+                RoleDefinition = new
+                {
+                    Name = "YASK-CIEM least-privilege proposal",
+                    IsCustom = true,
+                    Description = $"Derived from successful observed activity ({windowStart:O} to {windowEnd:O}); review before use.",
+                    Actions = azureIsDataAction == true ? Array.Empty<string>() : actions,
+                    NotActions = Array.Empty<string>(),
+                    DataActions = azureIsDataAction == true ? actions : Array.Empty<string>(),
+                    NotDataActions = Array.Empty<string>(),
+                    AssignableScopes = new[] { scope }
+                },
+                RoleAssignment = new
+                {
+                    Scope = scope,
+                    Condition = condition is null ? null : new { condition.Title, Expression = conditionExpression, condition.EvaluationStatus, condition.Version }
+                }
             },
-            CloudProvider.Aws => new
-            {
-                Version = "2012-10-17",
-                Statement = observed.Select(item => new { Effect = "Allow", item.Action, item.Resource }).ToArray()
-            },
+            CloudProvider.Aws => BuildAwsPolicy(observed, conditionExpression),
             CloudProvider.Gcp => new
             {
-                title = "YASK-CIEM least-privilege proposal",
-                description = $"Derived from successful observed activity ({windowStart:O} to {windowEnd:O}); bind only at the reviewed scope: {scope}.",
-                includedPermissions = actions
+                CustomRole = new
+                {
+                    title = "YASK-CIEM least-privilege proposal",
+                    description = $"Derived from successful observed activity ({windowStart:O} to {windowEnd:O}); review before use.",
+                    stage = "GA",
+                    includedPermissions = actions
+                },
+                Binding = new
+                {
+                    Scope = scope,
+                    Condition = condition is null ? null : new { condition.Title, Expression = conditionExpression, condition.EvaluationStatus }
+                }
             },
             _ => null
         };
-        return document is null ? null : System.Text.Json.JsonSerializer.Serialize(document, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        if (providerDocument is null) return null;
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            schemaVersion = "1.0",
+            provider,
+            reviewOnly = true,
+            observedResources = observed.Select(item => item.Resource).Distinct(StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal).ToArray(),
+            scopeSemantics = provider switch
+            {
+                CloudProvider.Azure => "The role assignment remains at the source scope; observed resources are evidence, not validated assignment scope reductions.",
+                CloudProvider.Aws => "Each statement retains its observed resource ARN and source IAM condition.",
+                CloudProvider.Gcp => "A custom role restricts permissions, not target resources; the binding retains the source scope and condition.",
+                _ => "Provider scope semantics require review."
+            },
+            impactAssessment = new { possibleAccessLoss = "Unknown", providerValidation = "Not performed" },
+            providerProposal = providerDocument
+        }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private static bool? ClassifyAzureDataAction(NormalizedPermission? permission, IReadOnlyList<string> actions)
+    {
+        if (permission?.Category is PermissionCategory.DataRead or PermissionCategory.DataWrite) return true;
+        if (permission?.Category is PermissionCategory.Read or PermissionCategory.Write or PermissionCategory.Delete or PermissionCategory.Administrative) return false;
+        var classifications = actions.Select(ClassifyAzureAction).ToArray();
+        if (classifications.Length == 0 || classifications.Any(value => !value.HasValue)
+            || classifications.Distinct().Count() != 1) return null;
+        return classifications[0];
+    }
+
+    private static bool? ClassifyAzureAction(string action)
+    {
+        if (new[] { "/blobServices/", "/fileServices/", "/queueServices/", "/tableServices/", "/containers/blobs/", "/vaults/secrets/", "/vaults/keys/", "/vaults/certificates/" }
+            .Any(segment => action.Contains(segment, StringComparison.OrdinalIgnoreCase))) return true;
+        if (action.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase)
+            && new[] { "/read", "/write", "/delete", "/action" }.Any(suffix => action.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))) return false;
+        return null;
+    }
+
+    private static object? BuildAwsPolicy(IReadOnlyList<ObservedOperation> observed, string? conditionExpression)
+    {
+        System.Text.Json.JsonElement? condition = null;
+        if (conditionExpression is not null)
+        {
+            try
+            {
+                using var parsed = System.Text.Json.JsonDocument.Parse(conditionExpression);
+                if (parsed.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+                condition = parsed.RootElement.Clone();
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return null;
+            }
+        }
+
+        var statements = observed.Select(item =>
+        {
+            var statement = new Dictionary<string, object?>
+            {
+                ["Effect"] = "Allow",
+                ["Action"] = item.Action,
+                ["Resource"] = item.Resource
+            };
+            if (condition.HasValue) statement["Condition"] = condition.Value;
+            return statement;
+        }).ToArray();
+        return new { Version = "2012-10-17", Statement = statements };
+    }
+
+    private static NormalizedEntitlement? FindPolicyEntitlement(RecommendationContext context, RiskFindingModel finding)
+    {
+        var candidates = context.Entitlements.Where(item => item.CloudAccountId == finding.CloudAccountId
+            && item.PrincipalId == finding.PrincipalId && item.PermissionId == finding.PermissionId).ToArray();
+        if (candidates.Length <= 1) return candidates.FirstOrDefault();
+
+        var effective = finding.EffectiveAccessId.HasValue
+            ? context.EffectiveAccess.FirstOrDefault(item => item.Id == finding.EffectiveAccessId.Value)
+            : null;
+        var resource = finding.ResourceId.HasValue ? context.Resources.FirstOrDefault(item => item.Id == finding.ResourceId.Value) : null;
+        var scored = candidates.Select(candidate =>
+        {
+            var score = 0;
+            if (effective is not null)
+            {
+                if (candidate.Scope.OriginalScope.Equals(effective.Scope, StringComparison.OrdinalIgnoreCase)) score += 8;
+                if (candidate.RoleId == effective.RoleId) score += 4;
+                if (candidate.PolicyId == effective.PolicyId) score += 4;
+            }
+            if (resource is not null)
+            {
+                if (candidate.ResourceId == resource.Id) score += 6;
+                if (!string.IsNullOrWhiteSpace(candidate.ResourcePattern)
+                    && candidate.ResourcePattern.Equals(resource.ResourceId ?? resource.ResourceUri, StringComparison.OrdinalIgnoreCase)) score += 3;
+            }
+            return (Candidate: candidate, Score: score);
+        }).OrderByDescending(item => item.Score).ToArray();
+        var best = scored.Where(item => item.Score == scored[0].Score).Select(item => item.Candidate).ToArray();
+        var signatures = best.Select(item => string.Join('|', item.Scope.OriginalScope, item.ResourceId, item.ResourcePattern, item.RoleId, item.PolicyId,
+            item.Condition?.OriginalExpression ?? item.Condition?.Expression, item.Condition?.Title)).Distinct(StringComparer.Ordinal).ToArray();
+        return signatures.Length == 1 ? best.OrderBy(item => item.Id).First() : null;
+    }
+
+    private static ProviderCondition? GetProviderCondition(CloudProvider provider, NormalizedEntitlement entitlement)
+    {
+        if (entitlement.Condition is not null)
+        {
+            var expression = entitlement.Condition.OriginalExpression ?? entitlement.Condition.Expression;
+            var version = entitlement.Evidence.ProviderSpecificData.GetValueOrDefault("conditionVersion");
+            return new ProviderCondition(entitlement.Condition.Title, expression ?? string.Empty, entitlement.Condition.EvaluationStatus, version);
+        }
+
+        if (provider == CloudProvider.Aws)
+        {
+            var raw = entitlement.Evidence.OriginalStatement ?? entitlement.Evidence.OriginalDocument;
+            var expression = ExtractAwsCondition(raw);
+            if (!string.IsNullOrWhiteSpace(expression)) return new ProviderCondition(null, expression, "PreservedFromSource", null);
+            if (raw?.Contains("\"Condition\"", StringComparison.Ordinal) == true)
+                return new ProviderCondition(null, string.Empty, "SourceConditionCouldNotBeParsed", null);
+        }
+
+        var providerData = entitlement.Evidence.ProviderSpecificData;
+        var conditionPair = providerData.FirstOrDefault(item => item.Key.Equals("conditionExpression", StringComparison.OrdinalIgnoreCase)
+            || item.Key.Equals("condition", StringComparison.OrdinalIgnoreCase));
+        return conditionPair.Key is null
+            ? null
+            : new ProviderCondition(providerData.GetValueOrDefault("conditionTitle"), conditionPair.Value ?? string.Empty,
+                "PreservedFromSource", providerData.GetValueOrDefault("conditionVersion"));
+    }
+
+    private static string? ExtractAwsCondition(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(raw);
+            var root = document.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object && root.TryGetProperty("Condition", out var condition)) return condition.GetRawText();
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object && root.TryGetProperty("Statement", out var statements) && statements.ValueKind == System.Text.Json.JsonValueKind.Array)
+                return statements.EnumerateArray().Select(statement => statement.TryGetProperty("Condition", out var found) ? found.GetRawText() : null).FirstOrDefault(value => value is not null);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+        return null;
     }
 }
 

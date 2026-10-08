@@ -16,6 +16,36 @@
                 <Button Grid.Column="6" Content="Export evidence bundle" Command="{Binding ExportComplianceBundleCommand}" IsEnabled="{Binding CanExportComplianceBundle}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Export organization-scoped controls, evidence, gaps, and assessment metadata"/>
                 <TextBlock Grid.Column="7" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
             </Grid>
+            <Expander Header="Standards and assessment history" IsExpanded="False" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="Standards included in the assessment crosswalk" Style="{StaticResource CardLabel}" Margin="0,8,0,4"/>
+                    <ItemsControl ItemsSource="{Binding ComplianceStandardOptions}">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="0,4,18,4"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Content="Load assessment history" Command="{Binding LoadComplianceHistoryCommand}" Style="{StaticResource QuietButton}"/>
+                        <TextBlock Text="{Binding ComplianceHistoryStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding ComplianceHistory}" Margin="0,6,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,3">
+                                    <TextBlock Text="{Binding AssessedAt}" Foreground="{StaticResource PrimaryBrush}"/>
+                                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource SuccessBrush}" Margin="10,0,0,0"><Run Text="Pass "/><Run Text="{Binding Passed, Mode=OneWay}"/></TextBlock>
+                                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource CriticalBrush}" Margin="10,0,0,0"><Run Text="Fail "/><Run Text="{Binding Failed, Mode=OneWay}"/></TextBlock>
+                                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}" Margin="10,0,0,0"><Run Text="Partial "/><Run Text="{Binding Partial, Mode=OneWay}"/></TextBlock>
+                                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Margin="10,0,0,0"><Run Text="Not assessed "/><Run Text="{Binding NotAssessed, Mode=OneWay}"/></TextBlock>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
             <Grid Margin="0,0,0,14">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="250"/></Grid.ColumnDefinitions>
                 <Border Grid.Column="1" HorizontalAlignment="Stretch">
@@ -434,12 +464,24 @@
                         <ComboBox ItemsSource="{Binding TicketingProviders}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedTicketingProviderOption, Mode=TwoWay}"/>
                         <TextBlock Text="Site URL" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
                         <TextBox Text="{Binding TicketingSiteUrl, UpdateSourceTrigger=PropertyChanged}" ToolTip="HTTPS site URL for the selected ticketing tool. Do not include credentials, query parameters, or fragments."/>
+                        <TextBlock Text="Project key / service desk ID" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
+                        <TextBox Text="{Binding TicketingProjectKey, UpdateSourceTrigger=PropertyChanged}" ToolTip="Used by Jira and Jira Service Management. Leave blank for other providers."/>
+                        <TextBlock Text="Issue type / request type / category" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
+                        <TextBox Text="{Binding TicketingRequestType, UpdateSourceTrigger=PropertyChanged}" ToolTip="Provider-specific project issue type, service request type, or incident category."/>
+                        <TextBlock Text="Signed webhook URL (optional fallback)" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
+                        <TextBox Text="{Binding TicketingWebhookUrl, UpdateSourceTrigger=PropertyChanged}" ToolTip="HTTPS endpoint for a signed generic ticketing webhook. Do not include credentials, query parameters, or fragments."/>
+                        <TextBlock Text="API username / email" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
+                        <TextBox Text="{Binding TicketingUserName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Username or email required by the selected provider's API."/>
+                        <TextBlock Text="API token / secret" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
+                        <PasswordBox MaxLength="2048" ToolTip="Saved only to Windows Credential Manager for this provider."/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                             <Button Content="Save URL" Command="{Binding SaveTicketingConnectionCommand}" Style="{StaticResource PrimaryButton}"/>
                             <Button Content="{Binding TicketingRequestButtonText}" Command="{Binding OpenTicketingRequestCommand}" IsEnabled="{Binding CanOpenTicketingRequest}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <Button Content="Save credential" Click="SaveTicketingCredentials_Click" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                         </StackPanel>
                         <TextBlock Text="{Binding TicketingConnectionStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                        <TextBlock Text="Opens a known create-request form when available, otherwise the selected tool portal. Sign in there to submit; credentials are not stored by this app." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding TicketingCredentialStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="Credentials are stored in Windows Credential Manager. Native connectors are available for Jira, Jira Service Management, and ServiceNow; other providers use the signed webhook URL." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
                 <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
@@ -492,6 +534,29 @@
                                     <Button Content="Export Review Draft" Command="{Binding ExportDraftCommand}" IsEnabled="{Binding CanExportDraft}" Style="{StaticResource PrimaryButton}"/>
                                     <TextBlock Text="{Binding ExportStatusMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Content="Raise ticket" Command="{Binding RaiseTicketCommand}" IsEnabled="{Binding CanRaiseTicket}" Style="{StaticResource QuietButton}" ToolTip="Create one ticket for this selected recommendation; an existing link is reused."/>
+                                    <Button Content="Refresh ticket status" Command="{Binding RefreshTicketStatusCommand}" IsEnabled="{Binding CanRefreshTicketStatus}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <TextBlock Text="{Binding TicketingStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding TicketingRequest.TicketUrl}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding TicketingRequest.TicketUrl}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                    <Hyperlink NavigateUri="{Binding TicketingRequest.TicketUrl}" RequestNavigate="TicketLink_RequestNavigate">
+                                        <Run Text="Open linked ticket: "/><Run Text="{Binding TicketingRequest.ExternalId, Mode=OneWay}"/>
+                                    </Hyperlink>
+                                </TextBlock>
                                 <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
@@ -588,6 +653,8 @@
                                     <Button Content="Sign in" Command="{Binding SignInCommand}" IsEnabled="{Binding CanSignIn}" Style="{StaticResource PrimaryButton}"/>
                                     <Button Content="Sign out" Command="{Binding SignOutCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                                 </StackPanel>
+                                <Button Content="Sync central audit events" Command="{Binding SyncCentralAuditCommand}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Upload local audit events for the selected organization to its Entra tenant's central audit log."/>
+                                <TextBlock Text="{Binding CentralAuditSyncStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">

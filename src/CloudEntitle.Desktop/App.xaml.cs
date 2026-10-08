@@ -1,6 +1,7 @@
 ﻿using System.Windows;
 using System.Windows.Threading;
 using System.IO;
+using System.Net.Http;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Application.Interfaces;
@@ -19,6 +20,7 @@ using CloudEntitle.RemediationPlanning.Abstractions;
 using CloudEntitle.RemediationPlanning.Services;
 using CloudEntitle.OrganizationManagement.Abstractions;
 using CloudEntitle.OrganizationManagement.Services;
+using CloudEntitle.Integration.Clients;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -59,6 +61,12 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 		services.AddSingleton<IPostureNotificationChannel>(_ => new WebhookPostureNotificationChannel());
 		services.AddSingleton<IJiraConnectionSettingsStore, LocalJiraConnectionSettingsStore>();
+		services.AddSingleton<ITicketingCredentialStore, WindowsTicketingCredentialStore>();
+		services.AddSingleton<ITicketingRequestStore, LocalTicketingRequestStore>();
+		services.AddSingleton<ITicketingWorkflowService, TicketingWorkflowService>();
+		services.AddSingleton<ITicketingCredentialStore, WindowsTicketingCredentialStore>();
+		services.AddSingleton<ITicketingRequestStore, LocalTicketingRequestStore>();
+		services.AddSingleton<ITicketingWorkflowService, TicketingWorkflowService>();
 		services.AddSingleton<IRemediationPlanner, RemediationPlanner>();
 		services.AddSingleton<IRemediationSimulator, RemediationSimulator>();
 		services.AddSingleton<IRemediationEngine, RemediationEngine>();
@@ -68,11 +76,28 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IOrganizationStore, LocalOrganizationStore>();
 		services.AddSingleton<AuthenticatedOrganizationContext>();
 		services.AddSingleton<OrganizationManagementService>();
-		services.AddSingleton<IOrganizationSsoService, EntraOrganizationSsoService>();
+		services.AddSingleton<EntraOrganizationSsoService>();
+		services.AddSingleton<IOrganizationSsoService>(provider => provider.GetRequiredService<EntraOrganizationSsoService>());
+		services.AddSingleton<IApiAccessTokenProvider>(provider => provider.GetRequiredService<EntraOrganizationSsoService>());
 		services.AddSingleton<IdentityGovernanceService>();
 		services.AddSingleton<ComplianceAssessmentService>();
 		services.AddSingleton<ComplianceExportService>();
+		services.AddSingleton<IComplianceBundleSigner, WindowsComplianceBundleSigner>();
+		services.AddSingleton<IComplianceAssessmentHistoryStore, LocalComplianceAssessmentHistoryStore>();
 		services.AddSingleton<IComplianceExportWorkflow, ComplianceExportWorkflow>();
+		var centralApiUrl = Environment.GetEnvironmentVariable("YASK_CIEM_API_BASE_URL");
+		if (!string.IsNullOrWhiteSpace(centralApiUrl))
+		{
+			if (Uri.TryCreate(centralApiUrl, UriKind.Absolute, out var centralApiUri) && centralApiUri.Scheme == Uri.UriSchemeHttps)
+			{
+				services.AddSingleton(new CiemApiClient(new HttpClient { BaseAddress = centralApiUri }));
+				services.AddSingleton<ICentralAuditSyncService, CentralAuditSyncService>();
+			}
+			else
+			{
+				Log.Warning("Central audit synchronization is disabled because YASK_CIEM_API_BASE_URL is not a valid HTTPS URL");
+			}
+		}
 		services.AddSingleton<IAccessReviewStore, LocalAccessReviewStore>();
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new AwsProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));

@@ -1,6 +1,8 @@
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain;
+using CloudEntitle.Domain.Entities;
 using CloudEntitle.Desktop.Services;
+using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
@@ -28,6 +30,8 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
     private readonly CloudConnectionState? _cloudConnectionState;
     private IReadOnlyList<LiveEffectiveAccessRecord> _records = Array.Empty<LiveEffectiveAccessRecord>();
     private IReadOnlyList<KubernetesWorkloadTrace> _workloadTraces = Array.Empty<KubernetesWorkloadTrace>();
+    private IReadOnlyList<DomainAccessPath> _modeledPaths = Array.Empty<DomainAccessPath>();
+    private IReadOnlyList<ResourceSecuritySignal> _resourceSignals = Array.Empty<ResourceSecuritySignal>();
     private string _searchText = string.Empty;
     private AccessPathExplorerRow? _selectedPath;
 
@@ -75,6 +79,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
         .Where(record => !record.AssignmentType.Equals("Role usage", StringComparison.OrdinalIgnoreCase))
         .Select(CreatePath)
         .Concat(_workloadTraces.Select(CreateWorkloadPath))
+        .Concat(_modeledPaths.Select(CreateModeledPath))
         .Where(path => string.IsNullOrWhiteSpace(SearchText)
             || new[] { path.Provider, path.Principal, path.Role, path.Scope, path.PathType, path.Evidence }
                 .Any(value => value.Contains(SearchText, StringComparison.OrdinalIgnoreCase)))
@@ -91,7 +96,9 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
         }).ToArray();
     public AccessBlastRadiusSummary? BlastRadius => SelectedPath is null ? null : BuildBlastRadius(SelectedPath);
     public bool HasResults => Paths.Count > 0;
-    public string CoverageMessage => "Paths include provider assignments and scanned Pod/Deployment-to-ServiceAccount traces. Cloud federation status is verified only when the provider CLI confirms issuer, subject, and audience; unavailable checks remain explicit.";
+    public int ResourceSignalCount => _resourceSignals.Count;
+    public int ModeledResourcePathCount => _modeledPaths.Count;
+    public string CoverageMessage => $"Live graph: {ModeledResourcePathCount} resource paths, {ResourceSignalCount} security signals. Tag/label signals and role-level access paths remain partial until provider-native action and security coverage is available. Kubernetes federation checks remain explicit.";
 
     public async Task RefreshAsync()
     {
@@ -100,8 +107,11 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
             var currentAccess = _liveCloudScanService?.CurrentResult?.EffectiveAccessRecords;
             if (currentAccess is not null)
             {
+                var current = _liveCloudScanService!.CurrentResult!;
                 _records = FilterConnectedProvider(currentAccess).ToArray();
-                _workloadTraces = FilterConnectedWorkloads(_liveCloudScanService?.CurrentResult?.WorkloadTraces ?? Array.Empty<KubernetesWorkloadTrace>()).ToArray();
+                _workloadTraces = FilterConnectedWorkloads(current.WorkloadTraces).ToArray();
+                _modeledPaths = FilterConnectedModeledPaths(current.ModeledAccessPaths).ToArray();
+                _resourceSignals = current.ResourceSecuritySignals;
             }
             else if (_liveScanHistoryStore is not null)
             {
@@ -113,16 +123,22 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
                 var latest = relevantHistory.OrderByDescending(scan => scan.StartedAt).FirstOrDefault();
                 _records = latest is null ? Array.Empty<LiveEffectiveAccessRecord>() : FilterConnectedProvider(latest.EffectiveAccess).ToArray();
                 _workloadTraces = latest is null ? Array.Empty<KubernetesWorkloadTrace>() : FilterConnectedWorkloads(latest.WorkloadTraces).ToArray();
+                _modeledPaths = latest is null ? Array.Empty<DomainAccessPath>() : FilterConnectedModeledPaths(latest.ModeledAccessPaths).ToArray();
+                _resourceSignals = latest?.ResourceSecuritySignals ?? Array.Empty<ResourceSecuritySignal>();
             }
             else
             {
                 _records = Array.Empty<LiveEffectiveAccessRecord>();
                 _workloadTraces = Array.Empty<KubernetesWorkloadTrace>();
+                _modeledPaths = Array.Empty<DomainAccessPath>();
+                _resourceSignals = Array.Empty<ResourceSecuritySignal>();
             }
 
             SelectedPath = Paths.FirstOrDefault();
             OnPropertyChanged(nameof(Paths));
             OnPropertyChanged(nameof(HasResults));
+            OnPropertyChanged(nameof(ResourceSignalCount));
+            OnPropertyChanged(nameof(ModeledResourcePathCount));
         }
         catch (Exception exception)
         {
@@ -144,6 +160,33 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
         return connected.Count == 1
             ? traces.Where(trace => trace.Provider == connected.Single())
             : traces;
+    }
+
+    private IEnumerable<DomainAccessPath> FilterConnectedModeledPaths(IEnumerable<DomainAccessPath> paths)
+    {
+        var connected = _cloudConnectionState?.ConnectedProviders ?? new HashSet<CloudProviderType>();
+        return connected.Count == 1
+            ? paths.Where(path => path.Provider.ToString().Equals(connected.Single().ToString(), StringComparison.OrdinalIgnoreCase))
+            : paths;
+    }
+
+    private AccessPathExplorerRow CreateModeledPath(DomainAccessPath path)
+    {
+        var nodes = path.Nodes.OrderBy(node => node.Sequence)
+            .Select(node => new AccessPathNodeRow(node.Sequence + 1, node.NodeType, node.Name,
+                string.IsNullOrWhiteSpace(node.EvidenceReference) ? "Provider scan" : node.EvidenceReference))
+            .ToArray();
+        var nodeNames = path.Nodes.ToDictionary(node => node.Id, node => node.Name);
+        var edges = path.Edges.Select(edge => new AccessPathEdgeRow(
+            nodeNames.GetValueOrDefault(edge.FromNodeId, edge.FromNodeId.ToString("D")), edge.RelationshipType,
+            nodeNames.GetValueOrDefault(edge.ToNodeId, edge.ToNodeId.ToString("D")), edge.EvidenceReference ?? "Modeled provider path")).ToArray();
+        var principal = path.Nodes.FirstOrDefault(node => node.NodeType == "Principal")?.Name ?? path.PrincipalId.ToString("D");
+        var role = path.Nodes.FirstOrDefault(node => node.NodeType == "Role")?.Name ?? "Role assignment";
+        var scope = path.Nodes.FirstOrDefault(node => node.NodeType == "Scope")?.Name ?? "Scope not reported";
+        var privileged = _records.Any(record => record.Provider.Equals(path.Provider.ToString(), StringComparison.OrdinalIgnoreCase)
+            && record.Principal.Equals(principal, StringComparison.OrdinalIgnoreCase) && record.IsPrivileged);
+        return new AccessPathExplorerRow(path.Provider.ToString(), principal, role, scope, $"Modeled {path.PathType} ({path.PathStatus})",
+            path.Evidence ?? "Signal-bearing path from current scan", "Partial provider evidence; not an authorization simulation.", privileged, nodes, edges);
     }
 
     private AccessBlastRadiusSummary BuildBlastRadius(AccessPathExplorerRow path)

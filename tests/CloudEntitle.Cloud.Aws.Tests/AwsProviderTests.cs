@@ -112,6 +112,19 @@ public class AwsProviderTests
         }
 
         [Fact]
+        public async Task AwsProvider_ShouldDiscoverTaggedResourcesForSecuritySignalMapping()
+        {
+            var provider = new AwsProvider(new FakeAwsCommandRunner(), useLiveDiscovery: true);
+            var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+            var resource = Assert.Single(await provider.GetResourcesAsync(account.Id));
+
+            Assert.Equal("customer-records", resource.Name);
+            Assert.Equal("true", resource.Tags["CriticalAsset"]);
+            Assert.Equal("restricted", resource.Tags["DataClassification"]);
+        }
+
+        [Fact]
         public async Task AwsProvider_ShouldHonorCancellation()
         {
             var provider = new AwsProvider(new FakeAwsCommandRunner(), useLiveDiscovery: true);
@@ -127,7 +140,9 @@ public class AwsProviderTests
         {
             public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
             {
-                var output = arguments.Contains("lookup-events")
+                var output = arguments.Contains("get-resources")
+                    ? "{\"ResourceTagMappingList\":[{\"ResourceARN\":\"arn:aws:s3:::customer-records\",\"Tags\":[{\"Key\":\"CriticalAsset\",\"Value\":\"true\"},{\"Key\":\"DataClassification\",\"Value\":\"restricted\"}]}]}"
+                    : arguments.Contains("lookup-events")
                     ? "{\"Events\":[{\"EventName\":\"PutUserPolicy\",\"EventTime\":\"2026-10-01T11:00:00Z\",\"CloudTrailEvent\":\"{\\\"userIdentity\\\":{\\\"arn\\\":\\\"arn:aws:iam::123456789012:user/auditor\\\"},\\\"requestParameters\\\":{\\\"userName\\\":\\\"demo-user\\\",\\\"policyName\\\":\\\"ReadOnlyAccess\\\"}}\"}]}"
                     : arguments.Contains("list-analyzers")
                     ? "{\"analyzers\":[{\"arn\":\"arn:aws:access-analyzer:us-east-1:123456789012:analyzer/demo\",\"status\":\"ACTIVE\"}]}"

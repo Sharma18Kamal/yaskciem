@@ -1,6 +1,7 @@
 using System.IO;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Collections.ObjectModel;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain.Entities;
@@ -31,6 +32,21 @@ public sealed class NavigationItem : ObservableObject
     public string Icon { get; }
     public Type ViewModelType { get; }
     public bool IsSelected { get => _isSelected; internal set => SetProperty(ref _isSelected, value); }
+}
+
+public sealed class ComplianceStandardSelection : ObservableObject
+{
+    private bool _isSelected = true;
+
+    public ComplianceStandardSelection(ComplianceStandard standard, string displayName)
+    {
+        Standard = standard;
+        DisplayName = displayName;
+    }
+
+    public ComplianceStandard Standard { get; }
+    public string DisplayName { get; }
+    public bool IsSelected { get => _isSelected; set => SetProperty(ref _isSelected, value); }
 }
 
 public sealed class CloudConnectionState : ObservableObject
@@ -404,6 +420,8 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private CancellationTokenSource? _scanCancellation;
     private bool _isScanning;
     private int _scanWaitingMessageIndex;
+    private IReadOnlyList<ComplianceAssessmentTrendPoint> _complianceHistory = Array.Empty<ComplianceAssessmentTrendPoint>();
+    private string _complianceHistoryStatus = string.Empty;
 
     public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null, IReportService? reportService = null, IDialogService? dialogService = null, IComplianceExportWorkflow? complianceExportWorkflow = null, AuthenticatedOrganizationContext? authenticatedOrganizationContext = null)
     {
@@ -427,6 +445,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         StopScanCommand = new RelayCommand(StopScan, () => IsScanning);
         GenerateReportCommand = new AsyncRelayCommand(GenerateReportAsync);
         ExportComplianceBundleCommand = new AsyncRelayCommand(ExportComplianceBundleAsync);
+        LoadComplianceHistoryCommand = new AsyncRelayCommand(LoadComplianceHistoryAsync);
         if (_authenticatedOrganizationContext is not null)
             _authenticatedOrganizationContext.Changed += (_, _) => OnPropertyChanged(nameof(CanExportComplianceBundle));
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
@@ -442,10 +461,20 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public RelayCommand StopScanCommand { get; }
     public AsyncRelayCommand GenerateReportCommand { get; }
     public AsyncRelayCommand ExportComplianceBundleCommand { get; }
+    public AsyncRelayCommand LoadComplianceHistoryCommand { get; }
     public IReadOnlyList<ComplianceFramework> ComplianceFrameworks { get; } = Enum.GetValues<ComplianceFramework>();
     public ComplianceFramework SelectedComplianceFramework { get; set; } = ComplianceFramework.CiemBaseline;
+    public ObservableCollection<ComplianceStandardSelection> ComplianceStandardOptions { get; } = new()
+    {
+        new(ComplianceStandard.Nist80053Rev5, "NIST SP 800-53 Rev. 5"),
+        new(ComplianceStandard.Iso27001_2022, "ISO/IEC 27001:2022"),
+        new(ComplianceStandard.Soc2TrustServices, "SOC 2 Trust Services Criteria")
+    };
+    public IReadOnlyList<ComplianceStandard> SelectedComplianceStandards => ComplianceStandardOptions.Where(option => option.IsSelected).Select(option => option.Standard).ToArray();
     public bool CanExportComplianceBundle => _complianceExportWorkflow?.CanExport == true;
     public string ComplianceExportStatus { get; private set; } = string.Empty;
+    public IReadOnlyList<ComplianceAssessmentTrendPoint> ComplianceHistory { get => _complianceHistory; private set => SetProperty(ref _complianceHistory, value); }
+    public string ComplianceHistoryStatus { get => _complianceHistoryStatus; private set => SetProperty(ref _complianceHistoryStatus, value); }
     public IReadOnlyList<ScanAccountSelection> AvailableAccounts => _availableAccounts;
     public string AccountSelectionMessage { get => _accountSelectionMessage; private set => SetProperty(ref _accountSelectionMessage, value); }
     public bool HasAvailableAccounts => _availableAccounts.Count > 0;
@@ -595,10 +624,11 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         ErrorMessage = null;
         try
         {
-            var bundle = await _complianceExportWorkflow.CreateBundleAsync(SelectedComplianceFramework);
+            var bundle = await _complianceExportWorkflow.CreateBundleAsync(SelectedComplianceFramework, SelectedComplianceStandards);
             await File.WriteAllBytesAsync(outputPath, bundle);
             ComplianceExportStatus = $"Compliance evidence bundle saved to: {outputPath}";
             OnPropertyChanged(nameof(ComplianceExportStatus));
+            await LoadComplianceHistoryAsync();
         }
         catch (Exception exception)
         {
@@ -607,6 +637,27 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    private async Task LoadComplianceHistoryAsync()
+    {
+        if (_complianceExportWorkflow is null || !CanExportComplianceBundle)
+        {
+            ComplianceHistoryStatus = "Sign in with report-export permission to view assessment history.";
+            return;
+        }
+
+        try
+        {
+            ComplianceHistory = await _complianceExportWorkflow.GetHistoryAsync(SelectedComplianceFramework);
+            ComplianceHistoryStatus = ComplianceHistory.Count == 0
+                ? "No saved assessments for this framework yet."
+                : $"Showing {ComplianceHistory.Count} most recent saved assessments for {SelectedComplianceFramework}.";
+        }
+        catch (Exception exception)
+        {
+            ComplianceHistoryStatus = $"Unable to load assessment history: {exception.Message}";
         }
     }
 
@@ -1417,9 +1468,21 @@ public sealed class RiskFindingsViewModel : WorkspaceViewModel
                 principals.GetValueOrDefault(item.PrincipalId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PrincipalId),
                 resources.GetValueOrDefault(item.ResourceId ?? Guid.Empty)?.Name ?? "Not specified",
                 item.Evidence.Summary, item.Recommendation ?? "Review finding", item.PriorityScore));
-            rows = rows.Concat((_liveCloudScanService?.CurrentResult?.Findings ?? Array.Empty<CloudEntitle.Domain.RiskFinding>()).Select(item => new RiskFindingGridRow(
-                item.CloudProvider.ToString(), item.Severity.ToString(), item.Title,
-                item.Principal, item.Resource, item.Evidence, item.Recommendation)));
+            var liveResult = _liveCloudScanService?.CurrentResult;
+            var graphFindingIds = liveResult?.ResourceRiskFindings.Select(item => item.Id).ToHashSet() ?? new HashSet<Guid>();
+            rows = rows.Concat((liveResult?.Findings ?? Array.Empty<CloudEntitle.Domain.RiskFinding>())
+                .Where(item => !graphFindingIds.Contains(item.Id))
+                .Select(item => new RiskFindingGridRow(item.CloudProvider.ToString(), item.Severity.ToString(), item.Title,
+                    item.Principal, item.Resource, item.Evidence, item.Recommendation)));
+            if (liveResult is not null)
+            {
+                rows = rows.Concat(liveResult.ResourceRiskFindings.Select(item => new RiskFindingGridRow(
+                    item.CloudProvider.ToString(), item.Severity.ToString(), item.Title,
+                    liveResult.IdentityRecords.FirstOrDefault(principal => principal.Id == item.PrincipalId)?.Name ?? WorkspaceDataFormatting.ShortId(item.PrincipalId),
+                    liveResult.ResourceRecords.FirstOrDefault(resource => resource.Id == item.ResourceId)?.Name ?? "Not specified",
+                    $"{item.Evidence.Summary}; State={item.EvaluationState}; Path={item.AccessPathId?.ToString("D") ?? "not linked"}",
+                    item.Recommendation ?? "Review the modeled identity-to-resource path.", item.PriorityScore)));
+            }
             return rows.Where(row => WorkspaceDataFormatting.Matches(SearchText, row.Provider, row.Severity, row.Title, row.Principal, row.Resource, row.Evidence, row.Recommendation))
                 .OrderByDescending(row => row.PriorityScore)
                 .ThenBy(row => row.Title, StringComparer.OrdinalIgnoreCase)
@@ -1447,16 +1510,22 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
     private readonly IRecommendationStore _store;
     private readonly ILiveCloudScanService? _liveCloudScanService;
     private readonly IDialogService? _dialogService;
+    private readonly ITicketingWorkflowService? _ticketingWorkflow;
     private string _searchText = string.Empty;
     private RecommendationGridRow? _selectedRecommendation;
     private string _exportStatusMessage = string.Empty;
-    public RecommendationsViewModel(IDemoDataService demoData, IRecommendationStore store, ILiveCloudScanService? liveCloudScanService = null, IDialogService? dialogService = null) : base(demoData)
+    private string _ticketingStatusMessage = "Select an evidence-backed recommendation to prepare a ticket.";
+    private TicketingRequestRecord? _ticketingRequest;
+    public RecommendationsViewModel(IDemoDataService demoData, IRecommendationStore store, ILiveCloudScanService? liveCloudScanService = null, IDialogService? dialogService = null, ITicketingWorkflowService? ticketingWorkflow = null) : base(demoData)
     {
         _store = store;
         _liveCloudScanService = liveCloudScanService;
         _dialogService = dialogService;
+        _ticketingWorkflow = ticketingWorkflow;
         RefreshRecommendationsCommand = new AsyncRelayCommand(LoadAsync);
         ExportDraftCommand = new AsyncRelayCommand(ExportDraftAsync);
+        RaiseTicketCommand = new AsyncRelayCommand(RaiseTicketAsync);
+        RefreshTicketStatusCommand = new AsyncRelayCommand(RefreshTicketStatusAsync);
         demoData.DataChanged += async (_, _) => await LoadAsync();
         if (_liveCloudScanService is not null)
         {
@@ -1477,14 +1546,22 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
             if (SetProperty(ref _selectedRecommendation, value))
             {
                 OnPropertyChanged(nameof(CanExportDraft));
+                OnPropertyChanged(nameof(CanRaiseTicket));
+                _ = LoadExistingTicketAsync(value?.Model);
                 ExportStatusMessage = string.Empty;
             }
         }
     }
     public bool CanExportDraft => _dialogService is not null && SelectedRecommendation?.Model is not null;
+    public bool CanRaiseTicket => _ticketingWorkflow?.CanSubmit(SelectedRecommendation?.Model) == true;
+    public bool CanRefreshTicketStatus => _ticketingRequest?.StatusUrl is not null && _ticketingWorkflow is not null;
+    public TicketingRequestRecord? TicketingRequest { get => _ticketingRequest; private set { if (SetProperty(ref _ticketingRequest, value)) OnPropertyChanged(nameof(CanRefreshTicketStatus)); } }
+    public string TicketingStatusMessage { get => _ticketingStatusMessage; private set => SetProperty(ref _ticketingStatusMessage, value); }
     public string ExportStatusMessage { get => _exportStatusMessage; private set => SetProperty(ref _exportStatusMessage, value); }
     public AsyncRelayCommand RefreshRecommendationsCommand { get; }
     public AsyncRelayCommand ExportDraftCommand { get; }
+    public AsyncRelayCommand RaiseTicketCommand { get; }
+    public AsyncRelayCommand RefreshTicketStatusCommand { get; }
     public async Task RefreshAsync() => await LoadAsync();
 
     public async Task ExportDraftAsync()
@@ -1525,6 +1602,69 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
         catch (Exception exception)
         {
             ErrorMessage = $"Unable to export policy draft: {exception.Message}";
+        }
+    }
+
+    public async Task RaiseTicketAsync()
+    {
+        if (_ticketingWorkflow is null || SelectedRecommendation?.Model is not { } recommendation || !CanRaiseTicket)
+        {
+            TicketingStatusMessage = "Configure the selected ticketing provider, mapping, and secure credential before raising a ticket.";
+            return;
+        }
+
+        IsLoading = true;
+        try
+        {
+            var result = await _ticketingWorkflow.CreateOrGetAsync(recommendation);
+            TicketingRequest = result.Ticket;
+            TicketingStatusMessage = result.AlreadyExists
+                ? $"Already linked to {result.Ticket.ExternalId}; duplicate creation was skipped."
+                : $"Created {result.Ticket.Provider} request {result.Ticket.ExternalId}.";
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to raise ticket: {exception.Message}";
+        }
+        finally { IsLoading = false; }
+    }
+
+    public async Task RefreshTicketStatusAsync()
+    {
+        if (_ticketingWorkflow is null || TicketingRequest is null || !CanRefreshTicketStatus) return;
+        try
+        {
+            TicketingRequest = await _ticketingWorkflow.RefreshStatusAsync(TicketingRequest);
+            TicketingStatusMessage = $"Ticket {TicketingRequest.ExternalId}: {TicketingRequest.Status}.";
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to refresh ticket status: {exception.Message}";
+        }
+    }
+
+    private async Task LoadExistingTicketAsync(RecommendationModel? recommendation)
+    {
+        TicketingRequest = null;
+        if (_ticketingWorkflow is null || recommendation is null)
+        {
+            TicketingStatusMessage = "Select an evidence-backed recommendation to prepare a ticket.";
+            return;
+        }
+
+        try
+        {
+            var existing = await _ticketingWorkflow.FindExistingAsync(recommendation);
+            if (SelectedRecommendation?.Model?.Id != recommendation.Id) return;
+            TicketingRequest = existing;
+            TicketingStatusMessage = existing is null
+                ? "No ticket is linked to this recommendation."
+                : $"Linked ticket {existing.ExternalId}: {existing.Status}.";
+            OnPropertyChanged(nameof(CanRaiseTicket));
+        }
+        catch (Exception exception)
+        {
+            TicketingStatusMessage = $"Ticket link lookup unavailable: {exception.Message}";
         }
     }
 
@@ -1888,34 +2028,47 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     private readonly IDemoDataService _demoData;
     private readonly ContinuousMonitoringService? _monitoringService;
     private readonly IJiraConnectionSettingsStore _jiraSettingsStore;
+    private readonly ITicketingCredentialStore _ticketingCredentialStore;
     private readonly Dictionary<TicketingProvider, string> _ticketingProviderUrls = new();
+    private readonly Dictionary<TicketingProvider, TicketingProviderConfiguration> _ticketingProviderConfigurations = new();
     private string _demoModeState = "Demo Mode is off";
     private string _ticketingSiteUrl = string.Empty;
+    private string _ticketingProjectKey = string.Empty;
+    private string _ticketingRequestType = string.Empty;
+    private string _ticketingWebhookUrl = string.Empty;
+    private string _ticketingUserName = string.Empty;
     private string _ticketingConnectionStatus = "Ticketing is not configured.";
+    private string _ticketingCredentialStatus = "Credentials are not configured.";
     private TicketingProvider _selectedTicketingProvider = TicketingProvider.Jira;
     private bool _scheduledScansEnabled;
     private int _selectedScanIntervalMinutes = 1440;
-    public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null, IJiraConnectionSettingsStore? jiraSettingsStore = null)
+    public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null, IJiraConnectionSettingsStore? jiraSettingsStore = null, ITicketingCredentialStore? ticketingCredentialStore = null)
     {
         _demoData = demoData;
         _monitoringService = monitoringService;
         _jiraSettingsStore = jiraSettingsStore ?? new LocalJiraConnectionSettingsStore();
+        _ticketingCredentialStore = ticketingCredentialStore ?? new WindowsTicketingCredentialStore();
         _scheduledScansEnabled = monitoringService?.Schedule.Enabled ?? false;
         _selectedScanIntervalMinutes = monitoringService?.Schedule.IntervalMinutes ?? 1440;
         try
         {
             var ticketingSettings = _jiraSettingsStore.Load();
             foreach (var option in TicketingProviders)
+            {
                 _ticketingProviderUrls[option.Provider] = ticketingSettings.GetBaseUrl(option.Provider);
+                _ticketingProviderConfigurations[option.Provider] = ticketingSettings.ProviderConfigurations?.GetValueOrDefault(option.Provider)
+                    ?? new TicketingProviderConfiguration();
+            }
             _selectedTicketingProvider = ticketingSettings.SelectedProvider;
             _ticketingSiteUrl = _ticketingProviderUrls.GetValueOrDefault(_selectedTicketingProvider, string.Empty);
+            LoadSelectedProviderConfiguration();
             _ticketingConnectionStatus = string.IsNullOrWhiteSpace(TicketingSiteUrl)
                 ? $"{SelectedTicketingProvider} is not configured."
                 : $"{SelectedTicketingProvider} site URL loaded.";
         }
         catch (Exception exception)
         {
-            ErrorMessage = $"Unable to load Jira settings: {exception.Message}";
+            ErrorMessage = $"Unable to load ticketing settings: {exception.Message}";
         }
         LoadDemoDataCommand = new AsyncRelayCommand(LoadDemoDataAsync);
         ResetDemoDataCommand = new AsyncRelayCommand(ResetDemoDataAsync);
@@ -1941,6 +2094,7 @@ public sealed class SettingsViewModel : WorkspaceViewModel
             OnPropertyChanged(nameof(TicketingSiteUrl));
             OnPropertyChanged(nameof(CanOpenTicketingRequest));
             OnPropertyChanged(nameof(TicketingRequestButtonText));
+            LoadSelectedProviderConfiguration();
             TicketingConnectionStatus = string.IsNullOrWhiteSpace(TicketingSiteUrl)
                 ? $"{SelectedTicketingProvider} is not configured."
                 : $"{SelectedTicketingProvider} site URL loaded.";
@@ -1976,6 +2130,11 @@ public sealed class SettingsViewModel : WorkspaceViewModel
         }
     }
     public string TicketingConnectionStatus { get => _ticketingConnectionStatus; private set => SetProperty(ref _ticketingConnectionStatus, value); }
+    public string TicketingProjectKey { get => _ticketingProjectKey; set => SetProperty(ref _ticketingProjectKey, value); }
+    public string TicketingRequestType { get => _ticketingRequestType; set => SetProperty(ref _ticketingRequestType, value); }
+    public string TicketingWebhookUrl { get => _ticketingWebhookUrl; set => SetProperty(ref _ticketingWebhookUrl, value); }
+    public string TicketingUserName { get => _ticketingUserName; set => SetProperty(ref _ticketingUserName, value); }
+    public string TicketingCredentialStatus { get => _ticketingCredentialStatus; private set => SetProperty(ref _ticketingCredentialStatus, value); }
     public string TicketingRequestButtonText => SelectedTicketingProvider switch
     {
         TicketingProvider.Jira => "Open Jira issue form",
@@ -2036,13 +2195,20 @@ public sealed class SettingsViewModel : WorkspaceViewModel
                 normalizedUrls[SelectedTicketingProvider] = LocalJiraConnectionSettingsStore.NormalizeBaseUrl(TicketingSiteUrl);
             else
                 normalizedUrls.Remove(SelectedTicketingProvider);
+            var providerConfigurations = _ticketingProviderConfigurations.ToDictionary(pair => pair.Key, pair => pair.Value);
+            providerConfigurations[SelectedTicketingProvider] = new TicketingProviderConfiguration(
+                TicketingUserName.Trim(), TicketingProjectKey.Trim(), TicketingRequestType.Trim(),
+                string.IsNullOrWhiteSpace(TicketingWebhookUrl) ? string.Empty : LocalJiraConnectionSettingsStore.NormalizeBaseUrl(TicketingWebhookUrl));
             _jiraSettingsStore.Save(new JiraConnectionSettings(
                 normalizedUrls.GetValueOrDefault(TicketingProvider.Jira, string.Empty),
                 normalizedUrls.GetValueOrDefault(TicketingProvider.ServiceNow, string.Empty),
                 SelectedTicketingProvider,
-                normalizedUrls));
+                normalizedUrls,
+                providerConfigurations));
             _ticketingProviderUrls.Clear();
             foreach (var pair in normalizedUrls) _ticketingProviderUrls[pair.Key] = pair.Value;
+            _ticketingProviderConfigurations.Clear();
+            foreach (var pair in providerConfigurations) _ticketingProviderConfigurations[pair.Key] = pair.Value;
             _ticketingSiteUrl = _ticketingProviderUrls.GetValueOrDefault(SelectedTicketingProvider, string.Empty);
             OnPropertyChanged(nameof(TicketingSiteUrl));
             OnPropertyChanged(nameof(JiraBaseUrl));
@@ -2057,6 +2223,44 @@ public sealed class SettingsViewModel : WorkspaceViewModel
             ErrorMessage = $"Unable to save ticketing URL: {exception.Message}";
         }
         return Task.CompletedTask;
+    }
+
+    public Task SaveTicketingCredentialsAsync(string secret)
+    {
+        try
+        {
+            _ticketingCredentialStore.Save(SelectedTicketingProvider, new TicketingCredentials(TicketingUserName.Trim(), secret));
+            TicketingCredentialStatus = $"Credential saved securely for {SelectedTicketingProvider} on this Windows user profile.";
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to save ticketing credential: {exception.Message}";
+        }
+        return Task.CompletedTask;
+    }
+
+    private void LoadSelectedProviderConfiguration()
+    {
+        var configuration = _ticketingProviderConfigurations.GetValueOrDefault(SelectedTicketingProvider) ?? new TicketingProviderConfiguration();
+        _ticketingUserName = configuration.UserName;
+        _ticketingProjectKey = configuration.ProjectKey;
+        _ticketingRequestType = configuration.RequestType;
+        _ticketingWebhookUrl = configuration.WebhookUrl;
+        OnPropertyChanged(nameof(TicketingUserName));
+        OnPropertyChanged(nameof(TicketingProjectKey));
+        OnPropertyChanged(nameof(TicketingRequestType));
+        OnPropertyChanged(nameof(TicketingWebhookUrl));
+        try
+        {
+            TicketingCredentialStatus = _ticketingCredentialStore.Read(SelectedTicketingProvider) is null
+                ? "Credentials are not configured."
+                : $"Secure credential is configured for {SelectedTicketingProvider}.";
+        }
+        catch (Exception exception)
+        {
+            TicketingCredentialStatus = $"Credential store unavailable: {exception.Message}";
+        }
     }
 
     public Task OpenJiraAsync() => OpenTicketingRequestAsync();

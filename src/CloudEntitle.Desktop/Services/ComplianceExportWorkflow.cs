@@ -15,7 +15,8 @@ namespace CloudEntitle.Desktop.Services;
 public interface IComplianceExportWorkflow
 {
     bool CanExport { get; }
-    Task<byte[]> CreateBundleAsync(ComplianceFramework framework, CancellationToken cancellationToken = default);
+    Task<byte[]> CreateBundleAsync(ComplianceFramework framework, IReadOnlyCollection<ComplianceStandard>? selectedStandards = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ComplianceAssessmentTrendPoint>> GetHistoryAsync(ComplianceFramework framework, CancellationToken cancellationToken = default);
 }
 
 public sealed class ComplianceExportWorkflow(
@@ -24,11 +25,15 @@ public sealed class ComplianceExportWorkflow(
     AuthenticatedOrganizationContext authenticatedContext,
     ComplianceAssessmentService assessmentService,
     IdentityGovernanceService governanceService,
-    ComplianceExportService exportService) : IComplianceExportWorkflow
+    ComplianceExportService exportService,
+    IComplianceBundleSigner signer,
+    IComplianceAssessmentHistoryStore? historyStore = null) : IComplianceExportWorkflow
 {
+    private readonly IComplianceAssessmentHistoryStore _historyStore = historyStore ?? new LocalComplianceAssessmentHistoryStore();
+
     public bool CanExport => TryGetAuthorizedOrganization(out _, out _);
 
-    public async Task<byte[]> CreateBundleAsync(ComplianceFramework framework, CancellationToken cancellationToken = default)
+    public async Task<byte[]> CreateBundleAsync(ComplianceFramework framework, IReadOnlyCollection<ComplianceStandard>? selectedStandards = null, CancellationToken cancellationToken = default)
     {
         if (!TryGetAuthorizedOrganization(out var identity, out var organization))
             throw new UnauthorizedAccessException("Sign in as an organization member with report-export permission before exporting compliance evidence.");
@@ -51,11 +56,22 @@ public sealed class ComplianceExportWorkflow(
         var scans = await context.Scans.AsNoTracking().Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken);
         var auditEvents = await context.AuditEvents.AsNoTracking().Where(item => item.OrganizationId == organization.Id).ToListAsync(cancellationToken);
         var governance = governanceService.Assess(principals, effectiveAccess, activity);
-        var complianceContext = new ComplianceContext(boundAccounts, principals, effectiveAccess, accessPaths, findings, governance, auditEvents);
-        var assessment = assessmentService.Assess(complianceContext, framework);
+        var complianceContext = new ComplianceContext(boundAccounts, principals, effectiveAccess, accessPaths, findings, governance, auditEvents)
+        {
+            Scans = scans
+        };
+        var assessment = assessmentService.Assess(complianceContext, framework, selectedStandards: selectedStandards);
+        await _historyStore.SaveAsync(organization.Id, assessment, cancellationToken);
         var latestScan = scans.Where(scan => scan.CompletedAt.HasValue).MaxBy(scan => scan.CompletedAt)?.CompletedAt;
         return exportService.CreateBundle(assessment,
-            new ComplianceExportMetadata(organization.Id, organization.Name, organization.EntraTenantId, latestScan));
+            new ComplianceExportMetadata(organization.Id, organization.Name, organization.EntraTenantId, latestScan), signer);
+    }
+
+    public async Task<IReadOnlyList<ComplianceAssessmentTrendPoint>> GetHistoryAsync(ComplianceFramework framework, CancellationToken cancellationToken = default)
+    {
+        if (!TryGetAuthorizedOrganization(out _, out var organization))
+            throw new UnauthorizedAccessException("Sign in as an organization member with report-export permission to view compliance history.");
+        return await _historyStore.GetTrendAsync(organization.Id, framework, cancellationToken: cancellationToken);
     }
 
     private bool TryGetAuthorizedOrganization(out OrganizationIdentity identity, out OrganizationProfile organization)

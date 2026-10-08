@@ -8,6 +8,26 @@ namespace CloudEntitle.Compliance.Models;
 
 public enum ComplianceControlState { Pass, Fail, Partial, NotAssessed }
 public enum ComplianceFramework { CiemBaseline, LeastPrivilege, IdentityGovernance, AccessReview }
+public enum ComplianceStandard { Nist80053Rev5, Iso27001_2022, Soc2TrustServices }
+
+public sealed record ComplianceStandardMapping(ComplianceStandard Standard, string Reference, string Rationale);
+
+public sealed record ComplianceEvidenceReference(
+    string EvidenceId,
+    string SourceType,
+    string SourceId,
+    Guid? CloudAccountId,
+    DateTime? CollectedAtUtc,
+    string Sha256);
+
+public sealed record ComplianceAssessmentTrendPoint(
+    Guid AssessmentId,
+    ComplianceFramework Framework,
+    DateTime AssessedAt,
+    int Passed,
+    int Failed,
+    int Partial,
+    int NotAssessed);
 
 public sealed record ComplianceControl(
     string ControlId,
@@ -17,7 +37,11 @@ public sealed record ComplianceControl(
     ComplianceControlState State,
     int EvidenceCount,
     IReadOnlyList<string> Evidence,
-    IReadOnlyList<string> Gaps);
+    IReadOnlyList<string> Gaps)
+{
+    public IReadOnlyList<ComplianceStandardMapping> Mappings { get; init; } = Array.Empty<ComplianceStandardMapping>();
+    public IReadOnlyList<ComplianceEvidenceReference> EvidenceLineage { get; init; } = Array.Empty<ComplianceEvidenceReference>();
+}
 
 public sealed record ComplianceAssessment(
     Guid Id,
@@ -27,7 +51,10 @@ public sealed record ComplianceAssessment(
     int Passed,
     int Failed,
     int Partial,
-    int NotAssessed);
+    int NotAssessed)
+{
+    public IReadOnlyList<ComplianceStandard> SelectedStandards { get; init; } = Array.Empty<ComplianceStandard>();
+}
 
 public sealed record ComplianceContext(
     IReadOnlyList<CloudAccount> Accounts,
@@ -36,4 +63,7 @@ public sealed record ComplianceContext(
     IReadOnlyList<DomainAccessPath> AccessPaths,
     IReadOnlyList<RiskFindingModel> Findings,
     IReadOnlyList<IdentityGovernanceRecord> GovernanceRecords,
-    IReadOnlyList<AuditEvent> AuditEvents);
+    IReadOnlyList<AuditEvent> AuditEvents)
+{
+    public IReadOnlyList<Scan> Scans { get; init; } = Array.Empty<Scan>();
+}

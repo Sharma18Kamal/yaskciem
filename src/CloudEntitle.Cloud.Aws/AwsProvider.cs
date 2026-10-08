@@ -386,7 +386,36 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     public Task<IReadOnlyList<CloudPrincipal>> GetPrincipalsAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverIdentitiesAsync(accountId, cancellationToken);
     public Task<IReadOnlyList<CloudPermission>> GetPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverPermissionsAsync(accountId, cancellationToken);
     public Task<IReadOnlyList<CloudRole>> GetRolesAsync(Guid accountId, CancellationToken cancellationToken = default) => DiscoverRolesAsync(accountId, cancellationToken);
-    public Task<IReadOnlyList<CloudResource>> GetResourcesAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudResource>>(Array.Empty<CloudResource>());
+    public async Task<IReadOnlyList<CloudResource>> GetResourcesAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        if (!_useLiveDiscovery) return Array.Empty<CloudResource>();
+        using var document = JsonDocument.Parse(await GetAwsOutputAsync(
+            new[] { "resourcegroupstaggingapi", "get-resources", "--resources-per-page", "100", "--output", "json" },
+            cancellationToken, accountId));
+        if (!document.RootElement.TryGetProperty("ResourceTagMappingList", out var resources) || resources.ValueKind != JsonValueKind.Array)
+            return Array.Empty<CloudResource>();
+
+        return resources.EnumerateArray().Select(resource =>
+        {
+            var arn = resource.TryGetProperty("ResourceARN", out var resourceArn) ? resourceArn.GetString() ?? string.Empty : string.Empty;
+            var tags = resource.TryGetProperty("Tags", out var tagList) && tagList.ValueKind == JsonValueKind.Array
+                ? tagList.EnumerateArray().Where(tag => tag.TryGetProperty("Key", out _) && tag.TryGetProperty("Value", out _))
+                    .ToDictionary(tag => tag.GetProperty("Key").GetString() ?? string.Empty,
+                        tag => tag.GetProperty("Value").GetString() ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var resourceSeparator = Math.Max(arn.LastIndexOf('/'), arn.LastIndexOf(':'));
+            var resourceName = resourceSeparator >= 0 ? arn[(resourceSeparator + 1)..] : arn;
+            var type = arn.StartsWith("arn:", StringComparison.OrdinalIgnoreCase)
+                ? arn.Split(':').Skip(2).FirstOrDefault() ?? "AWS resource"
+                : "AWS resource";
+            return new CloudResource
+            {
+                Id = Guid.NewGuid(), AccountId = accountId, ExternalId = arn,
+                Name = string.IsNullOrWhiteSpace(resourceName) ? arn : resourceName,
+                Type = type, ResourceType = ResourceType.Resource, ResourceUri = arn, Scope = arn, Tags = tags
+            };
+        }).Where(resource => !string.IsNullOrWhiteSpace(resource.ExternalId)).ToArray();
+    }
 
     public async Task<IReadOnlyList<CloudGroup>> DiscoverGroupsAsync(Guid accountId, CancellationToken cancellationToken = default)
     {

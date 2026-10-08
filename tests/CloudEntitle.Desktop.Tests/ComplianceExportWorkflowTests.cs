@@ -1,5 +1,6 @@
 using System.IO;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using CloudEntitle.Compliance.Models;
 using CloudEntitle.Compliance.Services;
@@ -56,6 +57,9 @@ public sealed class ComplianceExportWorkflowTests
             var bytes = await workflow.CreateBundleAsync(ComplianceFramework.CiemBaseline);
             using var archive = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
             using var assessment = JsonDocument.Parse(await ReadEntryAsync(archive, "assessment.json"));
+            Assert.Contains(archive.Entries, entry => entry.FullName == "signature.json");
+            using var lineage = JsonDocument.Parse(await ReadEntryAsync(archive, "evidence-lineage.json"));
+            Assert.NotEmpty(lineage.RootElement.EnumerateArray());
             var accountEvidence = assessment.RootElement.GetProperty("controls").EnumerateArray()
                 .Single(control => control.GetProperty("controlId").GetString() == "CIEM-BASE-001")
                 .GetProperty("evidence").EnumerateArray().Select(item => item.GetString()).ToArray();
@@ -90,7 +94,7 @@ public sealed class ComplianceExportWorkflowTests
     }
 
     private static ComplianceExportWorkflow CreateWorkflow(TestDbContextFactory factory, OrganizationManagementService organizations, AuthenticatedOrganizationContext session)
-        => new(factory, organizations, session, new ComplianceAssessmentService(), new IdentityGovernanceService(), new ComplianceExportService());
+        => new(factory, organizations, session, new ComplianceAssessmentService(), new IdentityGovernanceService(), new ComplianceExportService(), new TestComplianceBundleSigner());
 
     private static OrganizationIdentity CreateIdentity(string email)
         => CreateIdentity(Guid.NewGuid().ToString("D"), email);
@@ -107,5 +111,19 @@ public sealed class ComplianceExportWorkflowTests
     private sealed class TestDbContextFactory(DbContextOptions<CloudEntitleDbContext> options) : IDbContextFactory<CloudEntitleDbContext>
     {
         public CloudEntitleDbContext CreateDbContext() => new(options);
+    }
+
+    private sealed class TestComplianceBundleSigner : IComplianceBundleSigner
+    {
+        public ComplianceBundleSignatureDocument Sign(ReadOnlySpan<byte> manifestBytes)
+        {
+            using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var publicKey = key.ExportSubjectPublicKeyInfo();
+            return new ComplianceBundleSignatureDocument("ECDSA-P256-SHA256",
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(publicKey)).ToLowerInvariant(),
+                Convert.ToBase64String(publicKey),
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(manifestBytes)).ToLowerInvariant(),
+                Convert.ToBase64String(key.SignData(manifestBytes, HashAlgorithmName.SHA256)));
+        }
     }
 }

@@ -119,7 +119,8 @@ public enum ResourceSecuritySignalType
     PublicExposure,
     SensitiveData,
     WorkloadVulnerability,
-    CriticalAsset
+    CriticalAsset,
+    WorkloadIdentityRisk
 }
 
 public enum SecurityEvidenceCoverageStatus { Complete, Partial, Unavailable, Unsupported, Unknown }

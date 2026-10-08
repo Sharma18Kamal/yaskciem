@@ -210,6 +210,7 @@ public sealed class ExploitableAttackPathRule : RiskRuleBase
             var sensitiveSignals = signals.Where(signal => signal.Type == ResourceSecuritySignalType.SensitiveData).ToArray();
             var vulnerabilities = signals.Where(signal => signal.Type == ResourceSecuritySignalType.WorkloadVulnerability).ToArray();
             var criticalSignals = signals.Where(signal => signal.Type == ResourceSecuritySignalType.CriticalAsset).ToArray();
+            var workloadIdentitySignals = signals.Where(signal => signal.Type == ResourceSecuritySignalType.WorkloadIdentityRisk).ToArray();
             var publicTag = HasTagValue(resource, new[] { "PubliclyAccessible", "InternetFacing", "PublicAccess", "Exposure" }, new[] { "true", "yes", "public", "internet", "internet-facing" });
             var sensitiveTag = HasTagValue(resource, new[] { "Sensitivity", "DataClassification" }, new[] { "sensitive", "confidential", "restricted", "high", "critical", "tier0" });
             var criticalTag = HasTagValue(resource, new[] { "CriticalAsset", "BusinessCriticality", "Criticality", "AssetTier" }, new[] { "true", "yes", "critical", "tier0", "crown-jewel", "crown jewel" });
@@ -223,7 +224,8 @@ public sealed class ExploitableAttackPathRule : RiskRuleBase
             var sensitiveWeight = Math.Max(SignalWeight(sensitiveSignals, context), TagWeight(sensitiveTag, resource.UpdatedAt, context));
             var criticalWeight = Math.Max(SignalWeight(criticalSignals, context), TagWeight(criticalTag, resource.UpdatedAt, context));
             var vulnerabilityWeight = SignalWeight(vulnerabilities, context);
-            var hasRiskyResource = publicWeight > 0 || sensitiveWeight > 0 || criticalWeight > 0 || vulnerabilityWeight > 0;
+            var workloadIdentityWeight = SignalWeight(workloadIdentitySignals, context);
+            var hasRiskyResource = publicWeight > 0 || sensitiveWeight > 0 || criticalWeight > 0 || vulnerabilityWeight > 0 || workloadIdentityWeight > 0;
             if (!hasRiskyIdentity || !hasRiskyResource) continue;
 
             var vulnerabilityScore = vulnerabilities.Select(signal => (int)Math.Round(VulnerabilityPoints(signal) * SignalConfidence(signal, context))).DefaultIfEmpty(0).Max();
@@ -235,8 +237,13 @@ public sealed class ExploitableAttackPathRule : RiskRuleBase
                 + (int)Math.Round(20 * sensitiveWeight)
                 + (int)Math.Round(25 * criticalWeight)
                 + vulnerabilityScore
+                + (int)Math.Round(20 * workloadIdentityWeight)
                 + (path.PathStatus == AccessPathStatus.Complete ? 10 : path.PathStatus == AccessPathStatus.Partial ? 4 : 0);
-            var coverageStatus = Enum.GetValues<ResourceSecuritySignalType>()
+            var coverageTypes = Enum.GetValues<ResourceSecuritySignalType>()
+                .Where(type => type != ResourceSecuritySignalType.WorkloadIdentityRisk
+                    || IsWorkloadResource(resource)
+                    || workloadIdentitySignals.Length > 0);
+            var coverageStatus = coverageTypes
                 .ToDictionary(type => type, type => CoverageFreshness(type, resource.Id, context));
             var signalFreshness = signals.Select(signal => $"{signal.Type}:{SignalFreshness(signal, context)}").ToArray();
             var identityFreshness = DateFreshness(principal.UpdatedAt, context);
@@ -268,7 +275,7 @@ public sealed class ExploitableAttackPathRule : RiskRuleBase
             var signalSummary = string.Join("; ", signals.Select(signal => $"{signal.Type}={signal.Name} from {signal.Source} ({SignalFreshness(signal, context)})"));
             var identitySummary = $"IdentityType={principal.IdentityType}; Privileged={access.IsPrivileged || principal.IsPrivileged}; External={principal.IsExternal}";
             var coverageSummary = string.Join(", ", coverageStatus.Select(item => $"{item.Key}={item.Value}"));
-            var evidence = $"PriorityScore={score}; {identitySummary}; IdentityProfileFreshness={identityFreshness}; EffectiveAccessFreshness={accessFreshness}; PublicExposure={publicWeight > 0}; SensitiveAsset={sensitiveWeight > 0}; CriticalAsset={criticalWeight > 0}; VulnerabilityPoints={vulnerabilityScore}; PathStatus={path.PathStatus}; ModeledAccessPathFreshness={pathFreshness}; EvidenceCoverage={coverageSummary}; Signals={signalSummary}";
+            var evidence = $"PriorityScore={score}; {identitySummary}; IdentityProfileFreshness={identityFreshness}; EffectiveAccessFreshness={accessFreshness}; PublicExposure={publicWeight > 0}; SensitiveAsset={sensitiveWeight > 0}; CriticalAsset={criticalWeight > 0}; VulnerabilityPoints={vulnerabilityScore}; WorkloadIdentityRisk={workloadIdentityWeight > 0}; PathStatus={path.PathStatus}; ModeledAccessPathFreshness={pathFreshness}; EvidenceCoverage={coverageSummary}; Signals={signalSummary}";
             var evidenceDetails = new Dictionary<string, string>
             {
                 ["IdentityType"] = principal.IdentityType.ToString(),
@@ -343,6 +350,10 @@ public sealed class ExploitableAttackPathRule : RiskRuleBase
     private static bool HasTagValue(CloudResource resource, IReadOnlyList<string> keys, IReadOnlyList<string> acceptedValues)
         => resource.Tags.Any(tag => keys.Contains(tag.Key, StringComparer.OrdinalIgnoreCase)
             && acceptedValues.Contains(tag.Value.Trim(), StringComparer.OrdinalIgnoreCase));
+
+    private static bool IsWorkloadResource(CloudResource resource)
+        => new[] { "workload", "kubernetes", "container", "pod", "deployment", "function" }
+            .Any(value => resource.Type.Contains(value, StringComparison.OrdinalIgnoreCase));
 }
 public sealed class ProductionAdministrativeAccessRule : RiskRuleBase { public override string RuleId => "CIEM-009"; public override string Name => "Production Administrative Access"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.Scope; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged && Resource(c, a.ResourceId)?.Tags.TryGetValue("Environment", out var environment) == true && string.Equals(environment, "Production", StringComparison.OrdinalIgnoreCase)).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "Privileged effective access reaches a production resource.", "Resource tag Environment=Production")).ToArray()); }
 public sealed class ExcessiveServicePermissionRule : RiskRuleBase { public override string RuleId => "CIEM-010"; public override string Name => "Potentially Excessive Service Permissions"; public override RiskSeverity DefaultSeverity => RiskSeverity.Medium; public override RiskCategory Category => RiskCategory.ServiceIdentity; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => Principal(c, a.PrincipalId)?.IdentityType is IdentityType.ServiceAccount or IdentityType.ServicePrincipal or IdentityType.ManagedIdentity).Where(a => Permission(c, a.PermissionId)?.Action?.Contains("write", StringComparison.OrdinalIgnoreCase) == true || Permission(c, a.PermissionId)?.Action?.Contains("delete", StringComparison.OrdinalIgnoreCase) == true).Select(a => Finding(c, a, RiskEvaluationState.Potential, Name, "A service identity has write/delete capability requiring review.", "Service permission breadth exceeds read-only operations evidence.")).ToArray()); }

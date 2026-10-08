@@ -18,7 +18,10 @@ public sealed record RecommendationContext(
     IReadOnlyList<ActivityRecord> ActivityRecords,
     DateTime EvaluatedAt,
     IReadOnlyList<ActivityEvidenceCoverage>? ActivityCoverage = null,
-    int ActivityObservationDays = 30);
+    int ActivityObservationDays = 30)
+{
+    public IReadOnlyList<NormalizedPermission> NormalizedPermissions { get; init; } = Array.Empty<NormalizedPermission>();
+}
 
 public sealed record RecommendationEvidence(
     Guid RiskFindingId,

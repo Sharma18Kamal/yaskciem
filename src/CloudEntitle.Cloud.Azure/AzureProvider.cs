@@ -493,19 +493,41 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
         }
 
         using var document = JsonDocument.Parse(await GetAzOutputAsync(new[] { "resource", "list", "--subscription", account.SubscriptionId, "--output", "json" }, cancellationToken));
-        return document.RootElement.EnumerateArray().Select(resource => new CloudResource
+        return document.RootElement.EnumerateArray().Select(resource =>
         {
-            Id = Guid.NewGuid(),
-            AccountId = accountId,
-            ExternalId = resource.TryGetProperty("id", out var id) ? id.GetString() ?? string.Empty : string.Empty,
-            Name = resource.TryGetProperty("name", out var name) ? name.GetString() ?? "Azure resource" : "Azure resource",
-            Type = resource.TryGetProperty("type", out var type) ? type.GetString() ?? "Unknown" : "Unknown",
-            ResourceType = ResourceType.Resource,
-            ResourceUri = resource.TryGetProperty("id", out id) ? id.GetString() : null,
-            Region = resource.TryGetProperty("location", out var location) ? location.GetString() : null,
-            Location = resource.TryGetProperty("location", out location) ? location.GetString() : null,
-            Scope = resource.TryGetProperty("id", out id) ? id.GetString() : null
+            var tags = resource.TryGetProperty("tags", out var resourceTags) && resourceTags.ValueKind == JsonValueKind.Object
+                ? resourceTags.EnumerateObject().ToDictionary(tag => tag.Name,
+                    tag => tag.Value.ValueKind == JsonValueKind.String ? tag.Value.GetString() ?? string.Empty : tag.Value.ToString(),
+                    StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (resource.TryGetProperty("properties", out var properties) && properties.ValueKind == JsonValueKind.Object)
+            {
+                CopyPropertyTag(properties, tags, "publicNetworkAccess", "PublicNetworkAccess");
+                CopyPropertyTag(properties, tags, "allowBlobPublicAccess", "AllowBlobPublicAccess");
+                if (properties.TryGetProperty("networkAcls", out var networkAcls) && networkAcls.ValueKind == JsonValueKind.Object)
+                    CopyPropertyTag(networkAcls, tags, "defaultAction", "NetworkDefaultAction");
+            }
+            return new CloudResource
+            {
+                Id = Guid.NewGuid(),
+                AccountId = accountId,
+                ExternalId = resource.TryGetProperty("id", out var id) ? id.GetString() ?? string.Empty : string.Empty,
+                Name = resource.TryGetProperty("name", out var name) ? name.GetString() ?? "Azure resource" : "Azure resource",
+                Type = resource.TryGetProperty("type", out var type) ? type.GetString() ?? "Unknown" : "Unknown",
+                ResourceType = ResourceType.Resource,
+                ResourceUri = resource.TryGetProperty("id", out id) ? id.GetString() : null,
+                Region = resource.TryGetProperty("location", out var location) ? location.GetString() : null,
+                Location = resource.TryGetProperty("location", out location) ? location.GetString() : null,
+                Scope = resource.TryGetProperty("id", out id) ? id.GetString() : null,
+                Tags = tags
+            };
         }).ToArray();
+    }
+
+    private static void CopyPropertyTag(JsonElement source, IDictionary<string, string> tags, string propertyName, string tagName)
+    {
+        if (source.TryGetProperty(propertyName, out var value) && value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+            tags[tagName] = value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : value.ToString();
     }
 
     public Task<IReadOnlyList<CloudRole>> GetRolesAsync(Guid accountId, CancellationToken cancellationToken = default)

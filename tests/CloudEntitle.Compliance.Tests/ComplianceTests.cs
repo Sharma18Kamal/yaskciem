@@ -4,6 +4,7 @@ using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.IdentityGovernance.Models;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Xunit;
@@ -44,6 +45,24 @@ public sealed class ComplianceTests
     }
 
     [Fact]
+    public void Assessment_ShouldAttachSelectedStandardMappingsAndEvidenceLineage()
+    {
+        var account = new CloudAccount { Id = Guid.NewGuid(), Name = "Production", ExternalAccountId = "prod", CloudProvider = CloudProviderType.Azure, IsReadOnly = true };
+        var context = new ComplianceContext(new[] { account }, Array.Empty<CloudPrincipal>(), Array.Empty<DomainEffectiveAccess>(), Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(), Array.Empty<IdentityGovernanceRecord>(), Array.Empty<AuditEvent>());
+
+        var assessment = new ComplianceAssessmentService().Assess(context, ComplianceFramework.CiemBaseline, selectedStandards: new[] { ComplianceStandard.Nist80053Rev5 });
+        var accountControl = Assert.Single(assessment.Controls, control => control.ControlId == "CIEM-BASE-001");
+
+        Assert.Equal(new[] { ComplianceStandard.Nist80053Rev5 }, assessment.SelectedStandards);
+        Assert.Contains(accountControl.Mappings, mapping => mapping.Reference == "AC-6" && mapping.Standard == ComplianceStandard.Nist80053Rev5);
+        Assert.DoesNotContain(accountControl.Mappings, mapping => mapping.Standard == ComplianceStandard.Iso27001_2022);
+        var lineage = Assert.Single(accountControl.EvidenceLineage);
+        Assert.Equal(account.Id.ToString("D"), lineage.SourceId);
+        Assert.Equal(64, lineage.Sha256.Length);
+        Assert.Equal(account.Id, lineage.CloudAccountId);
+    }
+
+    [Fact]
     public void AuditService_ShouldRemoveSensitiveMetadata()
     {
         var audit = new AuditEventService().Create("ReviewCompleted", "Access review completed", metadata: new Dictionary<string, string> { ["ticket"] = "INC-1", ["token"] = "do-not-store", ["password"] = "do-not-store" });
@@ -61,19 +80,28 @@ public sealed class ComplianceTests
         var assessment = new ComplianceAssessment(Guid.NewGuid(), ComplianceFramework.CiemBaseline, DateTime.UtcNow, new[] { control }, 0, 0, 1, 0);
         var metadata = new ComplianceExportMetadata(Guid.NewGuid(), "Acme", Guid.NewGuid().ToString("D"), DateTime.UtcNow);
 
-        using var stream = new MemoryStream(new ComplianceExportService().CreateBundle(assessment, metadata));
+        using var signer = new TestComplianceBundleSigner();
+        using var stream = new MemoryStream(new ComplianceExportService().CreateBundle(assessment, metadata, signer));
         using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
         var manifest = ReadEntry(archive, "manifest.json");
         var exportedAssessment = ReadEntry(archive, "assessment.json");
         var csv = ReadEntry(archive, "controls.csv");
+        var signature = ComplianceBundleSignatureVerifier.ReadSignature(Encoding.UTF8.GetBytes(ReadEntry(archive, "signature.json")));
+        var manifestBytes = Encoding.UTF8.GetBytes(manifest);
 
         using var manifestJson = JsonDocument.Parse(manifest);
         using var assessmentJson = JsonDocument.Parse(exportedAssessment);
-        Assert.Equal("1.0", manifestJson.RootElement.GetProperty("schemaVersion").GetString());
+        Assert.Equal("1.1", manifestJson.RootElement.GetProperty("schemaVersion").GetString());
         Assert.Equal(metadata.OrganizationId, manifestJson.RootElement.GetProperty("organizationId").GetGuid());
         Assert.Equal(control.Evidence[0], assessmentJson.RootElement.GetProperty("controls")[0].GetProperty("evidence")[0].GetString());
         Assert.Contains("'=HYPERLINK", csv);
         Assert.Contains("Owner review required", csv);
+        Assert.Contains(archive.Entries, entry => entry.FullName == "control-mappings.csv");
+        Assert.Contains(archive.Entries, entry => entry.FullName == "evidence-lineage.json");
+        Assert.True(ComplianceBundleSignatureVerifier.Verify(manifestBytes, signature));
+        Assert.True(ComplianceBundleSignatureVerifier.VerifyArtifact(manifestBytes, "controls.csv", Encoding.UTF8.GetBytes(csv)));
+        Assert.False(ComplianceBundleSignatureVerifier.VerifyArtifact(manifestBytes, "controls.csv", Encoding.UTF8.GetBytes(csv + "tampered")));
+        Assert.False(ComplianceBundleSignatureVerifier.Verify(Encoding.UTF8.GetBytes(manifest + "tampered"), signature));
     }
 
     [Fact]
@@ -81,13 +109,30 @@ public sealed class ComplianceTests
     {
         var assessment = new ComplianceAssessment(Guid.NewGuid(), ComplianceFramework.CiemBaseline, DateTime.UtcNow, Array.Empty<ComplianceControl>(), 0, 0, 0, 0);
 
+        using var signer = new TestComplianceBundleSigner();
         Assert.Throws<ArgumentException>(() => new ComplianceExportService().CreateBundle(assessment,
-            new ComplianceExportMetadata(Guid.Empty, "Acme", Guid.NewGuid().ToString("D"), null)));
+            new ComplianceExportMetadata(Guid.Empty, "Acme", Guid.NewGuid().ToString("D"), null), signer));
     }
 
     private static string ReadEntry(ZipArchive archive, string name)
     {
         using var reader = new StreamReader(archive.GetEntry(name)!.Open(), Encoding.UTF8);
         return reader.ReadToEnd();
+    }
+
+    private sealed class TestComplianceBundleSigner : IComplianceBundleSigner, IDisposable
+    {
+        private readonly ECDsa _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+
+        public ComplianceBundleSignatureDocument Sign(ReadOnlySpan<byte> manifestBytes)
+        {
+            var publicKey = _key.ExportSubjectPublicKeyInfo();
+            return new ComplianceBundleSignatureDocument("ECDSA-P256-SHA256",
+                Convert.ToHexString(SHA256.HashData(publicKey)).ToLowerInvariant(), Convert.ToBase64String(publicKey),
+                Convert.ToHexString(SHA256.HashData(manifestBytes)).ToLowerInvariant(),
+                Convert.ToBase64String(_key.SignData(manifestBytes, HashAlgorithmName.SHA256)));
+        }
+
+        public void Dispose() => _key.Dispose();
     }
 }

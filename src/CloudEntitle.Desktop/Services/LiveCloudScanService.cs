@@ -3,7 +3,9 @@ using CloudEntitle.Application.Services;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.Desktop.ViewModels;
+using CloudEntitle.RiskEngine.Models;
 using ApplicationRiskEngine = CloudEntitle.Application.Services.RiskEngine;
+using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
 
 namespace CloudEntitle.Desktop.Services;
 
@@ -37,6 +39,11 @@ public sealed record LiveCloudScanResult(
     public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
     public IReadOnlyList<KubernetesWorkloadTrace> WorkloadTraces { get; init; } = Array.Empty<KubernetesWorkloadTrace>();
     public IReadOnlyList<PostureChangeRecord> PostureChanges { get; init; } = Array.Empty<PostureChangeRecord>();
+    public IReadOnlyList<ResourceSecuritySignal> ResourceSecuritySignals { get; init; } = Array.Empty<ResourceSecuritySignal>();
+    public IReadOnlyList<ResourceSecurityEvidenceCoverage> ResourceSecurityCoverage { get; init; } = Array.Empty<ResourceSecurityEvidenceCoverage>();
+    public IReadOnlyList<DomainAccessPath> ModeledAccessPaths { get; init; } = Array.Empty<DomainAccessPath>();
+    public IReadOnlyList<RiskFindingModel> ResourceRiskFindings { get; init; } = Array.Empty<RiskFindingModel>();
+    public IReadOnlyList<string> RiskGraphDiagnostics { get; init; } = Array.Empty<string>();
     public PostureTrendRecord? PostureTrend { get; init; }
     public string NotificationDelivery { get; init; } = "Not attempted";
 }
@@ -61,6 +68,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
     private readonly PostureHistoryService _postureHistoryService = new();
     private readonly IPostureNotificationChannel _postureNotificationChannel;
     private readonly ApplicationRiskEngine _riskEngine = new();
+    private readonly LiveResourceRiskGraphEvaluator _resourceRiskGraphEvaluator = new();
     private readonly SemaphoreSlim _scanGate = new(1, 1);
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
@@ -136,6 +144,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var startedAt = DateTime.UtcNow;
         var accountsScanned = 0;
         var accountRecords = new List<LiveScanAccountRecord>();
+        var accountsDiscovered = new List<CloudAccount>();
         var identitiesScanned = 0;
         var resourcesScanned = 0;
         var rolesScanned = 0;
@@ -146,6 +155,9 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var roleRecords = new List<DiscoveredCloudRole>();
         var permissionRecords = new List<DiscoveredCloudPermission>();
         var effectiveAccessRecords = new List<LiveEffectiveAccessRecord>();
+        var graphAssignments = new List<LiveResourceAccessAssignment>();
+        var resourceSecuritySignals = new List<ResourceSecuritySignal>();
+        var resourceSecurityCoverage = new List<ResourceSecurityEvidenceCoverage>();
         var findings = new List<RiskFinding>();
         var messages = new List<string>();
         var coverage = new List<ScanCoverageRecord>();
@@ -193,6 +205,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                 var accounts = await CollectAsync(provider.ProviderType.ToString(), string.Empty, "Cloud accounts", () => provider.DiscoverAccountsAsync(cancellationToken), coverage, messages, cancellationToken);
                 var selectedAccounts = accounts.Where(account => selectedAccountKeys is null
                     || selectedAccountKeys.Contains(ToAccountRecord(provider.ProviderType, account).SelectionKey)).ToArray();
+                accountsDiscovered.AddRange(selectedAccounts);
                 var selectedIds = selectedAccounts.Select(account => account.Id).ToHashSet();
                 accountsScanned += selectedAccounts.Length;
                 accountRecords.AddRange(accounts.Select(account => ToAccountRecord(provider.ProviderType, account,
@@ -232,6 +245,29 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                         var resources = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Resources", () => resourceProvider.GetResourcesAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
                         resourcesScanned += resources.Count;
                         resourceRecords.AddRange(resources);
+                        var mappedResources = resources.Select(resource => ResourceSecuritySignalMapper.MapTags(resource, provider.ProviderType)).ToArray();
+                        resourceSecuritySignals.AddRange(mappedResources.SelectMany(mapping => mapping.Signals));
+                        resourceSecurityCoverage.AddRange(mappedResources.SelectMany(mapping => mapping.Coverage));
+                        var resourceInventoryStatus = coverage.LastOrDefault(item => item.Provider == provider.ProviderType.ToString()
+                            && item.DataSource == $"{scanScope}: Resources")?.Status;
+                        var signalCoverageStatus = resourceInventoryStatus switch
+                        {
+                            ScanCoverageStatus.Collected => ScanCoverageStatus.Partial,
+                            ScanCoverageStatus.NoData => ScanCoverageStatus.NoData,
+                            ScanCoverageStatus.Denied => ScanCoverageStatus.Denied,
+                            ScanCoverageStatus.Unavailable => ScanCoverageStatus.Unavailable,
+                            ScanCoverageStatus.Unsupported => ScanCoverageStatus.Unsupported,
+                            ScanCoverageStatus.Skipped => ScanCoverageStatus.Skipped,
+                            ScanCoverageStatus.Partial => ScanCoverageStatus.Partial,
+                            _ => ScanCoverageStatus.Unavailable
+                        };
+                        foreach (var signalType in Enum.GetValues<ResourceSecuritySignalType>().Where(type => type != ResourceSecuritySignalType.WorkloadIdentityRisk))
+                        {
+                            coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), $"{scanScope}: {signalType} signals",
+                                signalCoverageStatus,
+                                mappedResources.Sum(mapping => mapping.Coverage.Count(item => item.SignalType == signalType)),
+                                "Derived from resource tags/labels only; provider-native security findings and complete negative coverage are not asserted."));
+                        }
                     }
                     else
                     {
@@ -241,6 +277,8 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     if (provider is ICloudEffectiveAccessProvider accessProvider)
                     {
                         var access = await CollectAsync(provider.ProviderType.ToString(), scanScope, "Effective access", () => accessProvider.DiscoverEffectiveAccessAsync(account.Id, cancellationToken), coverage, messages, cancellationToken);
+                        graphAssignments.AddRange(access.Where(item => !item.AssignmentType.Equals("Role usage", StringComparison.OrdinalIgnoreCase))
+                            .Select(item => new LiveResourceAccessAssignment(provider.ProviderType, account.Id, item)));
                         effectiveAccessRecords.AddRange(access.Select(item => new LiveEffectiveAccessRecord(
                             provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, account.ExternalAccountId ?? account.SubscriptionId ?? account.ProjectId ?? account.Id.ToString(), item.UsageHistoryComplete, item.UsageHistoryDays, item.UsageEvidenceSource)));
                         if (provider.ProviderType == CloudProviderType.Aws)
@@ -291,14 +329,17 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                 {
                     try
                     {
-                        var entraResult = await entraProvider.DiscoverEntraDirectoryAsync(accounts.FirstOrDefault()?.Id ?? Guid.Empty, cancellationToken);
+                        var directoryAccount = selectedAccounts.FirstOrDefault();
+                        var entraResult = await entraProvider.DiscoverEntraDirectoryAsync(directoryAccount?.Id ?? Guid.Empty, cancellationToken);
                         var knownPrincipalIds = identityRecords.Select(identity => identity.PrincipalId).Where(id => id is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
                         var newPrincipals = entraResult.Principals.Where(principal => principal.PrincipalId is null || knownPrincipalIds.Add(principal.PrincipalId)).ToArray();
                         identityRecords.AddRange(newPrincipals);
                         identitiesScanned += newPrincipals.Length;
                         privilegedIdentities += newPrincipals.Count(identity => identity.IsPrivileged);
                         effectiveAccessRecords.AddRange(entraResult.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
-                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, accounts.FirstOrDefault()?.ExternalAccountId ?? accounts.FirstOrDefault()?.SubscriptionId ?? accounts.FirstOrDefault()?.TenantId)));
+                            provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, directoryAccount?.ExternalAccountId ?? directoryAccount?.SubscriptionId ?? directoryAccount?.TenantId)));
+                        if (directoryAccount is not null)
+                            graphAssignments.AddRange(entraResult.AccessAssignments.Select(item => new LiveResourceAccessAssignment(provider.ProviderType, directoryAccount.Id, item)));
                         var partial = entraResult.ProviderMessages.Count > 0;
                         coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra directory", entraResult.Principals.Count > 0 ? partial ? ScanCoverageStatus.Partial : ScanCoverageStatus.Collected : partial ? ScanCoverageStatus.Denied : ScanCoverageStatus.NoData, entraResult.Principals.Count, string.Join("; ", entraResult.ProviderMessages.DefaultIfEmpty("Users, groups, service principals, and managed identities."))));
                         coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra PIM", entraResult.AccessAssignments.Count > 0 ? partial ? ScanCoverageStatus.Partial : ScanCoverageStatus.Collected : partial ? ScanCoverageStatus.Denied : ScanCoverageStatus.NoData, entraResult.AccessAssignments.Count, string.Join("; ", entraResult.ProviderMessages.DefaultIfEmpty("Active and eligible directory-role assignments."))));
@@ -394,10 +435,38 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                 foreach (var cluster in kubernetesResult.Clusters.Where(cluster => !selectedProvider.HasValue || cluster.Cluster.CloudProvider == selectedProvider.Value))
                 {
                     var providerType = cluster.Cluster.CloudProvider;
+                    accountsDiscovered.Add(cluster.Cluster);
                     accountsScanned++;
                     accountRecords.Add(new LiveScanAccountRecord(providerType.ToString(), cluster.Cluster.Name, cluster.Cluster.ExternalAccountId ?? string.Empty, cluster.Cluster.Description ?? string.Empty, "Kubernetes RBAC", $"Scanned: {cluster.Cluster.ConnectionStatus}; read-only scan") { CloudAccountId = cluster.Cluster.Id });
-                    resourcesScanned += cluster.Resources.Count;
-                    resourceRecords.AddRange(cluster.Resources);
+                    var clusterResources = cluster.Resources.ToList();
+                    var workloadObservedAt = DateTime.UtcNow;
+                    foreach (var trace in cluster.WorkloadTraces)
+                    {
+                        var workloadResourceId = $"clusters/{trace.Cluster}/namespaces/{trace.Namespace}/{trace.WorkloadKind.ToLowerInvariant()}/{trace.WorkloadName}";
+                        var workloadResource = clusterResources.FirstOrDefault(resource => resource.ResourceId?.Equals(workloadResourceId, StringComparison.OrdinalIgnoreCase) == true)
+                            ?? new CloudResource
+                            {
+                                Id = Guid.NewGuid(), AccountId = cluster.Cluster.Id, Name = $"{trace.Namespace}/{trace.WorkloadName}",
+                                Type = $"Kubernetes {trace.WorkloadKind}", ResourceType = ResourceType.Resource,
+                                ResourceId = workloadResourceId, ResourceUri = workloadResourceId, Scope = $"namespaces/{trace.Namespace}",
+                                UpdatedAt = workloadObservedAt,
+                                Tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                                {
+                                    ["WorkloadKind"] = trace.WorkloadKind,
+                                    ["ServiceAccount"] = trace.ServiceAccount,
+                                    ["TokenInjectionEnabled"] = trace.TokenInjectionEnabled.ToString()
+                                }
+                            };
+                        if (!clusterResources.Contains(workloadResource)) clusterResources.Add(workloadResource);
+                        var workloadMapping = ResourceSecuritySignalMapper.MapWorkloadTrust(trace, workloadResource, workloadObservedAt);
+                        resourceSecuritySignals.AddRange(workloadMapping.Signals);
+                        resourceSecurityCoverage.AddRange(workloadMapping.Coverage);
+                    }
+                    resourcesScanned += clusterResources.Count;
+                    resourceRecords.AddRange(clusterResources);
+                    var mappedResources = clusterResources.Select(resource => ResourceSecuritySignalMapper.MapTags(resource, providerType)).ToArray();
+                    resourceSecuritySignals.AddRange(mappedResources.SelectMany(mapping => mapping.Signals));
+                    resourceSecurityCoverage.AddRange(mappedResources.SelectMany(mapping => mapping.Coverage));
                     identitiesScanned += cluster.Principals.Count;
                     privilegedIdentities += cluster.Principals.Count(principal => principal.IsPrivileged);
                     identityRecords.AddRange(cluster.Principals);
@@ -413,6 +482,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     }
                     effectiveAccessRecords.AddRange(cluster.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
                         providerType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, cluster.Cluster.ExternalAccountId ?? cluster.Cluster.Id.ToString())));
+                    graphAssignments.AddRange(cluster.AccessAssignments.Select(item => new LiveResourceAccessAssignment(providerType, cluster.Cluster.Id, item)));
                 }
             }
             catch (OperationCanceledException)
@@ -428,6 +498,30 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         if (messages.Count == 0)
         {
             messages.Add("No cloud providers are configured.");
+        }
+
+        var graphResult = new LiveResourceRiskGraphResult(Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(), Array.Empty<string>());
+        if (graphAssignments.Count > 0 && resourceRecords.Count > 0)
+        {
+            try
+            {
+                graphResult = await _resourceRiskGraphEvaluator.EvaluateAsync(accountsDiscovered, identityRecords, resourceRecords,
+                    roleRecords.Select(item => item.Role).ToArray(), permissionRecords.Select(item => item.Permission).ToArray(),
+                    graphAssignments, resourceSecuritySignals, resourceSecurityCoverage, DateTime.UtcNow, cancellationToken);
+                findings.AddRange(graphResult.Findings.Select(finding => ToCloudFinding(finding, identityRecords, resourceRecords, permissionRecords)));
+                messages.AddRange(graphResult.Diagnostics);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var diagnostic = $"Live access-path risk evaluation was incomplete: {exception.Message}";
+                graphResult = graphResult with { Diagnostics = graphResult.Diagnostics.Append(diagnostic).ToArray() };
+                coverage.Add(new ScanCoverageRecord("Risk graph", "Live access paths", ScanCoverageStatus.Partial, 0, diagnostic));
+                messages.Add(diagnostic);
+            }
         }
 
         var completedAt = DateTime.UtcNow;
@@ -462,9 +556,13 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             accountRecords)
         {
             Coverage = coverage,
-                        ScannedAccountKeys = scannedAccountKeys,
+            ScannedAccountKeys = scannedAccountKeys,
             WorkloadTraces = workloadTraces,
-            RiskFindingDetails = riskFindingDetails
+            RiskFindingDetails = riskFindingDetails,
+            ResourceSecuritySignals = resourceSecuritySignals,
+            ResourceSecurityCoverage = resourceSecurityCoverage,
+            ModeledAccessPaths = graphResult.AccessPaths,
+            ResourceRiskFindings = graphResult.Findings
         };
         var postureAnalysis = _postureHistoryService.Analyze(previous, historyEntry);
         var notifications = (previous?.PendingNotifications ?? Array.Empty<PostureChangeRecord>())
@@ -503,6 +601,11 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         {
             Coverage = coverage,
             WorkloadTraces = workloadTraces,
+            ResourceSecuritySignals = resourceSecuritySignals,
+            ResourceSecurityCoverage = resourceSecurityCoverage,
+            ModeledAccessPaths = graphResult.AccessPaths,
+            ResourceRiskFindings = graphResult.Findings,
+            RiskGraphDiagnostics = graphResult.Diagnostics,
             PostureChanges = postureAnalysis.Changes,
             PostureTrend = postureAnalysis.Trend,
             NotificationDelivery = delivery.Status
@@ -522,6 +625,43 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         CurrentResult = result;
         ScanCompleted?.Invoke(this, EventArgs.Empty);
         return CurrentResult;
+    }
+
+    private static RiskFinding ToCloudFinding(
+        RiskFindingModel finding,
+        IReadOnlyList<CloudPrincipal> principals,
+        IReadOnlyList<CloudResource> resources,
+        IReadOnlyList<DiscoveredCloudPermission> permissions)
+    {
+        var providerType = Enum.TryParse<CloudProviderType>(finding.CloudProvider.ToString(), true, out var parsedProvider)
+            ? parsedProvider : CloudProviderType.Azure;
+        var principal = principals.FirstOrDefault(item => item.Id == finding.PrincipalId);
+        var resource = finding.ResourceId.HasValue ? resources.FirstOrDefault(item => item.Id == finding.ResourceId.Value) : null;
+        var permission = finding.PermissionId.HasValue ? permissions.FirstOrDefault(item => item.Permission.Id == finding.PermissionId.Value)?.Permission : null;
+        var detailText = finding.Evidence.Details.Count == 0
+            ? string.Empty
+            : string.Join("; ", finding.Evidence.Details.Select(item => $"{item.Key}={item.Value}"));
+        return new RiskFinding
+        {
+            Id = finding.Id,
+            CloudProvider = providerType,
+            Severity = finding.Severity,
+            Title = finding.Title,
+            Description = finding.Description,
+            Principal = principal?.Name ?? finding.PrincipalId.ToString("D"),
+            Resource = resource?.Name ?? finding.ResourceId?.ToString("D") ?? "Unknown resource",
+            Permission = permission?.Name ?? finding.PermissionId?.ToString("D") ?? "Role-level access",
+            Evidence = string.IsNullOrWhiteSpace(detailText) ? finding.Evidence.Summary : $"{finding.Evidence.Summary}; {detailText}",
+            Recommendation = finding.Recommendation ?? "Review the modeled identity-to-resource path and validate its partial provider evidence.",
+            CreatedAt = finding.CreatedAt,
+            RuleId = finding.RuleId,
+            CloudAccountId = finding.CloudAccountId,
+            PrincipalId = finding.PrincipalId,
+            ResourceId = finding.ResourceId,
+            EffectiveAccessId = finding.EffectiveAccessId,
+            Status = finding.Status,
+            UpdatedAt = finding.LastEvaluatedAt
+        };
     }
 
     private static LiveScanAccountRecord ToAccountRecord(CloudProviderType provider, CloudAccount account, string scanAccess = "Available")

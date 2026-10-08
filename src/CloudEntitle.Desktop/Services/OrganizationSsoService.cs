@@ -12,16 +12,26 @@ public interface IOrganizationSsoService
     Task<OrganizationIdentity> SignInAsync(string tenantId, CancellationToken cancellationToken = default);
 }
 
-public sealed class EntraOrganizationSsoService : IOrganizationSsoService
+public interface IApiAccessTokenProvider
+{
+    Task<string> GetApiAccessTokenAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed class EntraOrganizationSsoService : IOrganizationSsoService, IApiAccessTokenProvider
 {
     private const string ClientIdEnvironmentVariable = "YASK_CIEM_ENTRA_CLIENT_ID";
+    private const string ApiScopeEnvironmentVariable = "YASK_CIEM_API_SCOPE";
     private readonly HttpClient _httpClient;
     private readonly string? _clientId;
+    private readonly string? _apiScope;
+    private IPublicClientApplication? _application;
+    private IAccount? _signedInAccount;
 
     public EntraOrganizationSsoService(HttpClient? httpClient = null, string? clientId = null)
     {
         _httpClient = httpClient ?? new HttpClient();
         _clientId = clientId ?? Environment.GetEnvironmentVariable(ClientIdEnvironmentVariable);
+        _apiScope = Environment.GetEnvironmentVariable(ApiScopeEnvironmentVariable);
     }
 
     public async Task<OrganizationIdentity> SignInAsync(string tenantId, CancellationToken cancellationToken = default)
@@ -38,6 +48,21 @@ public sealed class EntraOrganizationSsoService : IOrganizationSsoService
         var result = await application.AcquireTokenInteractive(new[] { "User.Read" })
             .WithPrompt(Prompt.SelectAccount)
             .ExecuteAsync(cancellationToken);
+        _application = application;
+        _signedInAccount = result.Account;
+        if (!string.IsNullOrWhiteSpace(_apiScope))
+        {
+            try
+            {
+                await application.AcquireTokenSilent(new[] { _apiScope }, result.Account).ExecuteAsync(cancellationToken);
+            }
+            catch (MsalUiRequiredException)
+            {
+                await application.AcquireTokenInteractive(new[] { _apiScope })
+                    .WithAccount(result.Account)
+                    .ExecuteAsync(cancellationToken);
+            }
+        }
 
         var claims = result.ClaimsPrincipal;
         var claimTenant = claims.FindFirst("tid")?.Value ?? result.TenantId;
@@ -70,5 +95,17 @@ public sealed class EntraOrganizationSsoService : IOrganizationSsoService
             email = userPrincipalName.GetString()!;
 
         return new OrganizationIdentity(userId, subject, authenticatedTenant.ToString(), email.Trim());
+    }
+
+    public async Task<string> GetApiAccessTokenAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(_apiScope))
+            throw new InvalidOperationException($"Configure {ApiScopeEnvironmentVariable} with the API's delegated scope before synchronizing central audit events.");
+        if (_application is null || _signedInAccount is null)
+            throw new InvalidOperationException("Sign in with Entra ID before synchronizing central audit events.");
+
+        var result = await _application.AcquireTokenSilent(new[] { _apiScope }, _signedInAccount)
+            .ExecuteAsync(cancellationToken);
+        return result.AccessToken;
     }
 }

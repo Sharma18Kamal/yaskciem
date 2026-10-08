@@ -13,6 +13,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private readonly IOrganizationSsoService _ssoService;
     private readonly ILiveCloudScanService _liveScan;
     private readonly AuthenticatedOrganizationContext _authenticatedContext;
+    private readonly ICentralAuditSyncService? _centralAuditSyncService;
     private IReadOnlyList<OrganizationProfile> _organizations = Array.Empty<OrganizationProfile>();
     private IReadOnlyList<OrganizationMember> _members = Array.Empty<OrganizationMember>();
     private IReadOnlyList<OrganizationRoleOption> _memberRoles = Enum.GetValues<OrganizationMemberRole>()
@@ -36,6 +37,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private string _newMemberEmail = string.Empty;
     private string _customRoleName = string.Empty;
     private string _statusMessage = "Sign in with Microsoft Entra ID to manage organizations and view tenant data.";
+    private string _centralAuditSyncStatus = "Central audit synchronization is not configured.";
     private bool _customRoleViewInventory;
     private bool _customRoleRunScan;
     private bool _customRoleViewFindings;
@@ -56,15 +58,18 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         OrganizationManagementService organizationsService,
         IOrganizationSsoService ssoService,
         ILiveCloudScanService liveScan,
-        AuthenticatedOrganizationContext authenticatedContext) : base(demoData)
+        AuthenticatedOrganizationContext authenticatedContext,
+        ICentralAuditSyncService? centralAuditSyncService = null) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
         _liveScan = liveScan;
         _authenticatedContext = authenticatedContext;
+        _centralAuditSyncService = centralAuditSyncService;
         CreateOrganizationCommand = new AsyncRelayCommand(CreateOrganizationAsync);
         SignInCommand = new AsyncRelayCommand(SignInAsync);
         SignOutCommand = new AsyncRelayCommand(SignOutAsync);
+        SyncCentralAuditCommand = new AsyncRelayCommand(SyncCentralAuditAsync);
         AddMemberCommand = new AsyncRelayCommand(AddMemberAsync);
         UpdateMemberRoleCommand = new AsyncRelayCommand(UpdateMemberRoleAsync);
         ToggleMemberActiveCommand = new AsyncRelayCommand(ToggleMemberActiveAsync);
@@ -82,6 +87,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public IReadOnlyList<OrganizationMember> Members => _members;
     public IReadOnlyList<TenantBinding> Bindings => _bindings;
     public IReadOnlyList<OrganizationAuditEntry> AuditTrail => _auditTrail;
+    public string CentralAuditSyncStatus { get => _centralAuditSyncStatus; private set => SetProperty(ref _centralAuditSyncStatus, value); }
     public IReadOnlyList<LiveScanAccountRecord> AvailableAccounts => _availableAccounts;
     public IReadOnlyList<LiveScanAccountRecord> ConsolidatedAccounts => _consolidatedAccounts;
     public IReadOnlyList<OrganizationRoleOption> MemberRoles => _memberRoles;
@@ -183,6 +189,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public AsyncRelayCommand CreateOrganizationCommand { get; }
     public AsyncRelayCommand SignInCommand { get; }
     public AsyncRelayCommand SignOutCommand { get; }
+    public AsyncRelayCommand SyncCentralAuditCommand { get; }
     public AsyncRelayCommand AddMemberCommand { get; }
     public AsyncRelayCommand UpdateMemberRoleCommand { get; }
     public AsyncRelayCommand ToggleMemberActiveCommand { get; }
@@ -233,6 +240,31 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         catch (Exception exception)
         {
             ErrorMessage = $"Entra sign-in failed: {exception.Message}";
+        }
+    }
+
+    public async Task SyncCentralAuditAsync()
+    {
+        if (_centralAuditSyncService is null)
+        {
+            CentralAuditSyncStatus = "Set YASK_CIEM_API_BASE_URL to an HTTPS License Server URL to enable central audit sync.";
+            return;
+        }
+        if (SelectedOrganization is null || _identity is null)
+        {
+            CentralAuditSyncStatus = "Select an organization and sign in before syncing audit events.";
+            return;
+        }
+
+        try
+        {
+            var count = await _centralAuditSyncService.SyncOrganizationAsync(SelectedOrganization.Id);
+            CentralAuditSyncStatus = $"Synced {count} organization audit events to the central tenant log. Repeated syncs are deduplicated.";
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            CentralAuditSyncStatus = $"Central audit sync failed: {exception.Message}";
         }
     }
 

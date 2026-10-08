@@ -1,6 +1,9 @@
 using System.IO;
 using System.Text.Json;
 using CloudEntitle.Application.Interfaces;
+using CloudEntitle.Domain.Entities;
+using CloudEntitle.RiskEngine.Models;
+using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
 
 namespace CloudEntitle.Desktop.Services;
 
@@ -29,7 +32,13 @@ public sealed record LiveRiskFindingSnapshot(
     string Title,
     string Principal,
     string Resource,
-    string Recommendation);
+    string Recommendation)
+{
+    public string? RuleId { get; init; }
+    public int? PriorityScore { get; init; }
+    public string? EvaluationState { get; init; }
+    public Guid? AccessPathId { get; init; }
+}
 
 public sealed record PostureChangeRecord(
     string Provider,
@@ -76,6 +85,10 @@ public sealed record LiveScanHistoryEntry(
     public IReadOnlyList<ScanCoverageRecord> Coverage { get; init; } = Array.Empty<ScanCoverageRecord>();
     public IReadOnlyList<KubernetesWorkloadTrace> WorkloadTraces { get; init; } = Array.Empty<KubernetesWorkloadTrace>();
     public IReadOnlyList<LiveRiskFindingSnapshot> RiskFindingDetails { get; init; } = Array.Empty<LiveRiskFindingSnapshot>();
+    public IReadOnlyList<ResourceSecuritySignal> ResourceSecuritySignals { get; init; } = Array.Empty<ResourceSecuritySignal>();
+    public IReadOnlyList<ResourceSecurityEvidenceCoverage> ResourceSecurityCoverage { get; init; } = Array.Empty<ResourceSecurityEvidenceCoverage>();
+    public IReadOnlyList<DomainAccessPath> ModeledAccessPaths { get; init; } = Array.Empty<DomainAccessPath>();
+    public IReadOnlyList<RiskFindingModel> ResourceRiskFindings { get; init; } = Array.Empty<RiskFindingModel>();
     public IReadOnlyList<PostureChangeRecord> PostureChanges { get; init; } = Array.Empty<PostureChangeRecord>();
     public IReadOnlyList<PostureChangeRecord> PendingNotifications { get; init; } = Array.Empty<PostureChangeRecord>();
     public PostureTrendRecord? PostureTrend { get; init; }

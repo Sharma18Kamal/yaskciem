@@ -94,6 +94,7 @@ public sealed class AccessPathEngine : IAccessPathEngine
                 ResourceSecuritySignalType.SensitiveData => "SensitiveData",
                 ResourceSecuritySignalType.WorkloadVulnerability => "WorkloadVulnerability",
                 ResourceSecuritySignalType.CriticalAsset => "CriticalAsset",
+                ResourceSecuritySignalType.WorkloadIdentityRisk => "WorkloadIdentityRisk",
                 _ => "ResourceSignal"
             };
             AddNode(nodeType, null, signal.Name, signal.Source, $"Severity={signal.Severity}; Confirmed={signal.IsConfirmed}; ObservedAt={signal.ObservedAtUtc?.ToString("O") ?? "unknown"}; Freshness={EvidenceFreshness(signal.ObservedAtUtc, evaluatedAt)}; Exploitable={signal.IsExploitable}; CVSS={signal.CvssScore?.ToString() ?? "not reported"}; {signal.Details}");
