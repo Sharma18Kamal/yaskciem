@@ -110,11 +110,16 @@ public sealed class WorkspaceViewBindingTests
         Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
             ((string?)textBlock.Attribute("Text"))?.Contains("ScanWaitingMessage", StringComparison.Ordinal) == true);
         Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
-            ((string?)textBlock.Attribute("Text"))?.Contains("\u2601\u231B", StringComparison.Ordinal) == true);
-        Assert.Contains(scanPanel.Descendants(presentation + "DataTrigger"), trigger =>
+            ((string?)textBlock.Attribute("Text"))?.Contains("\u2601", StringComparison.Ordinal) == true);
+        var hourglass = Assert.Single(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
+            ((string?)textBlock.Attribute("Text"))?.Contains("\u231B", StringComparison.Ordinal) == true);
+        var scanningTrigger = Assert.Single(hourglass.Descendants(presentation + "DataTrigger"), trigger =>
             (string?)trigger.Attribute("Binding") == "{Binding IsScanning}"
-            && (string?)trigger.Attribute("Value") == "True"
-            && trigger.Descendants(presentation + "Setter").Any(setter =>
-                (string?)setter.Attribute("Property") == "Visibility" && (string?)setter.Attribute("Value") == "Visible"));
+            && (string?)trigger.Attribute("Value") == "True");
+        var animation = Assert.Single(scanningTrigger.Descendants(presentation + "DoubleAnimation"));
+        Assert.Equal("180", (string?)animation.Attribute("To"));
+        Assert.Equal("True", (string?)animation.Attribute("AutoReverse"));
+        Assert.Equal("Forever", (string?)scanningTrigger.Descendants(presentation + "Storyboard").Single().Attribute("RepeatBehavior"));
+        Assert.Single(scanningTrigger.Descendants(presentation + "StopStoryboard"));
     }
 }
