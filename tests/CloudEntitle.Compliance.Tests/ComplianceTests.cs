@@ -3,6 +3,9 @@ using CloudEntitle.Compliance.Services;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.IdentityGovernance.Models;
+using System.IO.Compression;
+using System.Text;
+using System.Text.Json;
 using Xunit;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
@@ -48,5 +51,43 @@ public sealed class ComplianceTests
         Assert.Contains("ticket", audit.Metadata.Keys);
         Assert.Equal("[REDACTED]", audit.Metadata["token"]);
         Assert.Equal("[REDACTED]", audit.Metadata["password"]);
+    }
+
+    [Fact]
+    public void ComplianceExport_ShouldIncludeManifestAssessmentEvidenceAndSpreadsheetSafeCsv()
+    {
+        var control = new ComplianceControl("CIEM-001", ComplianceFramework.CiemBaseline, "Evidence check", "Review access", ComplianceControlState.Partial, 1,
+            new[] { "=HYPERLINK(\"https://example.invalid\")" }, new[] { "Owner review required" });
+        var assessment = new ComplianceAssessment(Guid.NewGuid(), ComplianceFramework.CiemBaseline, DateTime.UtcNow, new[] { control }, 0, 0, 1, 0);
+        var metadata = new ComplianceExportMetadata(Guid.NewGuid(), "Acme", Guid.NewGuid().ToString("D"), DateTime.UtcNow);
+
+        using var stream = new MemoryStream(new ComplianceExportService().CreateBundle(assessment, metadata));
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var manifest = ReadEntry(archive, "manifest.json");
+        var exportedAssessment = ReadEntry(archive, "assessment.json");
+        var csv = ReadEntry(archive, "controls.csv");
+
+        using var manifestJson = JsonDocument.Parse(manifest);
+        using var assessmentJson = JsonDocument.Parse(exportedAssessment);
+        Assert.Equal("1.0", manifestJson.RootElement.GetProperty("schemaVersion").GetString());
+        Assert.Equal(metadata.OrganizationId, manifestJson.RootElement.GetProperty("organizationId").GetGuid());
+        Assert.Equal(control.Evidence[0], assessmentJson.RootElement.GetProperty("controls")[0].GetProperty("evidence")[0].GetString());
+        Assert.Contains("'=HYPERLINK", csv);
+        Assert.Contains("Owner review required", csv);
+    }
+
+    [Fact]
+    public void ComplianceExport_ShouldRequireOrganizationMetadata()
+    {
+        var assessment = new ComplianceAssessment(Guid.NewGuid(), ComplianceFramework.CiemBaseline, DateTime.UtcNow, Array.Empty<ComplianceControl>(), 0, 0, 0, 0);
+
+        Assert.Throws<ArgumentException>(() => new ComplianceExportService().CreateBundle(assessment,
+            new ComplianceExportMetadata(Guid.Empty, "Acme", Guid.NewGuid().ToString("D"), null)));
+    }
+
+    private static string ReadEntry(ZipArchive archive, string name)
+    {
+        using var reader = new StreamReader(archive.GetEntry(name)!.Open(), Encoding.UTF8);
+        return reader.ReadToEnd();
     }
 }

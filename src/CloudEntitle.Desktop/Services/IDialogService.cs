@@ -7,4 +7,5 @@ public interface IDialogService
     bool Confirm(string message, string title = "YASK-CIEM");
     string? ChooseReportPath();
     string? ChoosePolicyDraftPath();
+    string? ChooseComplianceBundlePath();
 }

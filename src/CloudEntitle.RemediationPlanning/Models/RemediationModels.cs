@@ -11,7 +11,11 @@ public enum SimulationStatus { NotRun, Simulated, RequiresReview, Unsupported, I
 public enum AccessImpactStatus { Unknown, Preserved, PotentialAccessLoss, NoKnownImpact }
 public enum RemediationVerificationStatus { NotRun, Verified, Failed, Unavailable }
 
-public sealed record RemediationAuditEntry(DateTime Timestamp, string Actor, string Action, string Details);
+public sealed record RemediationAuditEntry(DateTime Timestamp, string Actor, string Action, string Details)
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid? ActorUserId { get; init; }
+}
 public sealed record RemediationVerification(RemediationVerificationStatus Status, string Details, DateTime CheckedAt);
 
 public sealed record RemediationPlan(
@@ -25,7 +29,11 @@ public sealed record RemediationPlan(
     string SafetyNotice)
 {
     public string? CreatedBy { get; init; }
+    public Guid? CreatedByUserId { get; init; }
+    public Guid? OrganizationId { get; init; }
     public string? ApprovedBy { get; init; }
+    public Guid? ApprovedByUserId { get; init; }
+    public Guid? DryRunApprovedByUserId { get; init; }
     public DateTime? ApprovedAt { get; init; }
     public string? ApprovalComment { get; init; }
     public string? ApprovedChangeSetFingerprint { get; init; }
@@ -48,6 +56,8 @@ public static class RemediationPlanIntegrity
             plan.Id,
             plan.Provider,
             plan.IsRollbackDraft,
+            plan.CreatedByUserId,
+            plan.OrganizationId,
             Recommendation = new
             {
                 plan.Recommendation.Id,
@@ -88,6 +98,8 @@ public static class RemediationPlanIntegrity
             && !string.IsNullOrWhiteSpace(plan.CreatedBy)
             && !string.IsNullOrWhiteSpace(plan.ApprovedBy)
             && !string.Equals(plan.CreatedBy.Trim(), plan.ApprovedBy.Trim(), StringComparison.OrdinalIgnoreCase)
+            && (!plan.CreatedByUserId.HasValue || plan.ApprovedByUserId.HasValue && plan.CreatedByUserId != plan.ApprovedByUserId)
+            && (!plan.OrganizationId.HasValue || plan.CreatedByUserId.HasValue && plan.ApprovedByUserId.HasValue)
             && plan.ApprovedAt.HasValue
             && !string.IsNullOrWhiteSpace(plan.ApprovalComment)
             && string.Equals(plan.ApprovedChangeSetFingerprint, ComputeChangeSetFingerprint(plan), StringComparison.Ordinal);

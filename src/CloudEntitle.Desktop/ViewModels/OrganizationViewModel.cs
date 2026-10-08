@@ -12,6 +12,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private readonly OrganizationManagementService _organizationsService;
     private readonly IOrganizationSsoService _ssoService;
     private readonly ILiveCloudScanService _liveScan;
+    private readonly AuthenticatedOrganizationContext _authenticatedContext;
     private IReadOnlyList<OrganizationProfile> _organizations = Array.Empty<OrganizationProfile>();
     private IReadOnlyList<OrganizationMember> _members = Array.Empty<OrganizationMember>();
     private IReadOnlyList<OrganizationRoleOption> _memberRoles = Enum.GetValues<OrganizationMemberRole>()
@@ -41,6 +42,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private bool _customRoleManageMembers;
     private bool _customRoleManageConnections;
     private bool _customRoleManagePolicies;
+    private bool _customRoleManageRemediations;
     private bool _customRoleExportReports;
     private int _consolidatedIdentities;
     private int _consolidatedResources;
@@ -53,11 +55,13 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         IDemoDataService demoData,
         OrganizationManagementService organizationsService,
         IOrganizationSsoService ssoService,
-        ILiveCloudScanService liveScan) : base(demoData)
+        ILiveCloudScanService liveScan,
+        AuthenticatedOrganizationContext authenticatedContext) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
         _liveScan = liveScan;
+        _authenticatedContext = authenticatedContext;
         CreateOrganizationCommand = new AsyncRelayCommand(CreateOrganizationAsync);
         SignInCommand = new AsyncRelayCommand(SignInAsync);
         SignOutCommand = new AsyncRelayCommand(SignOutAsync);
@@ -98,6 +102,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
                 _identity = null;
                 StatusMessage = "The selected organization uses a different Entra tenant. Sign in to continue.";
             }
+            _authenticatedContext.Set(_identity, value?.Id);
             RefreshTenantView();
             NotifyAuthorization();
         }
@@ -139,6 +144,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public bool CustomRoleManageMembers { get => _customRoleManageMembers; set => SetProperty(ref _customRoleManageMembers, value); }
     public bool CustomRoleManageConnections { get => _customRoleManageConnections; set => SetProperty(ref _customRoleManageConnections, value); }
     public bool CustomRoleManagePolicies { get => _customRoleManagePolicies; set => SetProperty(ref _customRoleManagePolicies, value); }
+    public bool CustomRoleManageRemediations { get => _customRoleManageRemediations; set => SetProperty(ref _customRoleManageRemediations, value); }
     public bool CustomRoleExportReports { get => _customRoleExportReports; set => SetProperty(ref _customRoleExportReports, value); }
     public LiveScanAccountRecord? SelectedAccount { get => _selectedAccount; set { if (SetProperty(ref _selectedAccount, value)) NotifyAuthorization(); } }
     public string OrganizationName { get => _organizationName; set { if (SetProperty(ref _organizationName, value)) NotifyAuthorization(); } }
@@ -216,6 +222,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         try
         {
             _identity = await _ssoService.SignInAsync(SignInTenantId);
+            _authenticatedContext.Set(_identity, SelectedOrganization?.Id);
             var acceptedInvitation = SelectedOrganization is null ? null : _organizationsService.AcceptInvitation(SelectedOrganization.Id, _identity);
             StatusMessage = acceptedInvitation is null
                 ? $"Signed in as {_identity.Email}. Organization membership is checked against the signed-in tenant and role."
@@ -232,6 +239,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public Task SignOutAsync()
     {
         _identity = null;
+        _authenticatedContext.Set(null, null);
         _members = Array.Empty<OrganizationMember>();
         _bindings = Array.Empty<TenantBinding>();
         _availableAccounts = Array.Empty<LiveScanAccountRecord>();
@@ -442,6 +450,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         if (CustomRoleManageMembers) permissions.Add(OrganizationAction.ManageMembers);
         if (CustomRoleManageConnections) permissions.Add(OrganizationAction.ManageConnections);
         if (CustomRoleManagePolicies) permissions.Add(OrganizationAction.ManagePolicies);
+        if (CustomRoleManageRemediations) permissions.Add(OrganizationAction.ManageRemediations);
         if (CustomRoleExportReports) permissions.Add(OrganizationAction.ExportReports);
         return permissions;
     }
@@ -455,6 +464,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         CustomRoleManageMembers = selected.Contains(OrganizationAction.ManageMembers);
         CustomRoleManageConnections = selected.Contains(OrganizationAction.ManageConnections);
         CustomRoleManagePolicies = selected.Contains(OrganizationAction.ManagePolicies);
+        CustomRoleManageRemediations = selected.Contains(OrganizationAction.ManageRemediations);
         CustomRoleExportReports = selected.Contains(OrganizationAction.ExportReports);
     }
 

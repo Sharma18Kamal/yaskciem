@@ -12,8 +12,8 @@ Organization creation requires an authenticated user from the configured tenant 
 
 ## Roles
 
-- OrganizationAdmin: manage members, connections, policies, and organization settings.
-- SecurityAnalyst: run read-only scans and export/review findings.
+- OrganizationAdmin: manage members, connections, policies, and organization settings; approve remediation and export compliance evidence.
+- SecurityAnalyst: run read-only scans, review findings, approve remediation, and export compliance evidence.
 - Auditor: review inventory, findings, and evidence.
 - Viewer: read-only visibility.
 
@@ -25,7 +25,7 @@ Authorization is enforced by `OrganizationManagementService`, not only by UI sta
 
 `TenantBinding` stores provider, the scan's cloud-account GUID, the stable provider account identifier, display name, and bind time. Resolution and duplicate prevention use the provider plus stable external account ID because provider adapters generate new internal GUIDs on each scan. A given provider/account pair can be bound only once across local organizations.
 
-The Organizations workspace displays consolidated account, identity, resource, finding, critical-finding, and effective-access counts from the latest live scan. Metrics are filtered by the organization's stable provider/account bindings; provider findings are attributed to their originating scan account. Synthetic Demo Mode data is excluded. Bound accounts not present in the latest scan are called out as unmatched.
+The Organizations workspace displays consolidated account, identity, resource, finding, critical-finding, and effective-access counts from the latest live scan. Metrics are filtered by the organization's stable provider/account bindings; provider findings are attributed to their originating scan account. Synthetic Demo Mode data is excluded. Bound accounts not present in the latest scan are called out as unmatched. Dashboard compliance evidence bundles use the same provider plus external-account binding scope and require `ExportReports` authorization.
 
 ## Deployment Boundary
 

@@ -95,6 +95,34 @@ public sealed class RemediationPlanningTests
     }
 
     [Fact]
+    public async Task AuthenticatedPlan_ShouldRequireIndependentEntraUserIdForApproval()
+    {
+        var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);
+        var workflow = new RemediationWorkflowService(new RemediationPlanner(), new RemediationSimulator(), new RemediationEngine());
+        var creatorId = Guid.NewGuid();
+        var plan = workflow.CreatePlan(fixture.Recommendation, fixture.Context, "creator@example.invalid", creatorId, Guid.NewGuid());
+
+        Assert.Throws<InvalidOperationException>(() => workflow.Approve(plan, "reviewer@example.invalid", "Missing authenticated identity."));
+        Assert.Throws<InvalidOperationException>(() => workflow.Approve(plan, "different-alias@example.invalid", "Same Entra identity.", approverUserId: creatorId));
+
+        var reviewerId = Guid.NewGuid();
+        var approved = workflow.Approve(plan, "reviewer@example.invalid", "Independent review.", approverUserId: reviewerId);
+
+        Assert.Equal(creatorId, approved.CreatedByUserId);
+        Assert.Equal(reviewerId, approved.ApprovedByUserId);
+        Assert.Equal(reviewerId, Assert.Single(approved.AuditTrail, entry => entry.Action == "Approved").ActorUserId);
+        Assert.True(RemediationPlanIntegrity.HasAuditedApproval(approved));
+        Assert.False(RemediationPlanIntegrity.HasAuditedApproval(approved with { CreatedByUserId = Guid.NewGuid() }));
+        Assert.False(RemediationPlanIntegrity.HasAuditedApproval(approved with { OrganizationId = Guid.NewGuid() }));
+
+        var dryRun = await workflow.RunDryRunAsync(approved, fixture.Context, "creator@example.invalid", requestedByUserId: creatorId);
+        Assert.Throws<InvalidOperationException>(() => workflow.Approve(dryRun, "reviewer-alias@example.invalid", "Same Entra reviewer.", approverUserId: reviewerId));
+        var finalReviewerId = Guid.NewGuid();
+        var finalApproval = workflow.Approve(dryRun, "final-reviewer@example.invalid", "Independent final approval.", approverUserId: finalReviewerId);
+        Assert.True(RemediationPlanIntegrity.HasAuditedLiveApproval(finalApproval));
+    }
+
+    [Fact]
     public void RollbackPreviewChange_ShouldInvalidatePriorApproval()
     {
         var fixture = FixtureData.Create(RiskEvaluationState.Confirmed);

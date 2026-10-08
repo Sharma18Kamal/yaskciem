@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Text.Json;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Application.Interfaces;
@@ -10,6 +11,7 @@ using CloudEntitle.EffectiveAccess.Abstractions;
 using CloudEntitle.EffectiveAccess.Models;
 using CloudEntitle.EffectiveAccess.Services;
 using CloudEntitle.Normalization.Models;
+using CloudEntitle.Compliance.Models;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
@@ -381,6 +383,8 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private readonly ILiveCloudScanService? _liveCloudScanService;
     private readonly IReportService? _reportService;
     private readonly IDialogService? _dialogService;
+    private readonly IComplianceExportWorkflow? _complianceExportWorkflow;
+    private readonly AuthenticatedOrganizationContext? _authenticatedOrganizationContext;
     private AnalyticsSnapshot _analyticsSnapshot = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>(), Array.Empty<AnalyticsMetric>());
     private LiveCloudScanResult? _liveScan;
     private IReadOnlyList<ScanAccountSelection> _availableAccounts = Array.Empty<ScanAccountSelection>();
@@ -390,19 +394,24 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private CancellationTokenSource? _scanCancellation;
     private bool _isScanning;
 
-    public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null, IReportService? reportService = null, IDialogService? dialogService = null)
+    public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null, IReportService? reportService = null, IDialogService? dialogService = null, IComplianceExportWorkflow? complianceExportWorkflow = null, AuthenticatedOrganizationContext? authenticatedOrganizationContext = null)
     {
         _demoData = demoData;
         _analytics = analytics;
         _liveCloudScanService = liveCloudScanService;
         _reportService = reportService;
         _dialogService = dialogService;
+        _complianceExportWorkflow = complianceExportWorkflow;
+        _authenticatedOrganizationContext = authenticatedOrganizationContext;
         ScanCommand = new AsyncRelayCommand(RunScanAsync);
         DiscoverAccountsCommand = new AsyncRelayCommand(DiscoverAccountsAsync);
         SelectAllAccountsCommand = new RelayCommand(() => SetAccountSelection(true));
         SelectNoAccountsCommand = new RelayCommand(() => SetAccountSelection(false));
         StopScanCommand = new RelayCommand(StopScan, () => IsScanning);
         GenerateReportCommand = new AsyncRelayCommand(GenerateReportAsync);
+        ExportComplianceBundleCommand = new AsyncRelayCommand(ExportComplianceBundleAsync);
+        if (_authenticatedOrganizationContext is not null)
+            _authenticatedOrganizationContext.Changed += (_, _) => OnPropertyChanged(nameof(CanExportComplianceBundle));
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
         _ = RefreshAsync();
     }
@@ -415,6 +424,11 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public RelayCommand SelectNoAccountsCommand { get; }
     public RelayCommand StopScanCommand { get; }
     public AsyncRelayCommand GenerateReportCommand { get; }
+    public AsyncRelayCommand ExportComplianceBundleCommand { get; }
+    public IReadOnlyList<ComplianceFramework> ComplianceFrameworks { get; } = Enum.GetValues<ComplianceFramework>();
+    public ComplianceFramework SelectedComplianceFramework { get; set; } = ComplianceFramework.CiemBaseline;
+    public bool CanExportComplianceBundle => _complianceExportWorkflow?.CanExport == true;
+    public string ComplianceExportStatus { get; private set; } = string.Empty;
     public IReadOnlyList<ScanAccountSelection> AvailableAccounts => _availableAccounts;
     public string AccountSelectionMessage { get => _accountSelectionMessage; private set => SetProperty(ref _accountSelectionMessage, value); }
     public bool HasAvailableAccounts => _availableAccounts.Count > 0;
@@ -530,6 +544,36 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         catch (Exception exception)
         {
             ErrorMessage = $"Unable to generate the report: {exception.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    public async Task ExportComplianceBundleAsync()
+    {
+        if (_complianceExportWorkflow is null || _dialogService is null || !CanExportComplianceBundle)
+        {
+            ErrorMessage = "Sign in to an organization with report-export permission before exporting compliance evidence.";
+            return;
+        }
+
+        var outputPath = _dialogService.ChooseComplianceBundlePath();
+        if (string.IsNullOrWhiteSpace(outputPath)) return;
+
+        IsLoading = true;
+        ErrorMessage = null;
+        try
+        {
+            var bundle = await _complianceExportWorkflow.CreateBundleAsync(SelectedComplianceFramework);
+            await File.WriteAllBytesAsync(outputPath, bundle);
+            ComplianceExportStatus = $"Compliance evidence bundle saved to: {outputPath}";
+            OnPropertyChanged(nameof(ComplianceExportStatus));
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to export compliance evidence: {exception.Message}";
         }
         finally
         {
@@ -1730,24 +1774,50 @@ public sealed class SettingsViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;
     private readonly ContinuousMonitoringService? _monitoringService;
+    private readonly IJiraConnectionSettingsStore _jiraSettingsStore;
     private string _demoModeState = "Demo Mode is off";
+    private string _jiraBaseUrl = string.Empty;
+    private string _jiraConnectionStatus = "Jira is not configured.";
     private bool _scheduledScansEnabled;
     private int _selectedScanIntervalMinutes = 1440;
-    public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null)
+    public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null, IJiraConnectionSettingsStore? jiraSettingsStore = null)
     {
         _demoData = demoData;
         _monitoringService = monitoringService;
+        _jiraSettingsStore = jiraSettingsStore ?? new LocalJiraConnectionSettingsStore();
         _scheduledScansEnabled = monitoringService?.Schedule.Enabled ?? false;
         _selectedScanIntervalMinutes = monitoringService?.Schedule.IntervalMinutes ?? 1440;
+        try
+        {
+            _jiraBaseUrl = _jiraSettingsStore.Load().BaseUrl;
+            _jiraConnectionStatus = string.IsNullOrWhiteSpace(_jiraBaseUrl) ? "Jira is not configured." : "Jira site URL loaded.";
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to load Jira settings: {exception.Message}";
+        }
         LoadDemoDataCommand = new AsyncRelayCommand(LoadDemoDataAsync);
         ResetDemoDataCommand = new AsyncRelayCommand(ResetDemoDataAsync);
         SaveMonitoringScheduleCommand = new AsyncRelayCommand(SaveMonitoringScheduleAsync);
+        SaveJiraConnectionCommand = new AsyncRelayCommand(SaveJiraConnectionAsync);
+        OpenJiraCommand = new AsyncRelayCommand(OpenJiraAsync);
         _demoData.DataChanged += (_, _) => { DemoModeState = _demoData.IsDemoMode ? "DEMO MODE active: synthetic data only" : "Demo Mode is off"; };
     }
     public override string Title => "Settings";
     public override string Subtitle => "Application, database, connection, and security preferences.";
     public string DataLocation => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     public string DemoModeState { get => _demoModeState; private set => SetProperty(ref _demoModeState, value); }
+    public string JiraBaseUrl
+    {
+        get => _jiraBaseUrl;
+        set
+        {
+            if (!SetProperty(ref _jiraBaseUrl, value)) return;
+            OnPropertyChanged(nameof(CanConnectToJira));
+        }
+    }
+    public string JiraConnectionStatus { get => _jiraConnectionStatus; private set => SetProperty(ref _jiraConnectionStatus, value); }
+    public bool CanConnectToJira => TryGetJiraUri(JiraBaseUrl, out _);
     public bool ScheduledScansEnabled { get => _scheduledScansEnabled; set => SetProperty(ref _scheduledScansEnabled, value); }
     public int SelectedScanIntervalMinutes { get => _selectedScanIntervalMinutes; set => SetProperty(ref _selectedScanIntervalMinutes, value); }
     public IReadOnlyList<MonitoringIntervalOption> ScanIntervals { get; } = new[]
@@ -1761,6 +1831,8 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     public AsyncRelayCommand LoadDemoDataCommand { get; }
     public AsyncRelayCommand ResetDemoDataCommand { get; }
     public AsyncRelayCommand SaveMonitoringScheduleCommand { get; }
+    public AsyncRelayCommand SaveJiraConnectionCommand { get; }
+    public AsyncRelayCommand OpenJiraCommand { get; }
     private async Task SaveMonitoringScheduleAsync()
     {
         if (_monitoringService is null)
@@ -1777,6 +1849,57 @@ public sealed class SettingsViewModel : WorkspaceViewModel
         catch (Exception exception)
         {
             ErrorMessage = $"Unable to save monitoring schedule: {exception.Message}";
+        }
+    }
+    public Task SaveJiraConnectionAsync()
+    {
+        try
+        {
+            var normalized = string.IsNullOrWhiteSpace(JiraBaseUrl)
+                ? string.Empty
+                : LocalJiraConnectionSettingsStore.NormalizeBaseUrl(JiraBaseUrl);
+            _jiraSettingsStore.Save(normalized);
+            JiraBaseUrl = normalized;
+            JiraConnectionStatus = string.IsNullOrEmpty(normalized) ? "Jira URL cleared." : "Jira site URL saved on this device.";
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to save Jira URL: {exception.Message}";
+        }
+        return Task.CompletedTask;
+    }
+    private Task OpenJiraAsync()
+    {
+        if (!TryGetJiraUri(JiraBaseUrl, out var uri))
+        {
+            ErrorMessage = "Enter and save a valid HTTPS Jira site URL first.";
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+            ErrorMessage = null;
+            JiraConnectionStatus = "Opened Jira in the default browser. API authentication is not configured.";
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to open Jira: {exception.Message}";
+        }
+        return Task.CompletedTask;
+    }
+    private static bool TryGetJiraUri(string value, out Uri uri)
+    {
+        try
+        {
+            uri = new Uri(LocalJiraConnectionSettingsStore.NormalizeBaseUrl(value));
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            uri = null!;
+            return false;
         }
     }
     private async Task LoadDemoDataAsync() { IsLoading = true; ErrorMessage = null; try { await _demoData.LoadAsync(); DemoModeState = "DEMO MODE active: synthetic data only"; } catch { ErrorMessage = "Unable to load Demo Mode data."; } finally { IsLoading = false; } }

@@ -277,6 +277,7 @@ public sealed class OrganizationManagementService
         OrganizationAction.ViewInventory or OrganizationAction.ViewFindings => true,
         OrganizationAction.RunScan or OrganizationAction.ExportReports => role is not OrganizationMemberRole.Viewer,
         OrganizationAction.ManageMembers or OrganizationAction.ManageConnections or OrganizationAction.ManagePolicies => role == OrganizationMemberRole.OrganizationAdmin,
+        OrganizationAction.ManageRemediations => role is OrganizationMemberRole.OrganizationAdmin or OrganizationMemberRole.SecurityAnalyst,
         _ => false
     };
 

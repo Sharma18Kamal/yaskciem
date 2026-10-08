@@ -56,4 +56,20 @@ public sealed class DialogService : IDialogService
 
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
+
+    public string? ChooseComplianceBundlePath()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save organization compliance evidence bundle",
+            Filter = "Compliance evidence bundle (*.zip)|*.zip",
+            DefaultExt = ".zip",
+            AddExtension = true,
+            OverwritePrompt = true,
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            FileName = $"yask-ciem-compliance-{DateTime.Now:yyyyMMdd-HHmmss}.zip"
+        };
+
+        return dialog.ShowDialog() == true ? Path.ChangeExtension(dialog.FileName, ".zip") : null;
+    }
 }

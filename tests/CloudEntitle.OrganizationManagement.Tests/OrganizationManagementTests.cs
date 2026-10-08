@@ -8,6 +8,13 @@ namespace CloudEntitle.OrganizationManagement.Tests;
 public sealed class OrganizationManagementTests
 {
     [Fact]
+    public void RemediationPermission_ShouldPreserveExistingPersistedActionValues()
+    {
+        Assert.Equal(6, (int)OrganizationAction.ExportReports);
+        Assert.Equal(7, (int)OrganizationAction.ManageRemediations);
+    }
+
+    [Fact]
     public void Organization_ShouldBindAccountsAndExposeProviderScope()
     {
         var service = new OrganizationManagementService();
@@ -43,6 +50,8 @@ public sealed class OrganizationManagementTests
         Assert.False(service.Authorize(organization.Id, viewer, OrganizationAction.RunScan).Allowed);
         Assert.True(service.Authorize(organization.Id, analyst, OrganizationAction.RunScan).Allowed);
         Assert.False(service.Authorize(organization.Id, analyst, OrganizationAction.ManageMembers).Allowed);
+        Assert.True(service.Authorize(organization.Id, analyst, OrganizationAction.ManageRemediations).Allowed);
+        Assert.False(service.Authorize(organization.Id, viewer, OrganizationAction.ManageRemediations).Allowed);
     }
 
     [Fact]
@@ -156,7 +165,8 @@ public sealed class OrganizationManagementTests
         {
             OrganizationAction.ViewInventory,
             OrganizationAction.ViewFindings,
-            OrganizationAction.ExportReports
+            OrganizationAction.ExportReports,
+            OrganizationAction.ManageRemediations
         });
         var member = service.AddMember(organization.Id, owner, "reviewer@example.invalid", new OrganizationRoleOption(role.Name, null, role.Id));
         var reviewer = CreateIdentity(tenantId, member.Email);
@@ -165,6 +175,7 @@ public sealed class OrganizationManagementTests
         Assert.True(service.Authorize(organization.Id, reviewer, OrganizationAction.ViewInventory).Allowed);
         Assert.True(service.Authorize(organization.Id, reviewer, OrganizationAction.ViewFindings).Allowed);
         Assert.True(service.Authorize(organization.Id, reviewer, OrganizationAction.ExportReports).Allowed);
+        Assert.True(service.Authorize(organization.Id, reviewer, OrganizationAction.ManageRemediations).Allowed);
         Assert.False(service.Authorize(organization.Id, reviewer, OrganizationAction.RunScan).Allowed);
         Assert.False(service.Authorize(organization.Id, reviewer, OrganizationAction.ManageMembers).Allowed);
         Assert.Equal("Findings Reviewer", Assert.Single(service.GetMembers(organization.Id, owner), item => item.Id == member.Id).AssignedRoleName);

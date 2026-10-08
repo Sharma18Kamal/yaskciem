@@ -725,10 +725,12 @@ public sealed class NavigationTests
         public List<string> InformationMessages { get; } = new();
         public string? ReportPath { get; set; }
         public string? PolicyDraftPath { get; set; }
+        public string? ComplianceBundlePath { get; set; }
         public void ShowInformation(string message, string title = "YASK-CIEM") => InformationMessages.Add(message);
         public void ShowError(string message, string title = "YASK-CIEM") { }
         public string? ChooseReportPath() => ReportPath;
         public string? ChoosePolicyDraftPath() => PolicyDraftPath;
+        public string? ChooseComplianceBundlePath() => ComplianceBundlePath;
         public bool Confirm(string message, string title = "YASK-CIEM")
         {
             Confirmations.Add(message);

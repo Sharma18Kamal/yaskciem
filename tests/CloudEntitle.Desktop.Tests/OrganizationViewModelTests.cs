@@ -26,10 +26,13 @@ public sealed class OrganizationViewModelTests
         var otherAccountId = Guid.NewGuid();
         organizationService.BindCloudAccount(organization.Id, identity, CloudProvider.Azure, priorScanAccountId, "subscription-bound", "Bound Subscription");
         var liveScan = new TestLiveCloudScanService(CreateResult(currentScanAccountId, otherAccountId));
-        var viewModel = new OrganizationViewModel(new TestDemoDataService(), organizationService, new TestSsoService(identity), liveScan);
+        var authenticatedContext = new AuthenticatedOrganizationContext();
+        var viewModel = new OrganizationViewModel(new TestDemoDataService(), organizationService, new TestSsoService(identity), liveScan, authenticatedContext);
 
         await viewModel.SignInAsync();
 
+        Assert.Equal(identity, authenticatedContext.Identity);
+        Assert.Equal(organization.Id, authenticatedContext.OrganizationId);
         Assert.Equal(1, viewModel.BoundAccountCount);
         Assert.Equal(1, viewModel.ConsolidatedAccountCount);
         Assert.Equal(1, viewModel.ConsolidatedIdentities);

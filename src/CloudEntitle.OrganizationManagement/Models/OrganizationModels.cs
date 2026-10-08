@@ -4,7 +4,7 @@ namespace CloudEntitle.OrganizationManagement.Models;
 
 public enum OrganizationStatus { Active, Suspended, Archived }
 public enum OrganizationMemberRole { OrganizationAdmin, SecurityAnalyst, Auditor, Viewer }
-public enum OrganizationAction { ViewInventory, RunScan, ViewFindings, ManageMembers, ManageConnections, ManagePolicies, ExportReports }
+public enum OrganizationAction { ViewInventory, RunScan, ViewFindings, ManageMembers, ManageConnections, ManagePolicies, ExportReports, ManageRemediations }
 public sealed record OrganizationRoleOption(string Name, OrganizationMemberRole? BuiltInRole, Guid? CustomRoleId);
 public sealed record OrganizationCustomRole(Guid Id, Guid OrganizationId, string Name, IReadOnlyList<OrganizationAction> Permissions, DateTime CreatedAt, DateTime UpdatedAt);
 

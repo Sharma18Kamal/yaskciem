@@ -6,13 +6,15 @@
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
             <StackPanel>
             <Grid Margin="0,0,0,16">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Button Grid.Column="0" Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" ToolTip="Scan the connected cloud provider using read-only CLI access"/>
                 <Button Grid.Column="1" Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" MinWidth="100" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
                 <Button Grid.Column="2" Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Choose a folder and save findings as JSON or CSV"/>
                 <Button Grid.Column="3" Content="Discover accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="List accounts available through the currently connected cloud provider"/>
                 <TextBlock Grid.Column="4" Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxWidth="180" MaxHeight="48" ToolTip="Cloud CLI connection status"/>
-                <TextBlock Grid.Column="5" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
+                <ComboBox Grid.Column="5" ItemsSource="{Binding ComplianceFrameworks}" SelectedItem="{Binding SelectedComplianceFramework, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="145" Margin="8,0,0,0" ToolTip="Compliance framework for the exported evidence bundle"/>
+                <Button Grid.Column="6" Content="Export evidence bundle" Command="{Binding ExportComplianceBundleCommand}" IsEnabled="{Binding CanExportComplianceBundle}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Export organization-scoped controls, evidence, gaps, and assessment metadata"/>
+                <TextBlock Grid.Column="7" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
             </Grid>
             <Expander Header="{Binding AccountSelectionMessage}" IsExpanded="False" Margin="0,0,0,14">
                 <StackPanel>
@@ -33,6 +35,7 @@
                 </StackPanel>
             </Expander>
             <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding ComplianceExportStatus}" Foreground="{StaticResource SuccessBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
             <UniformGrid Columns="2" Rows="4">
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CLOUD ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CloudAccounts}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="IDENTITIES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding Identities}" Style="{StaticResource CardValue}"/></StackPanel></Border>
@@ -338,7 +341,58 @@
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
-            <StackPanel><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="APPLICATION" Style="{StaticResource CardLabel}"/><TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="0.1.0" Foreground="{StaticResource PrimaryBrush}" Margin="0,3,0,0"/><TextBlock Text="Data location" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/><TextBlock Text="{Binding DataLocation}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="DEMO MODE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding DemoModeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,12,0,0" TextWrapping="Wrap"/><TextBlock Text="Synthetic Azure, AWS, and GCP data is stored through the normal SQLite pipeline. No cloud APIs or credentials are used." Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal"><Button Content="Load Demo Data" Command="{Binding LoadDemoDataCommand}" Style="{StaticResource PrimaryButton}"/><Button Content="Reset Demo Data" Command="{Binding ResetDemoDataCommand}" Style="{StaticResource QuietButton}" Margin="10,0,0,0"/></StackPanel></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="CONTINUOUS MONITORING" Style="{StaticResource CardLabel}"/><CheckBox Content="Enable scheduled scans" IsChecked="{Binding ScheduledScansEnabled, Mode=TwoWay}" Margin="0,12,0,8"/><TextBlock Text="Scan interval" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,4"/><ComboBox ItemsSource="{Binding ScanIntervals}" DisplayMemberPath="Label" SelectedValuePath="Minutes" SelectedValue="{Binding SelectedScanIntervalMinutes, Mode=TwoWay}"/><Button Content="Save schedule" Command="{Binding SaveMonitoringScheduleCommand}" Style="{StaticResource PrimaryButton}" Margin="0,10,0,0"/><TextBlock Text="{Binding MonitoringService.Status}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/></StackPanel></Border><Border Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="CLOUD CONNECTIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="Use Connect Cloud in the application header to authenticate with Azure, AWS, or Google Cloud." Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0" TextWrapping="Wrap"/></StackPanel></Border></StackPanel>
+            <StackPanel>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="APPLICATION" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/>
+                        <TextBlock Text="0.1.0" Foreground="{StaticResource PrimaryBrush}" Margin="0,3,0,0"/>
+                        <TextBlock Text="Data location" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/>
+                        <TextBlock Text="{Binding DataLocation}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="DEMO MODE" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="{Binding DemoModeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="Synthetic Azure, AWS, and GCP data is stored through the normal SQLite pipeline. No cloud APIs or credentials are used." Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Load Demo Data" Command="{Binding LoadDemoDataCommand}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="Reset Demo Data" Command="{Binding ResetDemoDataCommand}" Style="{StaticResource QuietButton}" Margin="10,0,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="CONTINUOUS MONITORING" Style="{StaticResource CardLabel}"/>
+                        <CheckBox Content="Enable scheduled scans" IsChecked="{Binding ScheduledScansEnabled, Mode=TwoWay}" Margin="0,12,0,8"/>
+                        <TextBlock Text="Scan interval" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,4"/>
+                        <ComboBox ItemsSource="{Binding ScanIntervals}" DisplayMemberPath="Label" SelectedValuePath="Minutes" SelectedValue="{Binding SelectedScanIntervalMinutes, Mode=TwoWay}"/>
+                        <Button Content="Save schedule" Command="{Binding SaveMonitoringScheduleCommand}" Style="{StaticResource PrimaryButton}" Margin="0,10,0,0"/>
+                        <TextBlock Text="{Binding MonitoringService.Status}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="CLOUD CONNECTIONS" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="Use Connect Cloud in the application header to authenticate with Azure, AWS, or Google Cloud." Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="JIRA CONNECTION" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="Jira site URL" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
+                        <TextBox Text="{Binding JiraBaseUrl, UpdateSourceTrigger=PropertyChanged}" ToolTip="HTTPS Jira site URL. Do not include credentials, query parameters, or fragments."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="Save URL" Command="{Binding SaveJiraConnectionCommand}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="Connect to Jira" Command="{Binding OpenJiraCommand}" IsEnabled="{Binding CanConnectToJira}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding JiraConnectionStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="Connect opens the site in your browser. Jira API authentication and ticket creation are not configured." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RecommendationsViewModel}">
             <StackPanel>
@@ -410,11 +464,10 @@
                             </DataGrid.Columns>
                         </DataGrid>
                         <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0" Text="{Binding RequestedBy, UpdateSourceTrigger=PropertyChanged}" ToolTip="Plan creator and dry-run actor" Margin="0,0,8,0"/>
-                            <TextBox Grid.Column="1" Text="{Binding Reviewer, UpdateSourceTrigger=PropertyChanged}" ToolTip="Independent reviewer. Must differ from the plan creator." Margin="4,0,8,0"/>
-                            <TextBox Grid.Column="2" Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Approval or rejection rationale" Margin="4,0,8,0"/>
-                            <Button Grid.Column="3" Content="Create plan" Command="{Binding CreatePlanCommand}" IsEnabled="{Binding CanCreatePlan}" Style="{StaticResource PrimaryButton}"/>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="2.1*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{Binding SignedInAs}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Approval or rejection rationale" Margin="4,0,8,0"/>
+                            <Button Grid.Column="2" Content="Create plan" Command="{Binding CreatePlanCommand}" IsEnabled="{Binding CanCreatePlan}" Style="{StaticResource PrimaryButton}"/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -454,7 +507,7 @@
                         </ItemsControl>
                         <TextBlock Text="AUDIT TRAIL" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                         <ItemsControl ItemsSource="{Binding SelectedAuditTrail}">
-                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, Mode=OneWay, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Action, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Details, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, Mode=OneWay, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor, Mode=OneWay}"/><Run Text=" ("/><Run Text="{Binding ActorUserId, Mode=OneWay}"/><Run Text=") | "/><Run Text="{Binding Action, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Details, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </StackPanel>
                 </Grid>
@@ -571,6 +624,7 @@
                                             <CheckBox Content="Manage members" IsChecked="{Binding CustomRoleManageMembers}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
                                             <CheckBox Content="Manage connections" IsChecked="{Binding CustomRoleManageConnections}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
                                             <CheckBox Content="Manage policies" IsChecked="{Binding CustomRoleManagePolicies}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="Manage remediation" IsChecked="{Binding CustomRoleManageRemediations}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
                                             <CheckBox Content="Export reports" IsChecked="{Binding CustomRoleExportReports}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
                                         </WrapPanel>
                                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
