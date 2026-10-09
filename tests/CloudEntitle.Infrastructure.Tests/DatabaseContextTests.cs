@@ -54,6 +54,48 @@ public class DatabaseContextTests
     }
 
     [Fact]
+    public async Task CloudPrincipal_ShouldPersistWorkloadGovernanceEvidenceThroughMigrations()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<CloudEntitleDbContext>().UseSqlite(connection).Options;
+        var ownerId = "platform@example.invalid";
+        var trust = new WorkloadFederationTrust("https://issuer.example", "repo:org/app:environment:prod", new[] { "sts.amazonaws.com" }, "fixture");
+        var principal = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(),
+            AccountId = Guid.NewGuid(),
+            CloudProvider = CloudProviderType.Aws,
+            Name = "federated-workload",
+            PrincipalId = "arn:aws:iam::123456789012:role/federated-workload",
+            IdentityType = IdentityType.ServiceAccount,
+            OwnerIds = new List<string> { ownerId },
+            OwnerInventoryComplete = true,
+            CredentialLastRotatedAtUtc = DateTime.UtcNow.AddDays(-10),
+            CredentialInventoryComplete = true,
+            FederationTrusts = new List<WorkloadFederationTrust> { trust },
+            FederationInventoryComplete = true,
+            FederationTrustVerified = true,
+            LastObservedWorkloadAtUtc = DateTime.UtcNow
+        };
+
+        await using (var context = new CloudEntitleDbContext(options))
+        {
+            await context.Database.MigrateAsync();
+            context.CloudPrincipals.Add(principal);
+            await context.SaveChangesAsync();
+            context.ChangeTracker.Clear();
+
+            var loaded = await context.CloudPrincipals.SingleAsync();
+            Assert.Equal(new[] { ownerId }, loaded.OwnerIds);
+            Assert.Equal(trust.Issuer, Assert.Single(loaded.FederationTrusts).Issuer);
+            Assert.True(loaded.FederationTrustVerified);
+            Assert.Equal("platform@example.invalid", loaded.OwnerSummary);
+            Assert.Equal(principal.LastObservedWorkloadAtUtc, loaded.LastObservedWorkloadAtUtc);
+        }
+    }
+
+    [Fact]
     public async Task SqliteReportService_ShouldExportJsonAndCsv()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

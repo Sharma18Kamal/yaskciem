@@ -51,21 +51,39 @@ public sealed class ComplianceExportWorkflowTests
             organizationService.BindCloudAccount(organization.Id, identity, CloudProvider.Azure, boundAccount.Id, "subscription-bound", boundAccount.Name);
             var session = new AuthenticatedOrganizationContext();
             session.Set(identity, organization.Id);
-            var workflow = CreateWorkflow(factory, organizationService, session);
+            var historyStore = new LocalComplianceAssessmentHistoryStore(Path.Combine(directory, "assessments.json"));
+            var workflow = CreateWorkflow(factory, organizationService, session, historyStore);
 
             Assert.True(workflow.CanExport);
-            var bytes = await workflow.CreateBundleAsync(ComplianceFramework.CiemBaseline);
+            var exception = new ComplianceException(Guid.NewGuid(), "CIEM-BASE-001", "CHG-2042", "Temporary discovery exception",
+                "security@example.invalid", DateTime.UtcNow, DateTime.UtcNow.AddDays(30), "approval:CHG-2042");
+            var bytes = await workflow.CreateBundleAsync(ComplianceFramework.CiemBaseline,
+                new[] { ComplianceStandard.CisControlsV8_1, ComplianceStandard.Nist80053Rev5 }, exceptions: new[] { exception });
             using var archive = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
             using var assessment = JsonDocument.Parse(await ReadEntryAsync(archive, "assessment.json"));
+            using var manifest = JsonDocument.Parse(await ReadEntryAsync(archive, "manifest.json"));
+            using var exceptions = JsonDocument.Parse(await ReadEntryAsync(archive, "exceptions.json"));
             Assert.Contains(archive.Entries, entry => entry.FullName == "signature.json");
             using var lineage = JsonDocument.Parse(await ReadEntryAsync(archive, "evidence-lineage.json"));
+            using var controlLineage = JsonDocument.Parse(await ReadEntryAsync(archive, "control-lineage.json"));
             Assert.NotEmpty(lineage.RootElement.EnumerateArray());
+            Assert.Equal("1.2", manifest.RootElement.GetProperty("schemaVersion").GetString());
+            Assert.Equal("EvidenceSnapshot", manifest.RootElement.GetProperty("assessmentType").GetString());
+            Assert.False(manifest.RootElement.GetProperty("isCertification").GetBoolean());
+            Assert.Equal(ComplianceStandardCatalog.MappingCatalogVersion, manifest.RootElement.GetProperty("mappingCatalogVersion").GetString());
+            Assert.Equal("CIS Controls v8.1", controlLineage.RootElement[0].GetProperty("mappings")[0].GetProperty("standardVersion").GetString());
+            Assert.Equal("CHG-2042", exceptions.RootElement[0].GetProperty("reference").GetString());
+            Assert.False(assessment.RootElement.GetProperty("isCertification").GetBoolean());
             var accountEvidence = assessment.RootElement.GetProperty("controls").EnumerateArray()
                 .Single(control => control.GetProperty("controlId").GetString() == "CIEM-BASE-001")
                 .GetProperty("evidence").EnumerateArray().Select(item => item.GetString()).ToArray();
 
             Assert.Contains(accountEvidence, item => item!.Contains("Bound Production", StringComparison.Ordinal));
             Assert.DoesNotContain(accountEvidence, item => item!.Contains("Unrelated Production", StringComparison.Ordinal));
+            var historyPoints = await workflow.GetHistoryAsync(ComplianceFramework.CiemBaseline);
+            var historyPoint = Assert.Single(historyPoints);
+            Assert.Equal(ComplianceStandardCatalog.MappingCatalogVersion, historyPoint.MappingCatalogVersion);
+            Assert.Equal(1, historyPoint.ExceptionCount);
         }
         finally
         {
@@ -93,8 +111,10 @@ public sealed class ComplianceExportWorkflowTests
         Assert.Equal(Guid.Empty, member.CustomRoleId ?? Guid.Empty);
     }
 
-    private static ComplianceExportWorkflow CreateWorkflow(TestDbContextFactory factory, OrganizationManagementService organizations, AuthenticatedOrganizationContext session)
-        => new(factory, organizations, session, new ComplianceAssessmentService(), new IdentityGovernanceService(), new ComplianceExportService(), new TestComplianceBundleSigner());
+    private static ComplianceExportWorkflow CreateWorkflow(TestDbContextFactory factory, OrganizationManagementService organizations,
+        AuthenticatedOrganizationContext session, IComplianceAssessmentHistoryStore? historyStore = null)
+        => new(factory, organizations, session, new ComplianceAssessmentService(), new IdentityGovernanceService(), new ComplianceExportService(),
+            new TestComplianceBundleSigner(), historyStore);
 
     private static OrganizationIdentity CreateIdentity(string email)
         => CreateIdentity(Guid.NewGuid().ToString("D"), email);

@@ -84,6 +84,7 @@ public sealed class TicketingWorkflowService : ITicketingWorkflowService
         await submissionLock.WaitAsync(cancellationToken);
         try
         {
+            await using var processLock = await AcquireSubmissionFileLockAsync(dedupeKey, cancellationToken);
             var existing = await _requestStore.FindAsync(provider, dedupeKey, cancellationToken);
             if (existing is not null) return new TicketingSubmissionResult(existing, AlreadyExists: true);
 
@@ -156,7 +157,7 @@ public sealed class TicketingWorkflowService : ITicketingWorkflowService
         RecommendationModel recommendation, string summary, string evidence, string dedupeKey, CancellationToken cancellationToken)
     {
         var site = LocalJiraConnectionSettingsStore.NormalizeBaseUrl(siteUrl);
-        var descriptionText = $"{recommendation.Description}\n\nCurrent: {recommendation.CurrentState}\nProposed: {recommendation.SuggestedState}\nReason: {recommendation.Reason}\n\nYASK-CIEM evidence snapshot:\n{evidence}";
+        var descriptionText = $"{recommendation.Description}\n\nCurrent: {recommendation.CurrentState}\nProposed: {recommendation.SuggestedState}\nReason: {recommendation.Reason}\n\nYASK-CIEM evidence: {TicketingEvidenceLink.ForRecommendation(recommendation.Id)}\n\nYASK-CIEM evidence snapshot:\n{evidence}";
         var requestBody = JsonSerializer.Serialize(new
         {
             fields = new
@@ -192,7 +193,7 @@ public sealed class TicketingWorkflowService : ITicketingWorkflowService
         var body = JsonSerializer.Serialize(new
         {
             short_description = summary,
-            description = $"{recommendation.Description}\n\nCurrent: {recommendation.CurrentState}\nProposed: {recommendation.SuggestedState}\nReason: {recommendation.Reason}\n\nYASK-CIEM evidence snapshot:\n{evidence}",
+            description = $"{recommendation.Description}\n\nCurrent: {recommendation.CurrentState}\nProposed: {recommendation.SuggestedState}\nReason: {recommendation.Reason}\n\nYASK-CIEM evidence: {TicketingEvidenceLink.ForRecommendation(recommendation.Id)}\n\nYASK-CIEM evidence snapshot:\n{evidence}",
             category = configuration.RequestType
         });
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{site}/api/now/table/incident");
@@ -215,7 +216,7 @@ public sealed class TicketingWorkflowService : ITicketingWorkflowService
         RecommendationModel recommendation, string summary, string evidence, string dedupeKey, CancellationToken cancellationToken)
     {
         var site = LocalJiraConnectionSettingsStore.NormalizeBaseUrl(siteUrl);
-        var description = $"{recommendation.Description}\n\nCurrent: {recommendation.CurrentState}\nProposed: {recommendation.SuggestedState}\nReason: {recommendation.Reason}\n\nYASK-CIEM evidence snapshot:\n{evidence}";
+        var description = $"{recommendation.Description}\n\nCurrent: {recommendation.CurrentState}\nProposed: {recommendation.SuggestedState}\nReason: {recommendation.Reason}\n\nYASK-CIEM evidence: {TicketingEvidenceLink.ForRecommendation(recommendation.Id)}\n\nYASK-CIEM evidence snapshot:\n{evidence}";
         var body = JsonSerializer.Serialize(new
         {
             serviceDeskId = configuration.ProjectKey,
@@ -250,6 +251,7 @@ public sealed class TicketingWorkflowService : ITicketingWorkflowService
             provider = provider.ToString(),
             idempotencyKey = dedupeKey,
             summary,
+            evidenceUrl = TicketingEvidenceLink.ForRecommendation(recommendation.Id),
             recommendation = new
             {
                 recommendation.Provider,
@@ -294,9 +296,12 @@ public sealed class TicketingWorkflowService : ITicketingWorkflowService
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-        var status = json.RootElement.TryGetProperty("fields", out var fields) && fields.TryGetProperty("status", out var statusElement)
-            ? ReadString(statusElement, "name") : null;
-        return ticket with { Status = status ?? ticket.Status, UpdatedAtUtc = DateTime.UtcNow };
+        var statusElement = json.RootElement.TryGetProperty("fields", out var fields) && fields.TryGetProperty("status", out var parsedStatus)
+            ? parsedStatus : default;
+        var status = ReadString(statusElement, "name");
+        var category = statusElement.ValueKind == JsonValueKind.Object && statusElement.TryGetProperty("statusCategory", out var statusCategory)
+            ? ReadString(statusCategory, "key") : null;
+        return ApplyVerifiedStatus(ticket, status ?? ticket.Status, IsClosedStatus(status, category));
     }
 
     private async Task<TicketingRequestRecord> RefreshServiceNowStatusAsync(TicketingRequestRecord ticket, string siteUrl, TicketingProviderConfiguration configuration, TicketingCredentials credentials, CancellationToken cancellationToken)
@@ -311,7 +316,8 @@ public sealed class TicketingWorkflowService : ITicketingWorkflowService
         var result = json.RootElement.TryGetProperty("result", out var resultElement) ? resultElement : json.RootElement;
         var status = ReadString(result, "state");
         var number = ReadString(result, "number");
-        return ticket with { Status = number is null ? status ?? ticket.Status : $"{status ?? ticket.Status} ({number})", UpdatedAtUtc = DateTime.UtcNow };
+        var displayStatus = number is null ? status ?? ticket.Status : $"{status ?? ticket.Status} ({number})";
+        return ApplyVerifiedStatus(ticket, displayStatus, IsServiceNowClosedStatus(status));
     }
 
     private async Task<TicketingRequestRecord> RefreshWebhookStatusAsync(TicketingRequestRecord ticket, string webhookUrl, TicketingCredentials credentials, CancellationToken cancellationToken)
@@ -328,7 +334,48 @@ public sealed class TicketingWorkflowService : ITicketingWorkflowService
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-        return ticket with { Status = ReadString(json.RootElement, "status") ?? ticket.Status, UpdatedAtUtc = DateTime.UtcNow };
+        var status = ReadString(json.RootElement, "status");
+        return ApplyVerifiedStatus(ticket, status ?? ticket.Status, IsClosedStatus(status));
+    }
+
+    private static TicketingRequestRecord ApplyVerifiedStatus(TicketingRequestRecord ticket, string status, bool? isClosed)
+        => ticket with
+        {
+            Status = status,
+            UpdatedAtUtc = DateTime.UtcNow,
+            ClosureVerifiedAtUtc = isClosed switch
+            {
+                true => ticket.ClosureVerifiedAtUtc ?? DateTime.UtcNow,
+                false => null,
+                _ => ticket.ClosureVerifiedAtUtc
+            }
+        };
+
+    private static bool? IsClosedStatus(string? status, string? category = null)
+    {
+        if (string.Equals(category, "done", StringComparison.OrdinalIgnoreCase)) return true;
+        if (category is not null && (category.Equals("new", StringComparison.OrdinalIgnoreCase)
+            || category.Equals("indeterminate", StringComparison.OrdinalIgnoreCase))) return false;
+        if (status is null) return null;
+        if (new[] { "closed", "resolved", "done", "complete", "completed" }
+            .Contains(status.Trim(), StringComparer.OrdinalIgnoreCase)) return true;
+        if (new[] { "open", "new", "created", "to do", "in progress", "reopened", "on hold" }
+            .Contains(status.Trim(), StringComparer.OrdinalIgnoreCase)) return false;
+        return null;
+    }
+
+    private static bool? IsServiceNowClosedStatus(string? status)
+    {
+        if (status?.Trim() is "6" or "7") return true;
+        if (status?.Trim() is "1" or "2" or "3" or "8") return false;
+        return IsClosedStatus(status);
+    }
+
+    private static async Task<FileStream> AcquireSubmissionFileLockAsync(string dedupeKey, CancellationToken cancellationToken)
+    {
+        var lockDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YASK-CIEM", "ticketing", "locks");
+        var lockPath = Path.Combine(lockDirectory, dedupeKey + ".lock");
+        return await TicketingFileLock.AcquireAsync(lockPath, cancellationToken);
     }
 
     private static TicketingProviderConfiguration GetProviderConfiguration(JiraConnectionSettings settings, TicketingProvider provider)

@@ -14,6 +14,7 @@ public sealed class ComplianceAssessmentService
         IReadOnlyCollection<ComplianceStandard>? selectedStandards = null)
     {
         ArgumentNullException.ThrowIfNull(context);
+        var assessedAtUtc = (assessedAt ?? DateTime.UtcNow).ToUniversalTime();
         var standards = (selectedStandards ?? ComplianceStandardCatalog.Standards).Distinct().ToArray();
         var controls = framework switch
         {
@@ -22,13 +23,29 @@ public sealed class ComplianceAssessmentService
             ComplianceFramework.AccessReview => AccessReview(context),
             _ => CiemBaseline(context)
         };
+        var controlIds = controls.Select(control => control.ControlId).ToHashSet(StringComparer.Ordinal);
+        var exceptions = context.Exceptions.Select(exception =>
+        {
+            if (exception.Id == Guid.Empty || string.IsNullOrWhiteSpace(exception.ControlId)
+                || string.IsNullOrWhiteSpace(exception.Reference) || string.IsNullOrWhiteSpace(exception.Rationale)
+                || string.IsNullOrWhiteSpace(exception.RecordedBy))
+                throw new ArgumentException("Compliance exceptions require an ID, control, reference, rationale, and recorded-by identity.", nameof(context));
+            if (!controlIds.Contains(exception.ControlId))
+                throw new ArgumentException($"Compliance exception references unknown control '{exception.ControlId}'.", nameof(context));
+            if (exception.ExpiresAtUtc.ToUniversalTime() <= exception.RecordedAtUtc.ToUniversalTime())
+                throw new ArgumentException("Compliance exception expiry must be later than its recorded time.", nameof(context));
+            return exception with { Status = exception.ExpiresAtUtc.ToUniversalTime() > assessedAtUtc ? ComplianceExceptionStatus.Active : ComplianceExceptionStatus.Expired };
+        }).ToArray();
         controls = controls.Select(control => control with
         {
-            Mappings = ComplianceStandardCatalog.GetMappings(control.ControlId, standards)
+            Mappings = ComplianceStandardCatalog.GetMappings(control.ControlId, standards),
+            Exceptions = exceptions.Where(exception => exception.ControlId == control.ControlId).ToArray()
         }).ToArray();
-        return new ComplianceAssessment(Guid.NewGuid(), framework, assessedAt ?? DateTime.UtcNow, controls, controls.Count(item => item.State == ComplianceControlState.Pass), controls.Count(item => item.State == ComplianceControlState.Fail), controls.Count(item => item.State == ComplianceControlState.Partial), controls.Count(item => item.State == ComplianceControlState.NotAssessed))
+        return new ComplianceAssessment(Guid.NewGuid(), framework, assessedAtUtc, controls, controls.Count(item => item.State == ComplianceControlState.Pass), controls.Count(item => item.State == ComplianceControlState.Fail), controls.Count(item => item.State == ComplianceControlState.Partial), controls.Count(item => item.State == ComplianceControlState.NotAssessed))
         {
-            SelectedStandards = standards
+            SelectedStandards = standards,
+            MappingCatalogVersion = ComplianceStandardCatalog.MappingCatalogVersion,
+            Exceptions = exceptions
         };
     }
 

@@ -333,6 +333,56 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task DashboardViewModel_ShouldShowEvidenceQualityAndUnknownTotals()
+    {
+        var now = DateTime.UtcNow;
+        var scan = new LiveCloudScanResult(1, 1, 0, 0, 0, 0, Array.Empty<RiskFinding>(), now,
+            Array.Empty<string>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(),
+            Array.Empty<DiscoveredCloudRole>(), Array.Empty<DiscoveredCloudPermission>(), now,
+            new[]
+            {
+                new LiveEffectiveAccessRecord("Azure", "fully-attributed", "Reader", "subscription", "Activity Log", false,
+                    LastChangedAt: now, LastChangedBy: "admin@example.invalid"),
+                new LiveEffectiveAccessRecord("Azure", "partial-attribution", "Reader", "subscription", "RBAC", false,
+                    LastChangedAt: now),
+                new LiveEffectiveAccessRecord("Azure", "unattributed", "Reader", "subscription", "RBAC", false)
+            }, Array.Empty<LiveScanAccountRecord>())
+        {
+            Coverage = new[]
+            {
+                new ScanCoverageRecord("Azure", "RBAC assignments", ScanCoverageStatus.Collected, 3, "Collected."),
+                new ScanCoverageRecord("Azure", "permission usage", ScanCoverageStatus.Unsupported, 0, "Unsupported."),
+                new ScanCoverageRecord("Azure", "Entra directory", ScanCoverageStatus.Denied, 0, "Consent required.")
+            },
+            ResourceRiskFindings = new[]
+            {
+                new RiskFindingModel { Id = Guid.NewGuid(), EvaluationState = RiskEvaluationState.Unknown },
+                new RiskFindingModel { Id = Guid.NewGuid(), EvaluationState = RiskEvaluationState.Unsupported }
+            },
+            ModeledAccessPaths = new[]
+            {
+                new CloudEntitle.Domain.Entities.AccessPath { Id = Guid.NewGuid(), PathStatus = AccessPathStatus.Unknown },
+                new CloudEntitle.Domain.Entities.AccessPath { Id = Guid.NewGuid(), PathStatus = AccessPathStatus.Unsupported }
+            }
+        };
+        var scanService = new FixedLiveCloudScanService(scan);
+        var dashboard = new DashboardViewModel(new NoopDemoDataService(), new NoopAnalyticsService(), scanService);
+
+        await dashboard.RunScanAsync();
+
+        Assert.NotEqual("Not available", dashboard.EvidenceAge);
+        Assert.Contains("Completed", dashboard.EvidenceAgeDetails);
+        Assert.Equal("1/3 sources", dashboard.SourceCoverageSummary);
+        Assert.Contains("Denied 1", dashboard.SourceCoverageDetails);
+        Assert.Equal(1, dashboard.UnsupportedPermissionSourceCount);
+        Assert.Contains("permission usage", dashboard.UnsupportedPermissionSourceDetails);
+        Assert.Equal("33%", dashboard.AttributionConfidence);
+        Assert.Contains("1/3", dashboard.AttributionDetails);
+        Assert.Equal(2, dashboard.UnknownEvaluationTotal);
+        Assert.Equal(2, dashboard.UnsupportedEvaluationTotal);
+    }
+
+    [Fact]
     public async Task LiveCloudScan_ShouldOnlyScanTheSingleConnectedProvider()
     {
         var azure = new FakeCloudProvider(CloudProviderType.Azure, connected: true);
@@ -827,6 +877,22 @@ public sealed class NavigationTests
             {
                 new CloudEffectiveAccessAssignment("test-principal", "Owner", "test-scope", "Test assignment", true)
             });
+    }
+
+    private sealed class FixedLiveCloudScanService(LiveCloudScanResult result) : ILiveCloudScanService
+    {
+        public LiveCloudScanResult? CurrentResult { get; private set; }
+        public event EventHandler? ScanCompleted;
+        public Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<LiveScanAccountRecord>>(Array.Empty<LiveScanAccountRecord>());
+        public Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default)
+            => ScanAsync(null, cancellationToken);
+        public Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default)
+        {
+            CurrentResult = result;
+            ScanCompleted?.Invoke(this, EventArgs.Empty);
+            return Task.FromResult(result);
+        }
     }
 
     private sealed class CancellationBlockingCloudProvider : ICloudProvider

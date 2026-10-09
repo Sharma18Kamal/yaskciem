@@ -74,6 +74,62 @@ public sealed class IdentityGovernanceTests
     }
 
     [Fact]
+    public void AccessReview_ShouldIssueRecurringRemindersThenEscalate()
+    {
+        var now = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var candidate = new AccessReviewCandidate(Guid.NewGuid(), Guid.NewGuid(), null, CloudProvider.Azure,
+            "Privileged workload access", "Evidence snapshot", SuggestedReviewer: "owner@example.invalid");
+        var service = new IdentityGovernanceService();
+        var campaign = service.CreateCampaign("Workload review", new[] { candidate }, TimeSpan.FromDays(10),
+            asOf: now, templateId: "privileged-workloads", reminderLeadDays: 3, reminderIntervalDays: 1);
+        var item = Assert.Single(campaign.Items);
+
+        var beforeWindow = service.ReevaluateCampaign(campaign, now.AddDays(6));
+        Assert.Equal(0, Assert.Single(beforeWindow.Items).ReminderCount);
+        var firstReminder = service.ReevaluateCampaign(campaign, now.AddDays(7));
+        var firstReminderItem = Assert.Single(firstReminder.Items);
+        Assert.Equal("privileged-workloads", firstReminder.TemplateId);
+        Assert.Equal("owner@example.invalid", firstReminderItem.OwnerSnapshot);
+        Assert.Equal(1, firstReminderItem.ReminderCount);
+
+        var sameInterval = service.ReevaluateCampaign(firstReminder, now.AddDays(7).AddHours(12));
+        Assert.Equal(1, Assert.Single(sameInterval.Items).ReminderCount);
+        var nextReminder = service.ReevaluateCampaign(sameInterval, now.AddDays(8));
+        Assert.Equal(2, Assert.Single(nextReminder.Items).ReminderCount);
+
+        var overdue = service.ReevaluateCampaign(nextReminder, item.DueAt!.Value.AddMinutes(1));
+        var overdueItem = Assert.Single(overdue.Items);
+        Assert.NotNull(overdueItem.EscalatedAt);
+        Assert.Equal(2, overdueItem.ReminderCount);
+        Assert.Contains(overdueItem.AuditTrail, entry => entry.Action == "ReviewerReminderDue");
+        Assert.Contains(overdueItem.AuditTrail, entry => entry.Action == "Escalated");
+    }
+
+    [Fact]
+    public void AccessReview_ShouldBindAttestationToEvidenceAndRecordReviewerAndActor()
+    {
+        var now = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var evidence = "Provider=AWS; Grant=ReadOnly; Owner=platform@example.invalid";
+        var candidate = new AccessReviewCandidate(Guid.NewGuid(), Guid.NewGuid(), null, CloudProvider.Aws,
+            "Read-only account access", evidence, SuggestedReviewer: "platform@example.invalid");
+        var service = new IdentityGovernanceService();
+        var campaign = service.CreateCampaign("Owner attestation", new[] { candidate }, TimeSpan.FromDays(14),
+            asOf: now, templateId: "all-access");
+        var item = Assert.Single(campaign.Items);
+
+        var attested = service.RecordDecision(campaign, item.Id, ReviewDecision.Certified,
+            "platform@example.invalid", "Access confirmed", asOf: now.AddHours(1), actor: "security-admin@example.invalid");
+        var updatedItem = Assert.Single(attested.Items);
+        var attestation = Assert.Single(updatedItem.Attestations);
+
+        Assert.Equal("platform@example.invalid", attestation.Reviewer);
+        Assert.Equal("security-admin@example.invalid", attestation.Actor);
+        Assert.Equal(evidence, attestation.EvidenceSnapshot);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(evidence))).ToLowerInvariant(), attestation.EvidenceSha256);
+        Assert.Contains(updatedItem.AuditTrail, entry => entry.Action == "AttestationRecorded");
+    }
+
+    [Fact]
     public void AccessReview_ExceptionMustExpireAndEscalatesAfterExpiry()
     {
         var now = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);

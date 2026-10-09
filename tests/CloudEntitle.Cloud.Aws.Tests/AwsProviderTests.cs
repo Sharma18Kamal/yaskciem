@@ -108,7 +108,30 @@ public class AwsProviderTests
             Assert.Equal(400, unusedRole.UsageHistoryDays);
             Assert.Contains("no role use", unusedRole.Source, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(assignments, assignment => assignment.Principal == "demo-user" && assignment.Role == "ReadOnlyAccess" && assignment.LastChangedAt.HasValue && assignment.LastChangedBy == "arn:aws:iam::123456789012:user/auditor" && assignment.Source.Contains("CloudTrail", StringComparison.Ordinal));
-            Assert.Contains("Console password used", Assert.Single(users).LastActivity!);
+            Assert.Contains("Console password used", Assert.Single(users, identity => identity.IdentityType == IdentityType.User).LastActivity!);
+        }
+
+        [Fact]
+        public async Task AwsProvider_ShouldTrackServiceAndFederatedWorkloadRoles()
+        {
+            var provider = new AwsProvider(new FakeAwsCommandRunner(), useLiveDiscovery: true);
+            var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+            var identities = await provider.DiscoverIdentitiesAsync(account.Id);
+
+            var lambdaRole = Assert.Single(identities, identity => identity.Name == "LambdaWorkloadRole");
+            Assert.Equal(IdentityType.ServiceAccount, lambdaRole.IdentityType);
+            Assert.Contains("platform@example.invalid", lambdaRole.OwnerIds);
+            Assert.True(lambdaRole.OwnerInventoryComplete);
+            Assert.True(lambdaRole.ActivityEvidenceComplete);
+            Assert.Equal(400, lambdaRole.ActivityObservationDays);
+            var federatedRole = Assert.Single(identities, identity => identity.Name == "FederatedWorkloadRole");
+            Assert.True(federatedRole.FederationInventoryComplete);
+            Assert.Null(federatedRole.FederationTrustVerified);
+            Assert.Equal("arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE", Assert.Single(federatedRole.FederationTrusts).Issuer);
+            Assert.Equal("system:serviceaccount:apps:worker", federatedRole.FederationSubject);
+            Assert.Equal("sts.amazonaws.com", federatedRole.FederationAudience);
+            Assert.DoesNotContain(identities, identity => identity.Name == "HumanAssumableRole");
         }
 
         [Fact]
@@ -149,7 +172,7 @@ public class AwsProviderTests
                     : arguments.Contains("list-findings-v2")
                         ? "{\"findings\":[{\"status\":\"ACTIVE\",\"findingType\":\"ExternalAccess\",\"resource\":\"arn:aws:s3:::private-bucket\",\"resourceType\":\"AWS::S3::Bucket\",\"principal\":{\"AWS\":\"*\"},\"createdAt\":\"2026-01-01T00:00:00Z\"}]}"
                         : arguments.Contains("get-account-authorization-details")
-                    ? "{\"UserDetailList\":[{\"UserName\":\"demo-user\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"UserPolicyList\":[{\"UserPolicyName\":\"InlineRead\"}]}],\"GroupDetailList\":[],\"RoleDetailList\":[{\"RoleName\":\"DemoRole\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"RolePolicyList\":[],\"RoleLastUsed\":{\"LastUsedDate\":\"2026-10-01T12:00:00Z\",\"Region\":\"us-east-1\"}},{\"RoleName\":\"UnusedDemoRole\",\"AttachedManagedPolicies\":[{\"PolicyName\":\"ReadOnlyAccess\"}],\"RolePolicyList\":[],\"RoleLastUsed\":{}}]}"
+                    ? """{"UserDetailList":[{"UserName":"demo-user","AttachedManagedPolicies":[{"PolicyName":"ReadOnlyAccess"}],"UserPolicyList":[{"UserPolicyName":"InlineRead"}]}],"GroupDetailList":[],"RoleDetailList":[{"RoleName":"DemoRole","AttachedManagedPolicies":[{"PolicyName":"ReadOnlyAccess"}],"RolePolicyList":[],"RoleLastUsed":{"LastUsedDate":"2026-10-01T12:00:00Z","Region":"us-east-1"}},{"RoleName":"UnusedDemoRole","AttachedManagedPolicies":[{"PolicyName":"ReadOnlyAccess"}],"RolePolicyList":[],"RoleLastUsed":{}},{"RoleName":"LambdaWorkloadRole","Arn":"arn:aws:iam::123456789012:role/LambdaWorkloadRole","AssumeRolePolicyDocument":{"Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]},"Tags":[{"Key":"owner","Value":"platform@example.invalid"}],"RoleLastUsed":{"LastUsedDate":"2026-10-01T12:00:00Z","Region":"us-east-1"}},{"RoleName":"FederatedWorkloadRole","Arn":"arn:aws:iam::123456789012:role/FederatedWorkloadRole","AssumeRolePolicyDocument":{"Statement":[{"Effect":"Allow","Principal":{"Federated":"arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE:sub":"system:serviceaccount:apps:worker","oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE:aud":"sts.amazonaws.com"}}}]},"Tags":[],"RoleLastUsed":{}},{"RoleName":"HumanAssumableRole","Arn":"arn:aws:iam::123456789012:role/HumanAssumableRole","AssumeRolePolicyDocument":{"Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789012:root"},"Action":"sts:AssumeRole"}]},"Tags":[],"RoleLastUsed":{}}]}"""
                     : arguments.Contains("sts")
                     ? "{\"Account\":\"123456789012\",\"Arn\":\"arn:aws:iam::123456789012:user/demo\"}"
                     : arguments.Contains("list-users")

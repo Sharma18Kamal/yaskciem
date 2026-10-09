@@ -1,5 +1,7 @@
 namespace CloudEntitle.Domain;
 
+using System.ComponentModel.DataAnnotations.Schema;
+
 public enum CloudProviderType
 {
     Azure,
@@ -334,8 +336,38 @@ public class CloudPrincipal
     public IdentityStatus Status { get => IsActive ? IdentityStatus.Active : IdentityStatus.Inactive; set => IsActive = value == IdentityStatus.Active; }
     public bool IsExternal { get; set; }
     public DateTime? LastActivityAt { get; set; }
+    public DateTime? LastObservedWorkloadAtUtc { get; set; }
+    public bool? ActivityEvidenceComplete { get; set; }
+    public int? ActivityObservationDays { get; set; }
+    public string? ActivityEvidenceSource { get; set; }
+    public List<string> OwnerIds { get; set; } = new();
+    public bool? OwnerInventoryComplete { get; set; }
+    public string? OwnerEvidenceSource { get; set; }
+    public DateTime? CredentialLastRotatedAtUtc { get; set; }
+    public DateTime? CredentialExpiresAtUtc { get; set; }
+    public bool? CredentialInventoryComplete { get; set; }
+    public string? CredentialEvidenceSource { get; set; }
+    public string? FederationIssuer { get; set; }
+    public string? FederationSubject { get; set; }
+    public string? FederationAudience { get; set; }
+    public List<WorkloadFederationTrust> FederationTrusts { get; set; } = new();
+    public bool? FederationTrustVerified { get; set; }
+    public bool? FederationInventoryComplete { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+
+    [NotMapped]
+    public string OwnerSummary => OwnerIds.Count > 0 ? string.Join(", ", OwnerIds)
+        : OwnerInventoryComplete == true ? "Unowned"
+        : OwnerInventoryComplete == false ? "Unknown / incomplete"
+        : "Not assessed";
+
+    [NotMapped]
+    public string FederationSummary => FederationTrusts.Count > 0
+        ? string.Join("; ", FederationTrusts.Select(trust => $"{trust.Issuer} | {trust.Subject}"))
+        : FederationInventoryComplete == true ? "No federation configured"
+        : FederationInventoryComplete == false ? "Unknown / incomplete"
+        : "Not assessed";
 
     public void Validate()
     {
@@ -345,6 +377,8 @@ public class CloudPrincipal
         }
     }
 }
+
+public sealed record WorkloadFederationTrust(string Issuer, string Subject, IReadOnlyList<string> Audiences, string Source);
 
 public class CloudGroup
 {

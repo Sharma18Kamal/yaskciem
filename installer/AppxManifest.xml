@@ -22,6 +22,13 @@
   <Applications>
     <Application Id="YASKCIEM" Executable="CloudEntitle.Desktop.exe" EntryPoint="windows.fullTrustApplication">
       <uap:VisualElements AppListEntry="default" DisplayName="YASK-CIEM" Description="Cloud entitlement visibility and risk analysis" BackgroundColor="#0F172A" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="yask-ciem">
+            <uap:DisplayName>YASK-CIEM evidence</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+      </Extensions>
     </Application>
   </Applications>
 </Package>

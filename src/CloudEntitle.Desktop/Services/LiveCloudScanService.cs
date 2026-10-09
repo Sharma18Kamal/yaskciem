@@ -331,10 +331,22 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     {
                         var directoryAccount = selectedAccounts.FirstOrDefault();
                         var entraResult = await entraProvider.DiscoverEntraDirectoryAsync(directoryAccount?.Id ?? Guid.Empty, cancellationToken);
-                        var knownPrincipalIds = identityRecords.Select(identity => identity.PrincipalId).Where(id => id is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                        var newPrincipals = entraResult.Principals.Where(principal => principal.PrincipalId is null || knownPrincipalIds.Add(principal.PrincipalId)).ToArray();
+                        var newPrincipals = new List<CloudPrincipal>();
+                        foreach (var principal in entraResult.Principals)
+                        {
+                            var existing = principal.PrincipalId is null ? null : identityRecords.FirstOrDefault(identity =>
+                                identity.CloudProvider == principal.CloudProvider
+                                && string.Equals(identity.PrincipalId, principal.PrincipalId, StringComparison.OrdinalIgnoreCase));
+                            if (existing is null)
+                            {
+                                newPrincipals.Add(principal);
+                                continue;
+                            }
+
+                            MergeIdentityEvidence(existing, principal);
+                        }
                         identityRecords.AddRange(newPrincipals);
-                        identitiesScanned += newPrincipals.Length;
+                        identitiesScanned += newPrincipals.Count;
                         privilegedIdentities += newPrincipals.Count(identity => identity.IsPrivileged);
                         effectiveAccessRecords.AddRange(entraResult.AccessAssignments.Select(item => new LiveEffectiveAccessRecord(
                             provider.ProviderType.ToString(), item.Principal, item.Role, item.Scope, item.Source, item.IsPrivileged, item.AssignmentType, item.LastUsedAt, item.LastChangedAt, item.LastChangedBy, directoryAccount?.ExternalAccountId ?? directoryAccount?.SubscriptionId ?? directoryAccount?.TenantId)));
@@ -501,7 +513,9 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         }
 
         var graphResult = new LiveResourceRiskGraphResult(Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(), Array.Empty<string>());
-        if (graphAssignments.Count > 0 && resourceRecords.Count > 0)
+        var hasWorkloadIdentities = identityRecords.Any(principal => principal.IdentityType is IdentityType.ServicePrincipal
+            or IdentityType.ServiceAccount or IdentityType.ManagedIdentity or IdentityType.Application);
+        if ((graphAssignments.Count > 0 && resourceRecords.Count > 0) || hasWorkloadIdentities)
         {
             try
             {
@@ -625,6 +639,35 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         CurrentResult = result;
         ScanCompleted?.Invoke(this, EventArgs.Empty);
         return CurrentResult;
+    }
+
+    private static void MergeIdentityEvidence(CloudPrincipal target, CloudPrincipal source)
+    {
+        if (source.OwnerInventoryComplete.HasValue)
+        {
+            target.OwnerInventoryComplete = source.OwnerInventoryComplete;
+            target.OwnerIds = source.OwnerIds.ToList();
+        }
+        target.CredentialInventoryComplete = source.CredentialInventoryComplete ?? target.CredentialInventoryComplete;
+        target.CredentialLastRotatedAtUtc = source.CredentialLastRotatedAtUtc ?? target.CredentialLastRotatedAtUtc;
+        target.CredentialExpiresAtUtc = source.CredentialExpiresAtUtc ?? target.CredentialExpiresAtUtc;
+        target.CredentialEvidenceSource = source.CredentialEvidenceSource ?? target.CredentialEvidenceSource;
+        target.OwnerEvidenceSource = source.OwnerEvidenceSource ?? target.OwnerEvidenceSource;
+        target.FederationInventoryComplete = source.FederationInventoryComplete ?? target.FederationInventoryComplete;
+        target.FederationIssuer = source.FederationIssuer ?? target.FederationIssuer;
+        target.FederationSubject = source.FederationSubject ?? target.FederationSubject;
+        target.FederationAudience = source.FederationAudience ?? target.FederationAudience;
+        target.FederationTrustVerified = source.FederationTrustVerified ?? target.FederationTrustVerified;
+        if (source.FederationInventoryComplete.HasValue)
+            target.FederationTrusts = source.FederationTrusts.ToList();
+        target.LastObservedWorkloadAtUtc = source.LastObservedWorkloadAtUtc ?? target.LastObservedWorkloadAtUtc;
+        if (source.ActivityEvidenceComplete.HasValue)
+        {
+            target.ActivityEvidenceComplete = source.ActivityEvidenceComplete;
+            target.ActivityObservationDays = source.ActivityObservationDays;
+            target.ActivityEvidenceSource = source.ActivityEvidenceSource;
+            target.LastActivityAt = source.LastActivityAt ?? target.LastActivityAt;
+        }
     }
 
     private static RiskFinding ToCloudFinding(

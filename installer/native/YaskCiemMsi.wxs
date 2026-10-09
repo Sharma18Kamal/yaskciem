@@ -13,6 +13,16 @@
       <Directory Id="INSTALLFOLDER" Name="YASK-CIEM" />
     </StandardDirectory>
 
+    <Component Id="EvidenceProtocolHandler" Guid="{5BCAB901-2C8D-4665-9DAB-8F3C5AD11687}" Directory="INSTALLFOLDER">
+      <RegistryKey Root="HKLM" Key="Software\Classes\yask-ciem">
+        <RegistryValue Type="string" Value="URL:YASK-CIEM evidence link" />
+        <RegistryValue Name="URL Protocol" Type="string" Value="" />
+        <RegistryKey Key="shell\open\command">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]CloudEntitle.Desktop.exe&quot; &quot;%1&quot;" KeyPath="yes" />
+        </RegistryKey>
+      </RegistryKey>
+    </Component>
+
     <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="APPLICATIONMENUDIR" Name="YASK-CIEM">
         <Component Id="StartMenuShortcut" Guid="{F47E0C41-82A8-452E-8B3C-EA33D41456A3}">
@@ -29,6 +39,7 @@
     <Feature Id="MainFeature" Title="YASK-CIEM" Level="1">
       <Files Include="!(bindpath.PublishedApp)\**" Directory="INSTALLFOLDER" />
       <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="EvidenceProtocolHandler" />
     </Feature>
   </Package>
 </Wix>

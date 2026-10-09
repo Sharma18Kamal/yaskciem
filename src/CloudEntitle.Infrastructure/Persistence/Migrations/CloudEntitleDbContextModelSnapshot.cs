@@ -243,6 +243,15 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool?>("ActivityEvidenceComplete")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ActivityEvidenceSource")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ActivityObservationDays")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("CloudAccountId")
                         .HasColumnType("TEXT");
 
@@ -250,6 +259,18 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CredentialEvidenceSource")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CredentialExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("CredentialInventoryComplete")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CredentialLastRotatedAtUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("DisplayName")
@@ -261,6 +282,25 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FederationAudience")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("FederationInventoryComplete")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FederationIssuer")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FederationSubject")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("FederationTrustVerified")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FederationTrusts")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -283,10 +323,23 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastActivityAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("LastObservedWorkloadAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerEvidenceSource")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerIds")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("OwnerInventoryComplete")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("PrincipalId")
                         .HasMaxLength(200)

@@ -2,7 +2,6 @@ using CloudEntitle.Integration.Clients;
 using CloudEntitle.Integration.Contracts;
 using CloudEntitle.Infrastructure.Persistence;
 using CloudEntitle.OrganizationManagement.Models;
-using CloudEntitle.OrganizationManagement.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace CloudEntitle.Desktop.Services;
@@ -16,7 +15,7 @@ public sealed class CentralAuditSyncService(
     IDbContextFactory<CloudEntitleDbContext> contextFactory,
     CiemApiClient apiClient,
     IApiAccessTokenProvider tokenProvider,
-    OrganizationManagementService organizationService,
+    ISharedOrganizationApi sharedOrganizationApi,
     AuthenticatedOrganizationContext authenticatedContext) : ICentralAuditSyncService
 {
     public async Task<int> SyncOrganizationAsync(Guid organizationId, CancellationToken cancellationToken = default)
@@ -24,7 +23,8 @@ public sealed class CentralAuditSyncService(
         var identity = authenticatedContext.Identity;
         if (identity is null || authenticatedContext.OrganizationId != organizationId)
             throw new UnauthorizedAccessException("Sign in to the selected organization before syncing its audit events.");
-        if (!organizationService.Authorize(organizationId, identity, OrganizationAction.ExportReports).Allowed)
+        var workspace = await sharedOrganizationApi.GetWorkspaceAsync(organizationId, cancellationToken);
+        if (!workspace.AllowedActions.Contains(OrganizationAction.ExportReports))
             throw new UnauthorizedAccessException("Your organization role does not allow audit export.");
 
         var accessToken = await tokenProvider.GetApiAccessTokenAsync(cancellationToken);

@@ -26,7 +26,8 @@ public sealed class LiveResourceRiskGraphTests
         Assert.Contains(path.Nodes, node => node.NodeType == "PublicExposure");
         Assert.Contains(path.Nodes, node => node.NodeType == "SensitiveData");
         Assert.Contains(path.Nodes, node => node.NodeType == "CriticalAsset");
-        var graphFinding = Assert.Single(result.ResourceRiskFindings);
+        var graphFinding = Assert.Single(result.ResourceRiskFindings, finding => finding.Title == "Exploitable Identity-to-Workload Path");
+        Assert.Contains(result.ResourceRiskFindings, finding => finding.Title == "Overprivileged Workload Identity");
         Assert.Equal("Exploitable Identity-to-Workload Path", graphFinding.Title);
         Assert.Equal(RiskCategory.ExternalAccess, graphFinding.Category);
         Assert.Equal(RiskEvaluationState.Potential, graphFinding.EvaluationState);
@@ -63,7 +64,8 @@ public sealed class LiveResourceRiskGraphTests
             Assert.Contains(saved.ResourceSecuritySignals, signal => signal.Type == ResourceSecuritySignalType.CriticalAsset);
             Assert.Contains(saved.ResourceSecurityCoverage, item => item.SignalType == ResourceSecuritySignalType.PublicExposure);
             Assert.Single(saved.ModeledAccessPaths);
-            Assert.Single(saved.ResourceRiskFindings);
+            Assert.Contains(saved.ResourceRiskFindings, finding => finding.Title == "Exploitable Identity-to-Workload Path");
+            Assert.Contains(saved.ResourceRiskFindings, finding => finding.Title == "Overprivileged Workload Identity");
         }
         finally
         {

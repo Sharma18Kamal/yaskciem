@@ -5,7 +5,9 @@ using System.Text;
 using System.Text.Json;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.IdentityGovernance.Models;
 using CloudEntitle.Integration.Clients;
+using CloudEntitle.Integration.Contracts;
 using CloudEntitle.OrganizationManagement.Models;
 using CloudEntitle.OrganizationManagement.Services;
 using CloudEntitle.Infrastructure.Persistence;
@@ -28,14 +30,12 @@ public sealed class CentralAuditSyncServiceTests
         var firstEventId = Guid.NewGuid();
         var secondEventId = Guid.NewGuid();
         var identity = new OrganizationIdentity(Guid.NewGuid(), Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("D"), "owner@example.invalid");
-        var organizations = new OrganizationManagementService();
-        var organization = organizations.CreateOrganization("Audit Org", "audit-org", identity.TenantId, identity);
-        var organizationId = organization.Id;
+        var organizationId = Guid.NewGuid();
         var session = new AuthenticatedOrganizationContext();
         session.Set(identity, organizationId);
         var handler = new RecordingHandler();
         var service = new CentralAuditSyncService(factory, new CiemApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://api.example.invalid/") }),
-            new TestTokenProvider(), organizations, session);
+            new TestTokenProvider(), new TestSharedOrganizationApi(identity, organizationId), session);
 
         try
         {
@@ -67,6 +67,28 @@ public sealed class CentralAuditSyncServiceTests
     private sealed class TestTokenProvider : IApiAccessTokenProvider
     {
         public Task<string> GetApiAccessTokenAsync(CancellationToken cancellationToken = default) => Task.FromResult("api-test-token");
+    }
+
+    private sealed class TestSharedOrganizationApi(OrganizationIdentity identity, Guid organizationId) : ISharedOrganizationApi
+    {
+        public Task<IReadOnlyList<OrganizationProfile>> GetOrganizationsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<OrganizationWorkspaceDto> GetWorkspaceAsync(Guid id, CancellationToken cancellationToken = default)
+            => id == organizationId
+                ? Task.FromResult(new OrganizationWorkspaceDto(new OrganizationProfile(id, "Shared", "shared", OrganizationStatus.Active, DateTime.UtcNow) { EntraTenantId = identity.TenantId },
+                    new OrganizationMember(Guid.NewGuid(), id, identity.UserId, identity.Email, OrganizationMemberRole.OrganizationAdmin, true, DateTime.UtcNow),
+                    new[] { OrganizationAction.ExportReports }, Array.Empty<OrganizationMember>(), Array.Empty<TenantBinding>(), Array.Empty<OrganizationCustomRole>(), Array.Empty<OrganizationAuditEntry>()))
+                : throw new InvalidOperationException();
+        public Task<OrganizationProfile> CreateOrganizationAsync(string name, string tenantKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<OrganizationMember> InviteMemberAsync(Guid id, string email, OrganizationRoleOption role, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<OrganizationMember> UpdateMemberRoleAsync(Guid id, Guid memberId, OrganizationRoleOption role, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<OrganizationMember> SetMemberActiveAsync(Guid id, Guid memberId, bool isActive, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<TenantBinding> BindAccountAsync(Guid id, BindOrganizationAccountRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<OrganizationCustomRole> SaveCustomRoleAsync(Guid id, Guid? roleId, string name, IReadOnlyList<OrganizationAction> permissions, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task DeleteCustomRoleAsync(Guid id, Guid roleId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<AccessReviewCampaign>> GetAccessReviewsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task SaveAccessReviewAsync(Guid id, AccessReviewCampaign campaign, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<SharedScanSummaryDto> UploadScanSummaryAsync(Guid id, UploadSharedScanSummaryRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<SharedScanSummaryDto>> GetScanSummariesAsync(Guid id, int limit = 30, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class RecordingHandler : HttpMessageHandler

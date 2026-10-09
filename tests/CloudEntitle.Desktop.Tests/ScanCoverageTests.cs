@@ -59,6 +59,34 @@ public sealed class ScanCoverageTests
     }
 
     [Fact]
+    public async Task LiveScan_ShouldEmitWorkloadGovernanceFindingsWithoutAccessOrResources()
+    {
+        var now = DateTime.UtcNow;
+        var principal = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(),
+            AccountId = Guid.NewGuid(),
+            CloudProvider = CloudProviderType.Azure,
+            Name = "unowned-stale-application",
+            IdentityType = IdentityType.ServicePrincipal,
+            IsActive = true,
+            OwnerInventoryComplete = true,
+            ActivityEvidenceComplete = true,
+            ActivityObservationDays = 180,
+            LastActivityAt = now.AddDays(-120),
+            ActivityEvidenceSource = "Complete fixture observation"
+        };
+        var scanner = new LiveCloudScanService(new[] { new IdentityOnlyProvider(principal) });
+
+        var result = await scanner.ScanAsync();
+
+        Assert.Contains(result.Findings, finding => finding.Title == "Orphaned Workload Identity" && finding.Principal == principal.Name);
+        Assert.Contains(result.Findings, finding => finding.Title == "Unowned Workload Identity" && finding.Principal == principal.Name);
+        Assert.Empty(result.EffectiveAccessRecords);
+        Assert.Empty(result.ResourceRecords);
+    }
+
+    [Fact]
     public async Task ScanHistory_ShouldShowLatestCoverageAndLegacyHistoryWarning()
     {
         var coverage = new[]
@@ -99,6 +127,26 @@ public sealed class ScanCoverageTests
             => Task.FromResult<IReadOnlyList<CloudResource>>(new[] { new CloudResource { Id = Guid.NewGuid(), AccountId = accountId, Name = "vault-a", Type = "Vault", ResourceId = "/subscriptions/a/vaults/vault-a" } });
         public Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<CloudEffectiveAccessAssignment>>(new[] { new CloudEffectiveAccessAssignment("owner@example.invalid", "Owner", "/subscriptions/a", "Azure RBAC", true) });
+    }
+
+    private sealed class IdentityOnlyProvider(CloudPrincipal principal) : ICloudProvider
+    {
+        public CloudProviderType ProviderType => CloudProviderType.Azure;
+        public Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudAccount>>(new[] { new CloudAccount
+            {
+                Id = principal.AccountId,
+                Name = "identity-only-subscription",
+                SubscriptionId = "identity-only-subscription",
+                CloudProvider = CloudProviderType.Azure
+            } });
+        public Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPrincipal>>(new[] { principal });
+        public Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudRole>>(Array.Empty<CloudRole>());
+        public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<CloudPermission>>(Array.Empty<CloudPermission>());
     }
 
     private sealed class TwoAccountCloudProvider : ICloudProvider, IResourceProvider, ICloudEffectiveAccessProvider

@@ -334,6 +334,13 @@ public sealed class MainWindowViewModel : ObservableObject
         method.Invoke(_navigation, null);
     }
 
+    public async Task OpenRecommendationAsync(Guid recommendationId)
+    {
+        _navigation.NavigateTo<RecommendationsViewModel>();
+        if (_navigation.CurrentViewModel is RecommendationsViewModel recommendations)
+            await recommendations.OpenRecommendationAsync(recommendationId);
+    }
+
     private void SetSelectedNavigationItem(NavigationItem item)
     {
         if (CurrentNavigationItem is not null)
@@ -422,6 +429,13 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private int _scanWaitingMessageIndex;
     private IReadOnlyList<ComplianceAssessmentTrendPoint> _complianceHistory = Array.Empty<ComplianceAssessmentTrendPoint>();
     private string _complianceHistoryStatus = string.Empty;
+    private string _exceptionControlId = string.Empty;
+    private string _exceptionReference = string.Empty;
+    private string _exceptionRationale = string.Empty;
+    private string _exceptionRecordedBy = Environment.UserName;
+    private string _exceptionEvidenceReference = string.Empty;
+    private DateTime? _exceptionExpiresAt = DateTime.Today.AddDays(30);
+    private ComplianceException? _selectedComplianceException;
 
     public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null, IReportService? reportService = null, IDialogService? dialogService = null, IComplianceExportWorkflow? complianceExportWorkflow = null, AuthenticatedOrganizationContext? authenticatedOrganizationContext = null)
     {
@@ -446,6 +460,8 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         GenerateReportCommand = new AsyncRelayCommand(GenerateReportAsync);
         ExportComplianceBundleCommand = new AsyncRelayCommand(ExportComplianceBundleAsync);
         LoadComplianceHistoryCommand = new AsyncRelayCommand(LoadComplianceHistoryAsync);
+        AddComplianceExceptionCommand = new AsyncRelayCommand(AddComplianceExceptionAsync);
+        RemoveComplianceExceptionCommand = new AsyncRelayCommand(RemoveSelectedComplianceExceptionAsync);
         if (_authenticatedOrganizationContext is not null)
             _authenticatedOrganizationContext.Changed += (_, _) => OnPropertyChanged(nameof(CanExportComplianceBundle));
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
@@ -462,16 +478,41 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public AsyncRelayCommand GenerateReportCommand { get; }
     public AsyncRelayCommand ExportComplianceBundleCommand { get; }
     public AsyncRelayCommand LoadComplianceHistoryCommand { get; }
+    public AsyncRelayCommand AddComplianceExceptionCommand { get; }
+    public AsyncRelayCommand RemoveComplianceExceptionCommand { get; }
     public IReadOnlyList<ComplianceFramework> ComplianceFrameworks { get; } = Enum.GetValues<ComplianceFramework>();
     public ComplianceFramework SelectedComplianceFramework { get; set; } = ComplianceFramework.CiemBaseline;
     public ObservableCollection<ComplianceStandardSelection> ComplianceStandardOptions { get; } = new()
     {
+        new(ComplianceStandard.CisControlsV8_1, "CIS Controls v8.1"),
         new(ComplianceStandard.Nist80053Rev5, "NIST SP 800-53 Rev. 5"),
         new(ComplianceStandard.Iso27001_2022, "ISO/IEC 27001:2022"),
         new(ComplianceStandard.Soc2TrustServices, "SOC 2 Trust Services Criteria")
     };
+    public ObservableCollection<ComplianceException> ComplianceExceptionDrafts { get; } = new();
     public IReadOnlyList<ComplianceStandard> SelectedComplianceStandards => ComplianceStandardOptions.Where(option => option.IsSelected).Select(option => option.Standard).ToArray();
     public bool CanExportComplianceBundle => _complianceExportWorkflow?.CanExport == true;
+    public bool CanAddComplianceException => !string.IsNullOrWhiteSpace(ExceptionControlId)
+        && !string.IsNullOrWhiteSpace(ExceptionReference)
+        && !string.IsNullOrWhiteSpace(ExceptionRationale)
+        && !string.IsNullOrWhiteSpace(ExceptionRecordedBy)
+        && ExceptionExpiresAt?.Date > DateTime.Today;
+    public bool CanRemoveComplianceException => SelectedComplianceException is not null;
+    public string ExceptionControlId { get => _exceptionControlId; set { if (SetProperty(ref _exceptionControlId, value)) OnPropertyChanged(nameof(CanAddComplianceException)); } }
+    public string ExceptionReference { get => _exceptionReference; set { if (SetProperty(ref _exceptionReference, value)) OnPropertyChanged(nameof(CanAddComplianceException)); } }
+    public string ExceptionRationale { get => _exceptionRationale; set { if (SetProperty(ref _exceptionRationale, value)) OnPropertyChanged(nameof(CanAddComplianceException)); } }
+    public string ExceptionRecordedBy { get => _exceptionRecordedBy; set { if (SetProperty(ref _exceptionRecordedBy, value)) OnPropertyChanged(nameof(CanAddComplianceException)); } }
+    public string ExceptionEvidenceReference { get => _exceptionEvidenceReference; set => SetProperty(ref _exceptionEvidenceReference, value); }
+    public DateTime? ExceptionExpiresAt { get => _exceptionExpiresAt; set { if (SetProperty(ref _exceptionExpiresAt, value)) OnPropertyChanged(nameof(CanAddComplianceException)); } }
+    public ComplianceException? SelectedComplianceException
+    {
+        get => _selectedComplianceException;
+        set
+        {
+            if (!SetProperty(ref _selectedComplianceException, value)) return;
+            OnPropertyChanged(nameof(CanRemoveComplianceException));
+        }
+    }
     public string ComplianceExportStatus { get; private set; } = string.Empty;
     public IReadOnlyList<ComplianceAssessmentTrendPoint> ComplianceHistory { get => _complianceHistory; private set => SetProperty(ref _complianceHistory, value); }
     public string ComplianceHistoryStatus { get => _complianceHistoryStatus; private set => SetProperty(ref _complianceHistoryStatus, value); }
@@ -508,6 +549,69 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public int RiskFindings => _analyticsSnapshot.RiskFindings + (_liveScan?.Findings.Count ?? 0);
     public int CriticalFindings => _analyticsSnapshot.CriticalFindings + (_liveScan?.Findings.Count(finding => finding.Severity == RiskSeverity.Critical) ?? 0);
     public int HighFindings => _analyticsSnapshot.HighFindings + (_liveScan?.Findings.Count(finding => finding.Severity == RiskSeverity.High) ?? 0);
+    public string EvidenceAge => _liveScan is null ? "Not available" : FormatEvidenceAge(DateTime.UtcNow - _liveScan.CompletedAt.ToUniversalTime());
+    public string EvidenceAgeDetails => _liveScan is null ? "No completed live scan" : $"Completed {_liveScan.CompletedAt.ToLocalTime():g}";
+    public string SourceCoverageSummary
+    {
+        get
+        {
+            var coverage = _liveScan?.Coverage ?? Array.Empty<ScanCoverageRecord>();
+            if (coverage.Count == 0) return "Not available";
+            var successful = coverage.Count(item => item.Status is ScanCoverageStatus.Collected or ScanCoverageStatus.NoData);
+            return $"{successful}/{coverage.Count} sources";
+        }
+    }
+    public string SourceCoverageDetails
+    {
+        get
+        {
+            var coverage = _liveScan?.Coverage ?? Array.Empty<ScanCoverageRecord>();
+            var gaps = coverage.Where(item => item.Status is not (ScanCoverageStatus.Collected or ScanCoverageStatus.NoData))
+                .GroupBy(item => item.Status).OrderBy(group => group.Key)
+                .Select(group => $"{group.Key} {group.Count()}").ToArray();
+            return coverage.Count == 0 ? "No source status records" : gaps.Length == 0 ? "All source queries completed" : string.Join("; ", gaps);
+        }
+    }
+    public int UnsupportedPermissionSourceCount => (_liveScan?.Coverage ?? Array.Empty<ScanCoverageRecord>())
+        .Where(item => item.Status == ScanCoverageStatus.Unsupported && IsPermissionCoverage(item.DataSource))
+        .Select(item => $"{item.Provider}|{item.DataSource}").Distinct(StringComparer.OrdinalIgnoreCase).Count();
+    public string UnsupportedPermissionSourceDetails
+    {
+        get
+        {
+            var sources = (_liveScan?.Coverage ?? Array.Empty<ScanCoverageRecord>())
+                .Where(item => item.Status == ScanCoverageStatus.Unsupported && IsPermissionCoverage(item.DataSource))
+                .Select(item => $"{item.Provider}: {item.DataSource}").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            return sources.Length == 0 ? "No unsupported permission sources reported" : string.Join("; ", sources);
+        }
+    }
+    public string AttributionConfidence
+    {
+        get
+        {
+            var assignments = GetAttributionAssignments();
+            if (assignments.Count == 0) return "Not available";
+            var full = assignments.Count(item => item.LastChangedAt.HasValue && !string.IsNullOrWhiteSpace(item.LastChangedBy));
+            return $"{(int)Math.Round(full * 100d / assignments.Count)}%";
+        }
+    }
+    public string AttributionDetails
+    {
+        get
+        {
+            var assignments = GetAttributionAssignments();
+            if (assignments.Count == 0) return "No effective-access assignments";
+            var full = assignments.Count(item => item.LastChangedAt.HasValue && !string.IsNullOrWhiteSpace(item.LastChangedBy));
+            var partial = assignments.Count(item => item.LastChangedAt.HasValue != !string.IsNullOrWhiteSpace(item.LastChangedBy));
+            return $"{full}/{assignments.Count} have actor and change time; {partial} partial";
+        }
+    }
+    public int UnknownEvaluationTotal => (_liveScan?.ResourceRiskFindings.Count(item => item.EvaluationState == RiskEvaluationState.Unknown) ?? 0)
+        + (_liveScan?.ModeledAccessPaths.Count(item => item.PathStatus == AccessPathStatus.Unknown) ?? 0);
+    public string UnknownEvaluationDetails => $"{_liveScan?.ResourceRiskFindings.Count(item => item.EvaluationState == RiskEvaluationState.Unknown) ?? 0} findings; {_liveScan?.ModeledAccessPaths.Count(item => item.PathStatus == AccessPathStatus.Unknown) ?? 0} paths";
+    public int UnsupportedEvaluationTotal => (_liveScan?.ResourceRiskFindings.Count(item => item.EvaluationState == RiskEvaluationState.Unsupported) ?? 0)
+        + (_liveScan?.ModeledAccessPaths.Count(item => item.PathStatus == AccessPathStatus.Unsupported) ?? 0);
+    public string UnsupportedEvaluationDetails => $"{_liveScan?.ResourceRiskFindings.Count(item => item.EvaluationState == RiskEvaluationState.Unsupported) ?? 0} findings; {_liveScan?.ModeledAccessPaths.Count(item => item.PathStatus == AccessPathStatus.Unsupported) ?? 0} paths";
     public int DormantIdentities => _analyticsSnapshot.DormantIdentities;
     public int ExternalIdentities => _analyticsSnapshot.ExternalIdentities;
     public string LastScan => (_liveScan is not null && (!_analyticsSnapshot.LastScan.HasValue || _liveScan.CompletedAt > _analyticsSnapshot.LastScan.Value)
@@ -624,7 +728,8 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         ErrorMessage = null;
         try
         {
-            var bundle = await _complianceExportWorkflow.CreateBundleAsync(SelectedComplianceFramework, SelectedComplianceStandards);
+            var bundle = await _complianceExportWorkflow.CreateBundleAsync(SelectedComplianceFramework, SelectedComplianceStandards,
+                exceptions: ComplianceExceptionDrafts.ToArray());
             await File.WriteAllBytesAsync(outputPath, bundle);
             ComplianceExportStatus = $"Compliance evidence bundle saved to: {outputPath}";
             OnPropertyChanged(nameof(ComplianceExportStatus));
@@ -638,6 +743,27 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         {
             IsLoading = false;
         }
+    }
+
+    private Task AddComplianceExceptionAsync()
+    {
+        if (!CanAddComplianceException || ExceptionExpiresAt is not { } expiresAt) return Task.CompletedTask;
+        var expiresAtUtc = DateTime.SpecifyKind(expiresAt.Date.AddDays(1).AddTicks(-1), DateTimeKind.Local).ToUniversalTime();
+        ComplianceExceptionDrafts.Add(new ComplianceException(Guid.NewGuid(), ExceptionControlId.Trim(), ExceptionReference.Trim(),
+            ExceptionRationale.Trim(), ExceptionRecordedBy.Trim(), DateTime.UtcNow, expiresAtUtc,
+            string.IsNullOrWhiteSpace(ExceptionEvidenceReference) ? null : ExceptionEvidenceReference.Trim()));
+        ExceptionControlId = string.Empty;
+        ExceptionReference = string.Empty;
+        ExceptionRationale = string.Empty;
+        ExceptionEvidenceReference = string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private Task RemoveSelectedComplianceExceptionAsync()
+    {
+        if (SelectedComplianceException is { } exception) ComplianceExceptionDrafts.Remove(exception);
+        SelectedComplianceException = null;
+        return Task.CompletedTask;
     }
 
     private async Task LoadComplianceHistoryAsync()
@@ -729,7 +855,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private async Task RefreshAsync()
     {
         _analyticsSnapshot = _analytics.Calculate(await _demoData.GetSnapshotAsync());
-        foreach (var property in new[] { nameof(CloudAccounts), nameof(Identities), nameof(Resources), nameof(Entitlements), nameof(PrivilegedIdentities), nameof(RiskFindings), nameof(CriticalFindings), nameof(HighFindings), nameof(DormantIdentities), nameof(ExternalIdentities), nameof(LastScan), nameof(FindingsByProvider), nameof(FindingsBySeverity), nameof(AccessByDecision) })
+        foreach (var property in new[] { nameof(CloudAccounts), nameof(Identities), nameof(Resources), nameof(Entitlements), nameof(PrivilegedIdentities), nameof(RiskFindings), nameof(CriticalFindings), nameof(HighFindings), nameof(EvidenceAge), nameof(EvidenceAgeDetails), nameof(SourceCoverageSummary), nameof(SourceCoverageDetails), nameof(UnsupportedPermissionSourceCount), nameof(UnsupportedPermissionSourceDetails), nameof(AttributionConfidence), nameof(AttributionDetails), nameof(UnknownEvaluationTotal), nameof(UnknownEvaluationDetails), nameof(UnsupportedEvaluationTotal), nameof(UnsupportedEvaluationDetails), nameof(DormantIdentities), nameof(ExternalIdentities), nameof(LastScan), nameof(FindingsByProvider), nameof(FindingsBySeverity), nameof(AccessByDecision) })
         {
             OnPropertyChanged(property);
         }
@@ -745,6 +871,24 @@ public sealed class DashboardViewModel : WorkspaceViewModel
             .ThenBy(metric => metric.Label)
             .ToArray();
         return values.Length == 0 ? new[] { new AnalyticsMetric("No findings", 0) } : values;
+    }
+
+    private IReadOnlyList<LiveEffectiveAccessRecord> GetAttributionAssignments()
+        => (_liveScan?.EffectiveAccessRecords ?? Array.Empty<LiveEffectiveAccessRecord>())
+            .Where(item => !item.AssignmentType.Equals("Role usage", StringComparison.OrdinalIgnoreCase)).ToArray();
+
+    private static bool IsPermissionCoverage(string dataSource)
+        => dataSource.Contains("permission", StringComparison.OrdinalIgnoreCase)
+            || dataSource.Contains("effective access", StringComparison.OrdinalIgnoreCase)
+            || dataSource.Contains("action-level", StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatEvidenceAge(TimeSpan age)
+    {
+        if (age < TimeSpan.Zero) age = TimeSpan.Zero;
+        if (age < TimeSpan.FromMinutes(1)) return "<1 min";
+        if (age < TimeSpan.FromHours(1)) return $"{(int)age.TotalMinutes} min";
+        if (age < TimeSpan.FromDays(1)) return $"{(int)age.TotalHours} hr";
+        return $"{(int)age.TotalDays} days";
     }
 }
 
@@ -1555,7 +1699,19 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
     public bool CanExportDraft => _dialogService is not null && SelectedRecommendation?.Model is not null;
     public bool CanRaiseTicket => _ticketingWorkflow?.CanSubmit(SelectedRecommendation?.Model) == true;
     public bool CanRefreshTicketStatus => _ticketingRequest?.StatusUrl is not null && _ticketingWorkflow is not null;
-    public TicketingRequestRecord? TicketingRequest { get => _ticketingRequest; private set { if (SetProperty(ref _ticketingRequest, value)) OnPropertyChanged(nameof(CanRefreshTicketStatus)); } }
+    public TicketingRequestRecord? TicketingRequest
+    {
+        get => _ticketingRequest;
+        private set
+        {
+            if (!SetProperty(ref _ticketingRequest, value)) return;
+            OnPropertyChanged(nameof(CanRefreshTicketStatus));
+            OnPropertyChanged(nameof(TicketingClosureMessage));
+        }
+    }
+    public string TicketingClosureMessage => TicketingRequest?.ClosureVerifiedAtUtc is { } verifiedAt
+        ? $"Closure verified {verifiedAt.ToLocalTime():g}"
+        : TicketingRequest is null ? string.Empty : "Closure not yet verified";
     public string TicketingStatusMessage { get => _ticketingStatusMessage; private set => SetProperty(ref _ticketingStatusMessage, value); }
     public string ExportStatusMessage { get => _exportStatusMessage; private set => SetProperty(ref _exportStatusMessage, value); }
     public AsyncRelayCommand RefreshRecommendationsCommand { get; }
@@ -1563,6 +1719,16 @@ public sealed class RecommendationsViewModel : WorkspaceViewModel
     public AsyncRelayCommand RaiseTicketCommand { get; }
     public AsyncRelayCommand RefreshTicketStatusCommand { get; }
     public async Task RefreshAsync() => await LoadAsync();
+
+    public async Task OpenRecommendationAsync(Guid recommendationId)
+    {
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        await LoadAsync();
+        SelectedRecommendation = Recommendations.FirstOrDefault(row => row.Model?.Id == recommendationId);
+        if (SelectedRecommendation is null)
+            TicketingStatusMessage = "The linked recommendation is not available in this local workspace.";
+    }
 
     public async Task ExportDraftAsync()
     {

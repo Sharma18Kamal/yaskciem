@@ -12,7 +12,8 @@ public sealed record TicketingRequestRecord(
     string Status,
     string? StatusUrl,
     DateTime CreatedAtUtc,
-    DateTime UpdatedAtUtc);
+    DateTime UpdatedAtUtc,
+    DateTime? ClosureVerifiedAtUtc = null);
 
 public interface ITicketingRequestStore
 {
@@ -37,6 +38,7 @@ public sealed class LocalTicketingRequestStore : ITicketingRequestStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            await using var fileLock = await TicketingFileLock.AcquireAsync(_filePath + ".lock", cancellationToken);
             return (await ReadAsync(cancellationToken)).FirstOrDefault(item => item.Provider == provider
                 && string.Equals(item.DedupeKey, dedupeKey, StringComparison.Ordinal));
         }
@@ -48,6 +50,7 @@ public sealed class LocalTicketingRequestStore : ITicketingRequestStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            await using var fileLock = await TicketingFileLock.AcquireAsync(_filePath + ".lock", cancellationToken);
             var records = await ReadAsync(cancellationToken);
             var index = records.FindIndex(item => item.Provider == request.Provider
                 && string.Equals(item.DedupeKey, request.DedupeKey, StringComparison.Ordinal));
@@ -68,5 +71,26 @@ public sealed class LocalTicketingRequestStore : ITicketingRequestStore
         if (!File.Exists(_filePath)) return new List<TicketingRequestRecord>();
         var json = await File.ReadAllTextAsync(_filePath, cancellationToken);
         return JsonSerializer.Deserialize<List<TicketingRequestRecord>>(json, JsonOptions) ?? new List<TicketingRequestRecord>();
+    }
+}
+
+internal static class TicketingFileLock
+{
+    public static async Task<FileStream> AcquireAsync(string lockPath, CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(lockPath);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.Asynchronous);
+            }
+            catch (IOException exception) when ((exception.HResult & 0xFFFF) is 32 or 33)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+            }
+        }
     }
 }

@@ -1,6 +1,8 @@
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.IdentityGovernance.Models;
+using System.Security.Cryptography;
+using System.Text;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
 
@@ -56,11 +58,16 @@ public sealed class IdentityGovernanceService
         return CreateCampaign(name, candidates, duration);
     }
 
-    public AccessReviewCampaign CreateCampaign(string name, IReadOnlyList<AccessReviewCandidate> candidates, TimeSpan duration, string? assignedReviewer = null, DateTime? asOf = null)
+    public AccessReviewCampaign CreateCampaign(string name, IReadOnlyList<AccessReviewCandidate> candidates, TimeSpan duration,
+        string? assignedReviewer = null, DateTime? asOf = null, string? templateId = null, int reminderLeadDays = 3,
+        int reminderIntervalDays = 1, string? createdBy = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A campaign name is required.", nameof(name));
         if (duration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(duration), "Campaign duration must be positive.");
+        if (reminderLeadDays is < 1 or > 30) throw new ArgumentOutOfRangeException(nameof(reminderLeadDays));
+        if (reminderIntervalDays is < 1 or > 30) throw new ArgumentOutOfRangeException(nameof(reminderIntervalDays));
         var now = asOf ?? DateTime.UtcNow;
+        var creator = string.IsNullOrWhiteSpace(createdBy) ? assignedReviewer?.Trim() ?? "System" : createdBy.Trim();
         var campaignId = Guid.NewGuid();
         var dueAt = now.Add(duration);
         var items = candidates.Select(candidate => new AccessReviewItem(
@@ -68,14 +75,18 @@ public sealed class IdentityGovernanceService
             candidate.Provider, candidate.AccessSummary, ReviewDecision.Pending, null, null, null)
         {
             AssignedReviewer = string.IsNullOrWhiteSpace(assignedReviewer) ? null : assignedReviewer.Trim(),
+            OwnerSnapshot = string.IsNullOrWhiteSpace(candidate.SuggestedReviewer) ? null : candidate.SuggestedReviewer.Trim(),
             DueAt = dueAt,
             EvidenceSnapshot = candidate.EvidenceSnapshot,
-            AuditTrail = new[] { new AccessReviewAuditEntry(now, "System", "Created", "Evidence snapshot captured when the review campaign was created.") }
+            AuditTrail = new[] { new AccessReviewAuditEntry(now, creator, "Created", "Evidence snapshot captured when the review campaign was created.") }
         }).ToArray();
-        var audit = new[] { new AccessReviewAuditEntry(now, assignedReviewer?.Trim() ?? "System", "CampaignCreated", $"Created {items.Length} review item(s); due {dueAt:O}.") };
+        var audit = new[] { new AccessReviewAuditEntry(now, creator, "CampaignCreated", $"Created {items.Length} review item(s); due {dueAt:O}.") };
         return new AccessReviewCampaign(campaignId, name.Trim(), CampaignStatus.Open, now, dueAt, candidates.Select(candidate => candidate.PrincipalId).Distinct().ToArray(), items)
         {
-            CreatedBy = string.IsNullOrWhiteSpace(assignedReviewer) ? null : assignedReviewer.Trim(),
+            CreatedBy = creator == "System" ? null : creator,
+            TemplateId = templateId,
+            ReminderLeadDays = reminderLeadDays,
+            ReminderIntervalDays = reminderIntervalDays,
             AuditTrail = audit
         };
     }
@@ -96,7 +107,8 @@ public sealed class IdentityGovernanceService
         return UpdateCampaign(campaign, updated, new AccessReviewAuditEntry(now, actor, "ReviewerAssigned", $"{reviewer.Trim()} assigned to review item {itemId}."), now);
     }
 
-    public AccessReviewCampaign RecordDecision(AccessReviewCampaign campaign, Guid itemId, ReviewDecision decision, string reviewer, string comment, DateTime? exceptionExpiresAt = null, DateTime? asOf = null)
+    public AccessReviewCampaign RecordDecision(AccessReviewCampaign campaign, Guid itemId, ReviewDecision decision, string reviewer,
+        string comment, DateTime? exceptionExpiresAt = null, DateTime? asOf = null, string? actor = null)
     {
         if (decision == ReviewDecision.Pending) throw new ArgumentException("A decision cannot be Pending.", nameof(decision));
         if (string.IsNullOrWhiteSpace(reviewer)) throw new ArgumentException("A reviewer is required.", nameof(reviewer));
@@ -105,20 +117,26 @@ public sealed class IdentityGovernanceService
             throw new ArgumentOutOfRangeException(nameof(exceptionExpiresAt), "An exception must have a future expiration date.");
         var item = campaign.Items.FirstOrDefault(candidate => candidate.Id == itemId)
             ?? throw new ArgumentException("The review item does not belong to this campaign.", nameof(itemId));
+        var actingUser = string.IsNullOrWhiteSpace(actor) ? reviewer.Trim() : actor.Trim();
+        var commentText = comment ?? string.Empty;
+        var attestation = new AccessReviewAttestation(reviewer.Trim(), actingUser, decision, commentText, now,
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(item.EvidenceSnapshot))).ToLowerInvariant(), item.EvidenceSnapshot);
         var updated = item with
         {
             Decision = decision,
             Reviewer = reviewer.Trim(),
-            ReviewComment = comment,
+            ReviewComment = commentText,
             DecidedAt = now,
             DueAt = decision == ReviewDecision.ExceptionGranted ? exceptionExpiresAt : item.DueAt,
             ExceptionExpiresAt = decision == ReviewDecision.ExceptionGranted ? exceptionExpiresAt : null,
             ExceptionExpiredAt = null,
             EscalatedAt = null,
             EscalationReason = null,
-            AuditTrail = item.AuditTrail.Append(new AccessReviewAuditEntry(now, reviewer.Trim(), decision.ToString(), decision == ReviewDecision.ExceptionGranted ? $"{comment}; exception expires {exceptionExpiresAt:O}." : comment)).ToArray()
+            Attestations = item.Attestations.Append(attestation).ToArray(),
+            AuditTrail = item.AuditTrail.Append(new AccessReviewAuditEntry(now, actingUser, "AttestationRecorded", $"{decision} attested by {reviewer.Trim()}; evidence SHA-256 {attestation.EvidenceSha256}."))
+                .Append(new AccessReviewAuditEntry(now, actingUser, decision.ToString(), decision == ReviewDecision.ExceptionGranted ? $"{commentText}; exception expires {exceptionExpiresAt:O}." : commentText)).ToArray()
         };
-        return UpdateCampaign(campaign, updated, new AccessReviewAuditEntry(now, reviewer.Trim(), decision.ToString(), $"Decision recorded for review item {itemId}."), now);
+        return UpdateCampaign(campaign, updated, new AccessReviewAuditEntry(now, actingUser, "AttestationRecorded", $"{decision} recorded for review item {itemId} with evidence hash {attestation.EvidenceSha256}."), now);
     }
 
     public AccessReviewCampaign ReevaluateCampaign(AccessReviewCampaign campaign, DateTime? asOf = null)
@@ -137,6 +155,18 @@ public sealed class IdentityGovernanceService
             }
             var unresolved = updated.Decision == ReviewDecision.Pending || updated.ExceptionExpiredAt.HasValue;
             var dueAt = updated.DueAt ?? campaign.DueAt;
+            var reminderAt = dueAt.AddDays(-campaign.ReminderLeadDays);
+            if (unresolved && now >= reminderAt && now < dueAt
+                && (!updated.LastReminderAt.HasValue || now >= updated.LastReminderAt.Value.AddDays(campaign.ReminderIntervalDays)))
+            {
+                updated = updated with
+                {
+                    ReminderCount = updated.ReminderCount + 1,
+                    LastReminderAt = now,
+                    AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "ReviewerReminderDue",
+                        $"Reminder {updated.ReminderCount + 1} is due for {updated.AssignedReviewer ?? "unassigned reviewer"}; item deadline is {dueAt:O}." )).ToArray()
+                };
+            }
             if (unresolved && dueAt <= now && !updated.EscalatedAt.HasValue)
             {
                 updated = updated with
@@ -152,6 +182,9 @@ public sealed class IdentityGovernanceService
         var escalated = items.Any(item => item.EscalatedAt.HasValue);
         var status = complete ? CampaignStatus.Completed : escalated ? CampaignStatus.Escalated : CampaignStatus.Open;
         var audit = campaign.AuditTrail;
+        var reminderEntries = items.SelectMany(item => item.AuditTrail).Where(entry => entry.Action == "ReviewerReminderDue")
+            .Where(entry => !audit.Any(existing => existing.Timestamp == entry.Timestamp && existing.Details == entry.Details));
+        audit = audit.Concat(reminderEntries).ToArray();
         if (status != campaign.Status) audit = audit.Append(new AccessReviewAuditEntry(now, "System", "CampaignStatusChanged", $"{campaign.Status} -> {status}.")).ToArray();
         return campaign with { Items = items, Status = status, AuditTrail = audit };
     }

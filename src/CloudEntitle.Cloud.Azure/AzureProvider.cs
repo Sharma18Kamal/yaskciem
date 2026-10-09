@@ -1,6 +1,7 @@
 namespace CloudEntitle.Cloud.Azure;
 
 using System.Text.Json;
+using System.Globalization;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
@@ -301,20 +302,7 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
                 IsActive = true
             });
         });
-        await LoadDirectoryCollectionAsync("service principals", "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,displayName,appId,servicePrincipalType,accountEnabled&$top=999", element =>
-        {
-            var type = ReadString(element, "servicePrincipalType");
-            principals.Add(new CloudPrincipal
-            {
-                Id = Guid.NewGuid(),
-                AccountId = accountId,
-                CloudProvider = CloudProviderType.Azure,
-                Name = ReadString(element, "displayName") ?? "Entra service principal",
-                PrincipalId = ReadString(element, "id"),
-                IdentityType = type?.Equals("ManagedIdentity", StringComparison.OrdinalIgnoreCase) == true ? IdentityType.ManagedIdentity : IdentityType.ServicePrincipal,
-                IsActive = ReadBoolean(element, "accountEnabled")
-            });
-        });
+        await LoadServicePrincipalsAsync();
 
         await LoadPimAssignmentsAsync(
             "active PIM assignments",
@@ -327,6 +315,115 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
 
         messages.Add($"Azure Entra: discovered {principals.Count} directory identities and {accessAssignments.Count} PIM role schedule(s).");
         return new EntraDirectoryScanResult(principals, accessAssignments, messages);
+
+        async Task LoadServicePrincipalsAsync()
+        {
+            const string servicePrincipalUrl = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,displayName,appId,servicePrincipalType,accountEnabled,passwordCredentials,keyCredentials&$top=999";
+            IReadOnlyList<JsonElement> servicePrincipals;
+            try
+            {
+                servicePrincipals = await GetGraphCollectionAsync(servicePrincipalUrl, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                messages.Add($"Azure Entra service principals unavailable: {exception.Message}");
+                return;
+            }
+
+            foreach (var element in servicePrincipals)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var type = ReadString(element, "servicePrincipalType");
+                var principalId = ReadString(element, "id");
+                var principal = new CloudPrincipal
+                {
+                    Id = Guid.NewGuid(),
+                    AccountId = accountId,
+                    CloudProvider = CloudProviderType.Azure,
+                    Name = ReadString(element, "displayName") ?? "Entra service principal",
+                    PrincipalId = principalId,
+                    IdentityType = type?.Equals("ManagedIdentity", StringComparison.OrdinalIgnoreCase) == true ? IdentityType.ManagedIdentity : IdentityType.ServicePrincipal,
+                    IsActive = ReadBoolean(element, "accountEnabled")
+                };
+                MapCredentialEvidence(element, principal);
+                principals.Add(principal);
+
+                if (string.IsNullOrWhiteSpace(principalId)) continue;
+                try
+                {
+                    var owners = await GetGraphCollectionAsync($"https://graph.microsoft.com/v1.0/servicePrincipals/{Uri.EscapeDataString(principalId)}/owners?$select=id&$top=999", cancellationToken);
+                    principal.OwnerIds = owners.Select(owner => ReadString(owner, "id")).Where(id => !string.IsNullOrWhiteSpace(id)).Cast<string>().ToList();
+                    principal.OwnerInventoryComplete = true;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    principal.OwnerInventoryComplete = false;
+                    messages.Add($"Azure Entra owners unavailable for {principal.Name}: {exception.Message}");
+                }
+
+                if (principal.IdentityType != IdentityType.ServicePrincipal || string.IsNullOrWhiteSpace(ReadString(element, "appId"))) continue;
+                var federatedCredentials = await RunAzAsync(new[] { "ad", "app", "federated-credential", "list", "--id", ReadString(element, "appId")!, "--output", "json" }, cancellationToken);
+                if (!federatedCredentials.IsSuccess)
+                {
+                    principal.FederationInventoryComplete = false;
+                    messages.Add($"Azure Entra federated credentials unavailable for {principal.Name}: {federatedCredentials.StandardError.Trim()}");
+                    continue;
+                }
+
+                try
+                {
+                    using var federationDocument = JsonDocument.Parse(federatedCredentials.StandardOutput);
+                    principal.FederationTrusts = ParseFederationTrusts(federationDocument.RootElement);
+                    principal.FederationInventoryComplete = true;
+                    if (principal.FederationTrusts.Count > 0)
+                    {
+                        var firstTrust = principal.FederationTrusts[0];
+                        principal.FederationIssuer = firstTrust.Issuer;
+                        principal.FederationSubject = firstTrust.Subject;
+                        principal.FederationAudience = string.Join(",", firstTrust.Audiences);
+                    }
+                }
+                catch (JsonException exception)
+                {
+                    principal.FederationInventoryComplete = false;
+                    messages.Add($"Azure Entra federated credential response was invalid for {principal.Name}: {exception.Message}");
+                }
+            }
+        }
+
+        static void MapCredentialEvidence(JsonElement servicePrincipal, CloudPrincipal principal)
+        {
+            if (!servicePrincipal.TryGetProperty("passwordCredentials", out var passwords) || passwords.ValueKind != JsonValueKind.Array
+                || !servicePrincipal.TryGetProperty("keyCredentials", out var keys) || keys.ValueKind != JsonValueKind.Array)
+            {
+                principal.CredentialInventoryComplete = false;
+                return;
+            }
+
+            principal.CredentialInventoryComplete = true;
+            var credentials = passwords.EnumerateArray().Concat(keys.EnumerateArray()).ToArray();
+            principal.CredentialLastRotatedAtUtc = credentials.Select(item => ReadDate(item, "startDateTime")).Where(value => value.HasValue)
+                .Max();
+            principal.CredentialExpiresAtUtc = credentials.Select(item => ReadDate(item, "endDateTime"))
+                .Where(value => value.HasValue && value.Value > DateTime.UtcNow).Min();
+        }
+
+        static DateTime? ReadDate(JsonElement element, string property)
+            => DateTime.TryParse(ReadString(element, property), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var date)
+                ? date
+                : null;
+
+        static List<WorkloadFederationTrust> ParseFederationTrusts(JsonElement root)
+            => (root.ValueKind == JsonValueKind.Array ? root.EnumerateArray() : Enumerable.Empty<JsonElement>())
+                .Select(item => new WorkloadFederationTrust(
+                    ReadString(item, "issuer") ?? string.Empty,
+                    ReadString(item, "subject") ?? string.Empty,
+                    item.TryGetProperty("audiences", out var audiences) && audiences.ValueKind == JsonValueKind.Array
+                        ? audiences.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Select(value => value.GetString()!).ToArray()
+                        : Array.Empty<string>(),
+                    "Azure CLI federated credential"))
+                .ToList();
+
 
         async Task LoadDirectoryCollectionAsync(string label, string url, Action<JsonElement> map)
         {

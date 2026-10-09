@@ -158,9 +158,6 @@ public sealed class LiveResourceRiskGraphEvaluator
             }
         }
 
-        if (effectiveAccess.Count == 0)
-            return new LiveResourceRiskGraphResult(Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(), diagnostics);
-
         var normalized = new NormalizationResult(principals.Values.ToArray(), roles.Values.ToArray(), Array.Empty<CloudPolicy>(),
             sourcePermissions.Concat(graphPermissions).ToArray(), entitlements, Array.Empty<NormalizationWarning>(),
             new[] { "Live role assignments are modeled as partial entitlements; permission-level evaluation is not asserted." },
@@ -171,7 +168,10 @@ public sealed class LiveResourceRiskGraphEvaluator
         if (accessPathResult.Diagnostics.Count > 0)
             diagnostics.AddRange(accessPathResult.Diagnostics.Select(diagnostic => diagnostic.Message));
 
-        var options = new RiskRuleOptions(EnabledRules: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "CIEM-017" });
+        var options = new RiskRuleOptions(EnabledRules: new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020"
+        });
         var riskResult = await _riskEngine.EvaluateAsync(new RiskEvaluationRequest(
             accounts, principals.Values.ToArray(), resources, roles.Values.ToArray(), Array.Empty<CloudPolicy>(),
             sourcePermissions.Concat(graphPermissions).ToArray(), entitlements, effectiveAccess, accessPathResult.Paths,

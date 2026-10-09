@@ -174,8 +174,60 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     {
         if (!_useLiveDiscovery) return new[] { new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Gcp, Name = "demo-service-account", PrincipalId = "demo-service-account", IdentityType = IdentityType.ServiceAccount, IsActive = true } };
         using var document = JsonDocument.Parse(await GetGcloudOutputAsync(new[] { "iam", "service-accounts", "list", "--project", GetProject(accountId), "--format=json" }, cancellationToken));
-        return document.RootElement.EnumerateArray().Select(item => new CloudPrincipal { Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Gcp, Name = item.TryGetProperty("displayName", out var name) ? name.GetString() ?? "GCP service account" : "GCP service account", PrincipalId = item.TryGetProperty("uniqueId", out var id) ? id.GetString() : item.TryGetProperty("email", out var email) ? email.GetString() : null, Email = item.TryGetProperty("email", out email) ? email.GetString() : null, IdentityType = IdentityType.ServiceAccount, IsActive = item.TryGetProperty("disabled", out var disabled) && disabled.ValueKind == JsonValueKind.False }).ToArray();
+        var principals = new List<CloudPrincipal>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            var email = item.TryGetProperty("email", out var emailValue) ? emailValue.GetString() : null;
+            var principal = new CloudPrincipal
+            {
+                Id = Guid.NewGuid(),
+                AccountId = accountId,
+                CloudProvider = CloudProviderType.Gcp,
+                Name = item.TryGetProperty("displayName", out var name) ? name.GetString() ?? "GCP service account" : "GCP service account",
+                PrincipalId = item.TryGetProperty("uniqueId", out var id) ? id.GetString() : email,
+                Email = email,
+                IdentityType = IdentityType.ServiceAccount,
+                IsActive = item.TryGetProperty("disabled", out var disabled) && disabled.ValueKind == JsonValueKind.False,
+                OwnerInventoryComplete = false,
+                CredentialEvidenceSource = "Google Cloud IAM user-managed service-account keys"
+            };
+            if (!string.IsNullOrWhiteSpace(email))
+            {
+                try
+                {
+                    var keyOutput = await GetGcloudOutputAsync(new[] { "iam", "service-accounts", "keys", "list", $"--iam-account={email}", "--managed-by=user", $"--project={GetProject(accountId)}", "--format=json" }, cancellationToken);
+                    using var keys = JsonDocument.Parse(keyOutput);
+                    principal.CredentialInventoryComplete = true;
+                    var keyDates = keys.RootElement.ValueKind == JsonValueKind.Array
+                        ? keys.RootElement.EnumerateArray().Select(key => (
+                            Created: ReadGcpDate(key, "validAfterTime"),
+                            Expires: ReadGcpDate(key, "validBeforeTime"))).ToArray()
+                        : Array.Empty<(DateTime? Created, DateTime? Expires)>();
+                    principal.CredentialLastRotatedAtUtc = keyDates.Select(key => key.Created).Where(date => date.HasValue).Max();
+                    principal.CredentialExpiresAtUtc = keyDates.Select(key => key.Expires)
+                        .Where(date => date.HasValue && date.Value > DateTime.UtcNow).Min();
+                }
+                catch (OperationCanceledException) { throw; }
+                catch
+                {
+                    principal.CredentialInventoryComplete = false;
+                }
+            }
+            else
+            {
+                principal.CredentialInventoryComplete = false;
+            }
+            principals.Add(principal);
+        }
+        return principals;
     }
+
+    private static DateTime? ReadGcpDate(JsonElement element, string property)
+        => element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            && DateTime.TryParse(value.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var date)
+                ? date
+                : null;
 
     private async Task<JsonDocument> GetPolicyAsync(Guid accountId, CancellationToken cancellationToken)
         => JsonDocument.Parse(await GetGcloudOutputAsync(new[] { "projects", "get-iam-policy", GetProject(accountId), "--format=json" }, cancellationToken));

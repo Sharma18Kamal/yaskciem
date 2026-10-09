@@ -64,6 +64,20 @@ public class GcpProviderTests
     }
 
     [Fact]
+    public async Task GcpProvider_ShouldTrackServiceAccountKeyRotationAndExpiry()
+    {
+        var provider = new GcpProvider(new FakeGcloudRunner(), useLiveDiscovery: true);
+        var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+        var serviceAccount = Assert.Single(await provider.DiscoverServiceAccountsAsync(account.Id));
+
+        Assert.True(serviceAccount.CredentialInventoryComplete);
+        Assert.Equal(DateTime.Parse("2026-01-15T00:00:00Z").ToUniversalTime(), serviceAccount.CredentialLastRotatedAtUtc);
+        Assert.Equal(DateTime.Parse("2027-01-15T00:00:00Z").ToUniversalTime(), serviceAccount.CredentialExpiresAtUtc);
+        Assert.Contains("user-managed", serviceAccount.CredentialEvidenceSource, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GcpProvider_ShouldDiscoverOrganizationAndFolderAncestors()
     {
         var provider = new GcpProvider(new FakeGcloudRunner(), useLiveDiscovery: true);
@@ -165,6 +179,8 @@ public class GcpProviderTests
                     ? "[{\"type\":\"project\",\"id\":\"123\"},{\"type\":\"folder\",\"id\":\"456\"},{\"type\":\"organization\",\"id\":\"789\"}]"
                     : arguments.Contains("asset") && arguments.Contains("search-all-resources")
                         ? "{\"results\":[{\"name\":\"//storage.googleapis.com/projects/demo-production/buckets/demo-bucket\",\"assetType\":\"storage.googleapis.com/Bucket\",\"displayName\":\"demo-bucket\",\"location\":\"us-central1\",\"labels\":{\"environment\":\"production\"},\"parentFullResourceName\":\"//cloudresourcemanager.googleapis.com/projects/123\"}]}"
+                    : arguments.Contains("keys")
+                        ? "[{\"validAfterTime\":\"2026-01-15T00:00:00Z\",\"validBeforeTime\":\"2027-01-15T00:00:00Z\"}]"
                 : arguments.Contains("service-accounts")
                     ? "[{\"email\":\"demo-sa@demo-production.iam.gserviceaccount.com\",\"uniqueId\":\"sa-123\",\"displayName\":\"Demo Service Account\",\"disabled\":false}]"
                     : "{\"bindings\":[{\"role\":\"roles/owner\",\"members\":[\"user:demo@example.invalid\",\"group:demo@example.invalid\",\"serviceAccount:demo-sa@demo-production.iam.gserviceaccount.com\"],\"condition\":{\"title\":\"DemoCondition\",\"expression\":\"resource.name.startsWith('projects/demo-production')\"}}]}";

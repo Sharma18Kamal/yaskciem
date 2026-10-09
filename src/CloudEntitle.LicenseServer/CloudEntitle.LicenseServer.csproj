@@ -8,10 +8,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.17.2" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.13.0" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.16.0" />
     <ProjectReference Include="..\CloudEntitle.Licensing\CloudEntitle.Licensing.csproj" />
     <ProjectReference Include="..\CloudEntitle.Integration\CloudEntitle.Integration.csproj" />
     <ProjectReference Include="..\CloudEntitle.Security\CloudEntitle.Security.csproj" />
+    <ProjectReference Include="..\CloudEntitle.OrganizationManagement\CloudEntitle.OrganizationManagement.csproj" />
+    <ProjectReference Include="..\CloudEntitle.IdentityGovernance\CloudEntitle.IdentityGovernance.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Infrastructure\CloudEntitle.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

@@ -121,7 +121,7 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
     {
         if (!_useLiveDiscovery) return MockIdentities(accountId);
         using var document = JsonDocument.Parse(await GetAwsOutputAsync(new[] { "iam", "list-users", "--output", "json" }, cancellationToken, accountId));
-        return document.RootElement.GetProperty("Users").EnumerateArray().Select(user => new CloudPrincipal
+        var principals = document.RootElement.GetProperty("Users").EnumerateArray().Select(user => new CloudPrincipal
         {
             Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Aws,
             Name = user.GetProperty("UserName").GetString() ?? "unknown-user",
@@ -130,7 +130,137 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
                 ? $"Console password used {passwordLastUsed.GetString()}"
                 : null,
             IdentityType = IdentityType.User, IsActive = true
-        }).ToArray();
+        }).ToList();
+
+        using var authorization = JsonDocument.Parse(await GetAwsOutputAsync(
+            new[] { "iam", "get-account-authorization-details", "--filter", "Role", "--output", "json" }, cancellationToken, accountId));
+        if (authorization.RootElement.TryGetProperty("RoleDetailList", out var roles) && roles.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var role in roles.EnumerateArray())
+            {
+                var trustDocument = ReadTrustDocument(role);
+                var federationTrusts = ReadWorkloadTrust(trustDocument);
+                if (federationTrusts is null) continue;
+
+                var roleName = ReadString(role, "RoleName") ?? "AWS workload role";
+                var roleArn = ReadString(role, "Arn");
+                var tagsAvailable = role.TryGetProperty("Tags", out var tags) && tags.ValueKind == JsonValueKind.Array;
+                var ownerIds = tagsAvailable
+                    ? tags.EnumerateArray()
+                        .Where(tag => ReadString(tag, "Key") is string key && IsOwnerTag(key))
+                        .Select(tag => ReadString(tag, "Value"))
+                        .Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                    : new List<string>();
+                var hasUsageHistory = role.TryGetProperty("RoleLastUsed", out var lastUsed) && lastUsed.ValueKind == JsonValueKind.Object;
+                var lastActivity = hasUsageHistory ? ReadDate(lastUsed, "LastUsedDate") : null;
+                var principal = new CloudPrincipal
+                {
+                    Id = Guid.NewGuid(),
+                    AccountId = accountId,
+                    CloudProvider = CloudProviderType.Aws,
+                    Name = roleName,
+                    PrincipalId = roleArn ?? roleName,
+                    IdentityType = IdentityType.ServiceAccount,
+                    IsActive = true,
+                    OwnerIds = ownerIds,
+                    OwnerInventoryComplete = tagsAvailable,
+                    OwnerEvidenceSource = tagsAvailable ? "AWS IAM role tags (owner, owner-email, business-owner)" : null,
+                    ActivityEvidenceComplete = hasUsageHistory,
+                    ActivityObservationDays = hasUsageHistory ? 400 : null,
+                    ActivityEvidenceSource = hasUsageHistory ? "AWS IAM RoleLastUsed; maximum 400-day history" : null,
+                    LastActivityAt = lastActivity,
+                    FederationInventoryComplete = true,
+                    FederationTrusts = federationTrusts.ToList()
+                };
+                if (principal.FederationTrusts.Count > 0)
+                {
+                    principal.FederationIssuer = principal.FederationTrusts[0].Issuer;
+                    principal.FederationSubject = principal.FederationTrusts[0].Subject;
+                    principal.FederationAudience = string.Join(",", principal.FederationTrusts[0].Audiences);
+                }
+                principals.Add(principal);
+            }
+        }
+        return principals;
+    }
+
+    private static DateTime? ReadDate(JsonElement element, string property)
+        => DateTime.TryParse(ReadString(element, property), System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var date)
+                ? date
+                : null;
+
+    private static bool IsOwnerTag(string key)
+        => key.Equals("owner", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("owner-email", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("business-owner", StringComparison.OrdinalIgnoreCase);
+
+    private static JsonElement ReadTrustDocument(JsonElement role)
+    {
+        if (!role.TryGetProperty("AssumeRolePolicyDocument", out var document)) return default;
+        if (document.ValueKind == JsonValueKind.Object) return document;
+        if (document.ValueKind == JsonValueKind.String && document.GetString() is { } json)
+        {
+            try
+            {
+                using var parsed = JsonDocument.Parse(json);
+                return parsed.RootElement.Clone();
+            }
+            catch (JsonException) { }
+        }
+        return default;
+    }
+
+    private static IReadOnlyList<WorkloadFederationTrust>? ReadWorkloadTrust(JsonElement trustDocument)
+    {
+        if (trustDocument.ValueKind != JsonValueKind.Object || !trustDocument.TryGetProperty("Statement", out var statementElement)) return null;
+        var statements = statementElement.ValueKind == JsonValueKind.Array ? statementElement.EnumerateArray().ToArray() : new[] { statementElement };
+        var isWorkload = false;
+        var trusts = new List<WorkloadFederationTrust>();
+        foreach (var statement in statements)
+        {
+            if (!statement.TryGetProperty("Principal", out var principal) || principal.ValueKind != JsonValueKind.Object) continue;
+            var action = statement.TryGetProperty("Action", out var actionElement)
+                ? (actionElement.ValueKind == JsonValueKind.Array ? actionElement.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Select(value => value.GetString()).ToArray() : new[] { actionElement.GetString() })
+                : Array.Empty<string?>();
+            var services = ReadPrincipalValues(principal, "Service");
+            if (services.Count > 0 && action.Any(value => value?.StartsWith("sts:AssumeRole", StringComparison.OrdinalIgnoreCase) == true)) isWorkload = true;
+
+            var federated = ReadPrincipalValues(principal, "Federated");
+            if (federated.Count == 0 || !action.Any(value => string.Equals(value, "sts:AssumeRoleWithWebIdentity", StringComparison.OrdinalIgnoreCase))) continue;
+            isWorkload = true;
+            var condition = statement.TryGetProperty("Condition", out var conditionElement) ? conditionElement : default;
+            var conditionValues = EnumerateConditionValues(condition).ToArray();
+            var subject = conditionValues.FirstOrDefault(item => item.Key.EndsWith(":sub", StringComparison.OrdinalIgnoreCase)).Value;
+            var audience = conditionValues.Where(item => item.Key.EndsWith(":aud", StringComparison.OrdinalIgnoreCase)).Select(item => item.Value).Distinct(StringComparer.Ordinal).ToArray();
+            trusts.Add(new WorkloadFederationTrust(federated[0], subject ?? string.Empty, audience, "AWS IAM AssumeRoleWithWebIdentity trust policy"));
+        }
+        return isWorkload ? trusts : null;
+    }
+
+    private static IReadOnlyList<string> ReadPrincipalValues(JsonElement principal, string property)
+    {
+        if (!principal.TryGetProperty(property, out var value)) return Array.Empty<string>();
+        return value.ValueKind == JsonValueKind.String ? new[] { value.GetString()! }
+            : value.ValueKind == JsonValueKind.Array
+                ? value.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToArray()
+                : Array.Empty<string>();
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> EnumerateConditionValues(JsonElement condition)
+    {
+        if (condition.ValueKind != JsonValueKind.Object) yield break;
+        foreach (var operatorElement in condition.EnumerateObject())
+        {
+            if (operatorElement.Value.ValueKind != JsonValueKind.Object) continue;
+            foreach (var item in operatorElement.Value.EnumerateObject())
+            {
+                if (item.Value.ValueKind == JsonValueKind.String) yield return new(item.Name, item.Value.GetString()!);
+                else if (item.Value.ValueKind == JsonValueKind.Array)
+                    foreach (var value in item.Value.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String))
+                        yield return new(item.Name, value.GetString()!);
+            }
+        }
     }
 
     public async Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)

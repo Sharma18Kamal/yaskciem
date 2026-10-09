@@ -2,6 +2,7 @@ using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.Integration.Contracts;
 using CloudEntitle.OrganizationManagement.Models;
 using CloudEntitle.OrganizationManagement.Services;
 
@@ -14,7 +15,11 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private readonly ILiveCloudScanService _liveScan;
     private readonly AuthenticatedOrganizationContext _authenticatedContext;
     private readonly ICentralAuditSyncService? _centralAuditSyncService;
+    private readonly ISharedOrganizationApi? _sharedOrganizationApi;
+    private OrganizationWorkspaceDto? _sharedWorkspace;
     private IReadOnlyList<OrganizationProfile> _organizations = Array.Empty<OrganizationProfile>();
+    private readonly ISharedScanSummaryPublisher? _sharedScanSummaryPublisher;
+    private IReadOnlyList<SharedScanSummaryDto> _sharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
     private IReadOnlyList<OrganizationMember> _members = Array.Empty<OrganizationMember>();
     private IReadOnlyList<OrganizationRoleOption> _memberRoles = Enum.GetValues<OrganizationMemberRole>()
         .Select(role => new OrganizationRoleOption(role.ToString(), role, null)).ToArray();
@@ -38,6 +43,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private string _customRoleName = string.Empty;
     private string _statusMessage = "Sign in with Microsoft Entra ID to manage organizations and view tenant data.";
     private string _centralAuditSyncStatus = "Central audit synchronization is not configured.";
+    private string _sharedScanSummaryStatus = "Shared scan summaries are not configured.";
     private bool _customRoleViewInventory;
     private bool _customRoleRunScan;
     private bool _customRoleViewFindings;
@@ -59,17 +65,22 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         IOrganizationSsoService ssoService,
         ILiveCloudScanService liveScan,
         AuthenticatedOrganizationContext authenticatedContext,
-        ICentralAuditSyncService? centralAuditSyncService = null) : base(demoData)
+        ICentralAuditSyncService? centralAuditSyncService = null,
+        ISharedOrganizationApi? sharedOrganizationApi = null,
+        ISharedScanSummaryPublisher? sharedScanSummaryPublisher = null) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
         _liveScan = liveScan;
         _authenticatedContext = authenticatedContext;
         _centralAuditSyncService = centralAuditSyncService;
+        _sharedOrganizationApi = sharedOrganizationApi;
+        _sharedScanSummaryPublisher = sharedScanSummaryPublisher;
         CreateOrganizationCommand = new AsyncRelayCommand(CreateOrganizationAsync);
         SignInCommand = new AsyncRelayCommand(SignInAsync);
         SignOutCommand = new AsyncRelayCommand(SignOutAsync);
         SyncCentralAuditCommand = new AsyncRelayCommand(SyncCentralAuditAsync);
+        PublishSharedScanSummaryCommand = new AsyncRelayCommand(PublishSharedScanSummaryAsync);
         AddMemberCommand = new AsyncRelayCommand(AddMemberAsync);
         UpdateMemberRoleCommand = new AsyncRelayCommand(UpdateMemberRoleAsync);
         ToggleMemberActiveCommand = new AsyncRelayCommand(ToggleMemberActiveAsync);
@@ -77,7 +88,12 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         SaveCustomRoleCommand = new AsyncRelayCommand(SaveCustomRoleAsync);
         DeleteCustomRoleCommand = new AsyncRelayCommand(DeleteCustomRoleAsync);
         BindAccountCommand = new AsyncRelayCommand(BindAccountAsync);
-        _liveScan.ScanCompleted += (_, _) => RefreshTenantView();
+        _liveScan.ScanCompleted += async (_, _) =>
+        {
+            RefreshTenantView();
+            if (_sharedScanSummaryPublisher is not null && SelectedOrganization is not null && IsAllowed(OrganizationAction.RunScan))
+                await PublishSharedScanSummaryAsync();
+        };
         _ = RefreshAsync();
     }
 
@@ -88,6 +104,8 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public IReadOnlyList<TenantBinding> Bindings => _bindings;
     public IReadOnlyList<OrganizationAuditEntry> AuditTrail => _auditTrail;
     public string CentralAuditSyncStatus { get => _centralAuditSyncStatus; private set => SetProperty(ref _centralAuditSyncStatus, value); }
+    public string SharedScanSummaryStatus { get => _sharedScanSummaryStatus; private set => SetProperty(ref _sharedScanSummaryStatus, value); }
+    public IReadOnlyList<SharedScanSummaryDto> SharedScanSummaries { get => _sharedScanSummaries; private set => SetProperty(ref _sharedScanSummaries, value); }
     public IReadOnlyList<LiveScanAccountRecord> AvailableAccounts => _availableAccounts;
     public IReadOnlyList<LiveScanAccountRecord> ConsolidatedAccounts => _consolidatedAccounts;
     public IReadOnlyList<OrganizationRoleOption> MemberRoles => _memberRoles;
@@ -109,13 +127,17 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
                 StatusMessage = "The selected organization uses a different Entra tenant. Sign in to continue.";
             }
             _authenticatedContext.Set(_identity, value?.Id);
-            RefreshTenantView();
+            _sharedWorkspace = null;
+            if (_sharedOrganizationApi is not null && _identity is not null && value is not null)
+                _ = RefreshSharedWorkspaceAsync();
+            else
+                RefreshTenantView();
             NotifyAuthorization();
         }
     }
     public OrganizationIdentity? Identity => _identity;
     public string SignedInAs => _identity?.Email ?? "Not signed in";
-    public string CurrentRole => CurrentOrganizationRole?.ToString() ?? "No organization access";
+    public string CurrentRole => _sharedWorkspace?.CurrentMember.AssignedRoleName ?? CurrentOrganizationRole?.ToString() ?? "No organization access";
     public OrganizationMember? SelectedMember
     {
         get => _selectedMember;
@@ -179,6 +201,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public bool CanManageMembers => IsAllowed(OrganizationAction.ManageMembers);
     public bool CanManageConnections => IsAllowed(OrganizationAction.ManageConnections);
     public bool CanViewTenant => IsAllowed(OrganizationAction.ViewInventory);
+    public bool CanPublishSharedScanSummary => _sharedScanSummaryPublisher is not null && IsAllowed(OrganizationAction.RunScan) && _liveScan.CurrentResult is not null;
     public bool CanAddMember => CanManageMembers && NewMemberEmail.Contains('@', StringComparison.Ordinal) && SelectedOrganization is not null;
     public bool CanChangeMemberRole => CanManageMembers && SelectedMember is not null;
     public bool CanToggleMember => CanManageMembers && SelectedMember is not null;
@@ -190,6 +213,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public AsyncRelayCommand SignInCommand { get; }
     public AsyncRelayCommand SignOutCommand { get; }
     public AsyncRelayCommand SyncCentralAuditCommand { get; }
+    public AsyncRelayCommand PublishSharedScanSummaryCommand { get; }
     public AsyncRelayCommand AddMemberCommand { get; }
     public AsyncRelayCommand UpdateMemberRoleCommand { get; }
     public AsyncRelayCommand ToggleMemberActiveCommand { get; }
@@ -198,18 +222,22 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public AsyncRelayCommand DeleteCustomRoleCommand { get; }
     public AsyncRelayCommand BindAccountCommand { get; }
 
-    public Task RefreshAsync()
+    public async Task RefreshAsync()
     {
         IsLoading = true;
         ErrorMessage = null;
         try
         {
-            _organizations = _organizationsService.GetOrganizations();
+            _organizations = _sharedOrganizationApi is not null
+                ? _identity is not null ? await _sharedOrganizationApi.GetOrganizationsAsync() : Array.Empty<OrganizationProfile>()
+                : _organizationsService.GetOrganizations();
             OnPropertyChanged(nameof(Organizations));
             if (SelectedOrganization is null || !_organizations.Any(item => item.Id == SelectedOrganization.Id))
                 SelectedOrganization = _organizations.FirstOrDefault();
             else
                 SelectedOrganization = _organizations.First(item => item.Id == SelectedOrganization.Id);
+            if (_sharedOrganizationApi is not null && _identity is not null && SelectedOrganization is not null)
+                await RefreshSharedWorkspaceAsync();
             RefreshTenantView();
         }
         catch (Exception exception)
@@ -220,7 +248,6 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         {
             IsLoading = false;
         }
-        return Task.CompletedTask;
     }
 
     public async Task SignInAsync()
@@ -230,10 +257,13 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         {
             _identity = await _ssoService.SignInAsync(SignInTenantId);
             _authenticatedContext.Set(_identity, SelectedOrganization?.Id);
-            var acceptedInvitation = SelectedOrganization is null ? null : _organizationsService.AcceptInvitation(SelectedOrganization.Id, _identity);
+            var acceptedInvitation = _sharedOrganizationApi is null && SelectedOrganization is not null
+                ? _organizationsService.AcceptInvitation(SelectedOrganization.Id, _identity)
+                : null;
             StatusMessage = acceptedInvitation is null
                 ? $"Signed in as {_identity.Email}. Organization membership is checked against the signed-in tenant and role."
                 : "The Entra identity matched a pending organization invitation; membership is now linked to its object ID.";
+            await RefreshAsync();
             RefreshTenantView();
             NotifyAuthorization();
         }
@@ -268,9 +298,38 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         }
     }
 
+    public async Task PublishSharedScanSummaryAsync()
+    {
+        if (_sharedScanSummaryPublisher is null)
+        {
+            SharedScanSummaryStatus = "Set the shared License Server URL to publish organization scan summaries.";
+            return;
+        }
+        if (SelectedOrganization is null || _identity is null || !IsAllowed(OrganizationAction.RunScan))
+        {
+            SharedScanSummaryStatus = "Sign in with an organization role that can run scans before publishing summaries.";
+            return;
+        }
+        try
+        {
+            var summary = await _sharedScanSummaryPublisher.PublishCurrentAsync(SelectedOrganization.Id);
+            SharedScanSummaryStatus = summary is null
+                ? "No scanned accounts are bound to this organization; nothing was published."
+                : $"Shared summary saved for {summary.Provider} at {summary.CompletedAtUtc.ToLocalTime():g}.";
+            if (summary is not null && _sharedOrganizationApi is not null)
+                SharedScanSummaries = await _sharedOrganizationApi.GetScanSummariesAsync(SelectedOrganization.Id, 20);
+        }
+        catch (Exception exception)
+        {
+            SharedScanSummaryStatus = $"Unable to publish shared scan summary: {exception.Message}";
+        }
+    }
+
     public Task SignOutAsync()
     {
         _identity = null;
+        _sharedWorkspace = null;
+        SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
         _authenticatedContext.Set(null, null);
         _members = Array.Empty<OrganizationMember>();
         _bindings = Array.Empty<TenantBinding>();
@@ -287,7 +346,9 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         if (!CanCreateOrganization || _identity is null) return;
         try
         {
-            var organization = _organizationsService.CreateOrganization(OrganizationName, TenantKey, OrganizationTenantId, _identity);
+            var organization = _sharedOrganizationApi is not null
+                ? await _sharedOrganizationApi.CreateOrganizationAsync(OrganizationName, TenantKey)
+                : _organizationsService.CreateOrganization(OrganizationName, TenantKey, OrganizationTenantId, _identity);
             OrganizationName = string.Empty;
             TenantKey = string.Empty;
             StatusMessage = "Organization created and the signed-in identity was added as its first administrator.";
@@ -305,7 +366,10 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         if (!CanAddMember || _identity is null || SelectedOrganization is null) return;
         try
         {
-            _organizationsService.AddMember(SelectedOrganization.Id, _identity, NewMemberEmail, NewMemberRoleOption);
+            if (_sharedOrganizationApi is not null)
+                await _sharedOrganizationApi.InviteMemberAsync(SelectedOrganization.Id, NewMemberEmail, NewMemberRoleOption);
+            else
+                _organizationsService.AddMember(SelectedOrganization.Id, _identity, NewMemberEmail, NewMemberRoleOption);
             NewMemberEmail = string.Empty;
             StatusMessage = "Organization membership saved. The invited user must sign in through Entra before receiving access.";
             await RefreshAsync();
@@ -321,7 +385,10 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         if (!CanChangeMemberRole || _identity is null || SelectedOrganization is null || SelectedMember is null) return;
         try
         {
-            _organizationsService.UpdateMemberRole(SelectedOrganization.Id, _identity, SelectedMember.Id, SelectedMemberRoleOption);
+            if (_sharedOrganizationApi is not null)
+                await _sharedOrganizationApi.UpdateMemberRoleAsync(SelectedOrganization.Id, SelectedMember.Id, SelectedMemberRoleOption);
+            else
+                _organizationsService.UpdateMemberRole(SelectedOrganization.Id, _identity, SelectedMember.Id, SelectedMemberRoleOption);
             StatusMessage = "Member role updated and saved.";
             await RefreshAsync();
         }
@@ -336,7 +403,10 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         if (!CanToggleMember || _identity is null || SelectedOrganization is null || SelectedMember is null) return;
         try
         {
-            _organizationsService.SetMemberActive(SelectedOrganization.Id, _identity, SelectedMember.Id, !SelectedMember.IsActive);
+            if (_sharedOrganizationApi is not null)
+                await _sharedOrganizationApi.SetMemberActiveAsync(SelectedOrganization.Id, SelectedMember.Id, !SelectedMember.IsActive);
+            else
+                _organizationsService.SetMemberActive(SelectedOrganization.Id, _identity, SelectedMember.Id, !SelectedMember.IsActive);
             StatusMessage = SelectedMember.IsActive ? "Member deactivated." : "Member reactivated.";
             await RefreshAsync();
         }
@@ -354,16 +424,18 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         return Task.CompletedTask;
     }
 
-    public Task SaveCustomRoleAsync()
+    public async Task SaveCustomRoleAsync()
     {
-        if (!CanSaveCustomRole || _identity is null || SelectedOrganization is null) return Task.CompletedTask;
+        if (!CanSaveCustomRole || _identity is null || SelectedOrganization is null) return;
         try
         {
             var isNewRole = SelectedCustomRole is null;
             var permissions = GetSelectedCustomRolePermissions();
-            var savedRole = isNewRole
-                ? _organizationsService.CreateCustomRole(SelectedOrganization.Id, _identity, CustomRoleName, permissions)
-                : _organizationsService.UpdateCustomRole(SelectedOrganization.Id, _identity, SelectedCustomRole!.Id, CustomRoleName, permissions);
+            var savedRole = _sharedOrganizationApi is not null
+                ? await _sharedOrganizationApi.SaveCustomRoleAsync(SelectedOrganization.Id, SelectedCustomRole?.Id, CustomRoleName, permissions)
+                : isNewRole
+                    ? _organizationsService.CreateCustomRole(SelectedOrganization.Id, _identity, CustomRoleName, permissions)
+                    : _organizationsService.UpdateCustomRole(SelectedOrganization.Id, _identity, SelectedCustomRole!.Id, CustomRoleName, permissions);
             StatusMessage = isNewRole ? "Custom role created." : "Custom role updated.";
             RefreshTenantView();
             SelectedCustomRole = _customRoles.FirstOrDefault(role => role.Id == savedRole.Id);
@@ -372,16 +444,18 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         {
             ErrorMessage = $"Unable to save custom role: {exception.Message}";
         }
-        return Task.CompletedTask;
     }
 
-    public Task DeleteCustomRoleAsync()
+    public async Task DeleteCustomRoleAsync()
     {
         if (!CanDeleteCustomRole || _identity is null || SelectedOrganization is null || SelectedCustomRole is null)
-            return Task.CompletedTask;
+            return;
         try
         {
-            _organizationsService.DeleteCustomRole(SelectedOrganization.Id, _identity, SelectedCustomRole.Id);
+            if (_sharedOrganizationApi is not null)
+                await _sharedOrganizationApi.DeleteCustomRoleAsync(SelectedOrganization.Id, SelectedCustomRole.Id);
+            else
+                _organizationsService.DeleteCustomRole(SelectedOrganization.Id, _identity, SelectedCustomRole.Id);
             StatusMessage = "Custom role deleted.";
             _ = NewCustomRoleAsync();
             RefreshTenantView();
@@ -390,7 +464,6 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         {
             ErrorMessage = $"Unable to delete custom role: {exception.Message}";
         }
-        return Task.CompletedTask;
     }
 
     public async Task BindAccountAsync()
@@ -403,7 +476,10 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         }
         try
         {
-            _organizationsService.BindCloudAccount(SelectedOrganization.Id, _identity, provider, SelectedAccount.CloudAccountId, SelectedAccount.AccountId, SelectedAccount.AccountName);
+            if (_sharedOrganizationApi is not null)
+                await _sharedOrganizationApi.BindAccountAsync(SelectedOrganization.Id, new BindOrganizationAccountRequest(provider, SelectedAccount.CloudAccountId, SelectedAccount.AccountId, SelectedAccount.AccountName));
+            else
+                _organizationsService.BindCloudAccount(SelectedOrganization.Id, _identity, provider, SelectedAccount.CloudAccountId, SelectedAccount.AccountId, SelectedAccount.AccountName);
             StatusMessage = "Cloud account bound to the organization. Consolidated counts use only matching live-scan account IDs.";
             await RefreshAsync();
         }
@@ -414,36 +490,51 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     }
 
     private OrganizationMemberRole? CurrentOrganizationRole =>
-        _identity is null || SelectedOrganization is null ? null : _organizationsService.GetCurrentRole(SelectedOrganization.Id, _identity);
+        _identity is null || SelectedOrganization is null || _sharedOrganizationApi is not null ? null : _organizationsService.GetCurrentRole(SelectedOrganization.Id, _identity);
 
     private bool IsAllowed(OrganizationAction action) =>
-        _identity is not null && SelectedOrganization is not null && _organizationsService.Authorize(SelectedOrganization.Id, _identity, action).Allowed;
+        _identity is not null && SelectedOrganization is not null && (_sharedWorkspace is not null
+            ? _sharedWorkspace.AllowedActions.Contains(action)
+            : _organizationsService.Authorize(SelectedOrganization.Id, _identity, action).Allowed);
 
     private void RefreshTenantView()
     {
-        try
+        if (_sharedOrganizationApi is not null)
         {
-            _memberRoles = CanManageMembers && _identity is not null && SelectedOrganization is not null
-                ? _organizationsService.GetRoleOptions(SelectedOrganization.Id, _identity)
-                : Enum.GetValues<OrganizationMemberRole>().Select(role => new OrganizationRoleOption(role.ToString(), role, null)).ToArray();
-            _customRoles = CanManageMembers && _identity is not null && SelectedOrganization is not null
-                ? _organizationsService.GetCustomRoles(SelectedOrganization.Id, _identity)
-                : Array.Empty<OrganizationCustomRole>();
-            _members = CanManageMembers && _identity is not null && SelectedOrganization is not null
-                ? _organizationsService.GetMembers(SelectedOrganization.Id, _identity)
-                : Array.Empty<OrganizationMember>();
-            _bindings = CanViewTenant && _identity is not null && SelectedOrganization is not null
-                ? _organizationsService.GetTenantBindings(SelectedOrganization.Id, _identity)
-                : Array.Empty<TenantBinding>();
-            _auditTrail = CanManageMembers && _identity is not null && SelectedOrganization is not null
-                ? _organizationsService.GetAuditTrail(SelectedOrganization.Id, _identity)
-                : Array.Empty<OrganizationAuditEntry>();
+            _customRoles = CanManageMembers ? _sharedWorkspace?.CustomRoles ?? Array.Empty<OrganizationCustomRole>() : Array.Empty<OrganizationCustomRole>();
+            var builtInRoles = Enum.GetValues<OrganizationMemberRole>().Select(role => new OrganizationRoleOption(role.ToString(), role, null));
+            var customRoleOptions = _customRoles.Select(role => new OrganizationRoleOption(role.Name, null, role.Id));
+            _memberRoles = builtInRoles.Concat(customRoleOptions).ToArray();
+            _members = CanManageMembers ? _sharedWorkspace?.Members ?? Array.Empty<OrganizationMember>() : Array.Empty<OrganizationMember>();
+            _bindings = CanViewTenant ? _sharedWorkspace?.Bindings ?? Array.Empty<TenantBinding>() : Array.Empty<TenantBinding>();
+            _auditTrail = CanManageMembers ? _sharedWorkspace?.AuditTrail ?? Array.Empty<OrganizationAuditEntry>() : Array.Empty<OrganizationAuditEntry>();
         }
-        catch (UnauthorizedAccessException)
+        else
         {
-            _members = Array.Empty<OrganizationMember>();
-            _bindings = Array.Empty<TenantBinding>();
-            _auditTrail = Array.Empty<OrganizationAuditEntry>();
+            try
+            {
+                _memberRoles = CanManageMembers && _identity is not null && SelectedOrganization is not null
+                    ? _organizationsService.GetRoleOptions(SelectedOrganization.Id, _identity)
+                    : Enum.GetValues<OrganizationMemberRole>().Select(role => new OrganizationRoleOption(role.ToString(), role, null)).ToArray();
+                _customRoles = CanManageMembers && _identity is not null && SelectedOrganization is not null
+                    ? _organizationsService.GetCustomRoles(SelectedOrganization.Id, _identity)
+                    : Array.Empty<OrganizationCustomRole>();
+                _members = CanManageMembers && _identity is not null && SelectedOrganization is not null
+                    ? _organizationsService.GetMembers(SelectedOrganization.Id, _identity)
+                    : Array.Empty<OrganizationMember>();
+                _bindings = CanViewTenant && _identity is not null && SelectedOrganization is not null
+                    ? _organizationsService.GetTenantBindings(SelectedOrganization.Id, _identity)
+                    : Array.Empty<TenantBinding>();
+                _auditTrail = CanManageMembers && _identity is not null && SelectedOrganization is not null
+                    ? _organizationsService.GetAuditTrail(SelectedOrganization.Id, _identity)
+                    : Array.Empty<OrganizationAuditEntry>();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                _members = Array.Empty<OrganizationMember>();
+                _bindings = Array.Empty<TenantBinding>();
+                _auditTrail = Array.Empty<OrganizationAuditEntry>();
+            }
         }
 
         var result = _liveScan.CurrentResult;
@@ -456,7 +547,9 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         _availableAccounts = CanManageConnections && _identity is not null && SelectedOrganization is not null
             ? allAccounts.Where(account => account.CloudAccountId != Guid.Empty
                     && Enum.TryParse<CloudProvider>(account.Provider, true, out var provider)
-                    && _organizationsService.IsAccountAvailable(SelectedOrganization.Id, _identity, provider, account.AccountId))
+                    && (_sharedOrganizationApi is not null
+                        ? !_bindings.Any(binding => binding.Provider == provider && binding.ExternalTenantId.Equals(account.AccountId, StringComparison.OrdinalIgnoreCase))
+                        : _organizationsService.IsAccountAvailable(SelectedOrganization.Id, _identity, provider, account.AccountId)))
                 .GroupBy(account => (account.Provider, account.AccountId), StringTupleComparer.Instance).Select(group => group.First()).ToArray()
             : Array.Empty<LiveScanAccountRecord>();
         _consolidatedIdentities = CanViewTenant ? (result?.IdentityRecords ?? Array.Empty<CloudPrincipal>()).Count(item => currentAccountIds.Contains(item.AccountId)) : 0;
@@ -466,11 +559,39 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         _consolidatedCriticalFindings = findings.Count(item => item.Severity == RiskSeverity.Critical);
         _consolidatedEffectiveAccess = CanViewTenant ? (result?.EffectiveAccessRecords ?? Array.Empty<LiveEffectiveAccessRecord>()).Count(item => item.AccountId is not null && externalAccountIds.Contains(item.AccountId)) : 0;
         _unmatchedBoundAccounts = Math.Max(0, _bindings.Count - _consolidatedAccounts.Count);
-        foreach (var property in new[] { nameof(Members), nameof(Bindings), nameof(AuditTrail), nameof(AvailableAccounts), nameof(ConsolidatedAccounts), nameof(BoundAccountCount), nameof(ConsolidatedAccountCount), nameof(ConsolidatedIdentities), nameof(ConsolidatedResources), nameof(ConsolidatedFindings), nameof(ConsolidatedCriticalFindings), nameof(ConsolidatedEffectiveAccess), nameof(UnmatchedBoundAccounts), nameof(ConsolidatedCoverage) })
+        foreach (var property in new[] { nameof(Members), nameof(Bindings), nameof(AuditTrail), nameof(AvailableAccounts), nameof(ConsolidatedAccounts), nameof(BoundAccountCount), nameof(ConsolidatedAccountCount), nameof(ConsolidatedIdentities), nameof(ConsolidatedResources), nameof(ConsolidatedFindings), nameof(ConsolidatedCriticalFindings), nameof(ConsolidatedEffectiveAccess), nameof(UnmatchedBoundAccounts), nameof(ConsolidatedCoverage), nameof(SharedScanSummaries), nameof(SharedScanSummaryStatus) })
             OnPropertyChanged(property);
         OnPropertyChanged(nameof(MemberRoles));
         OnPropertyChanged(nameof(CustomRoles));
         NotifyAuthorization();
+    }
+
+    private async Task RefreshSharedWorkspaceAsync()
+    {
+        if (_sharedOrganizationApi is null || _identity is null || SelectedOrganization is null)
+        {
+            _sharedWorkspace = null;
+            RefreshTenantView();
+            return;
+        }
+        try
+        {
+            _sharedWorkspace = await _sharedOrganizationApi.GetWorkspaceAsync(SelectedOrganization.Id);
+            SharedScanSummaries = _sharedWorkspace.AllowedActions.Contains(OrganizationAction.ViewInventory)
+                ? await _sharedOrganizationApi.GetScanSummariesAsync(SelectedOrganization.Id, 20)
+                : Array.Empty<SharedScanSummaryDto>();
+            SharedScanSummaryStatus = SharedScanSummaries.Count == 0
+                ? "No shared scan summaries are available for this organization."
+                : $"Loaded {SharedScanSummaries.Count} shared scan summaries.";
+            RefreshTenantView();
+            NotifyAuthorization();
+        }
+        catch (Exception exception)
+        {
+            _sharedWorkspace = null;
+            RefreshTenantView();
+            ErrorMessage = $"Unable to load shared organization workspace: {exception.Message}";
+        }
     }
 
     private IReadOnlyList<OrganizationAction> GetSelectedCustomRolePermissions()
@@ -519,7 +640,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
 
     private void NotifyAuthorization()
     {
-        foreach (var property in new[] { nameof(SignedInAs), nameof(CurrentRole), nameof(CanCreateOrganization), nameof(CanSignIn), nameof(CanManageMembers), nameof(CanManageConnections), nameof(CanViewTenant), nameof(CanAddMember), nameof(CanChangeMemberRole), nameof(CanToggleMember), nameof(CanBindAccount), nameof(CanSaveCustomRole), nameof(CanDeleteCustomRole), nameof(Identity) })
+        foreach (var property in new[] { nameof(SignedInAs), nameof(CurrentRole), nameof(CanCreateOrganization), nameof(CanSignIn), nameof(CanManageMembers), nameof(CanManageConnections), nameof(CanViewTenant), nameof(CanPublishSharedScanSummary), nameof(CanAddMember), nameof(CanChangeMemberRole), nameof(CanToggleMember), nameof(CanBindAccount), nameof(CanSaveCustomRole), nameof(CanDeleteCustomRole), nameof(Identity) })
             OnPropertyChanged(property);
     }
 }

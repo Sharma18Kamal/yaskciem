@@ -48,6 +48,18 @@ catch (FormatException exception) { throw new InvalidOperationException("AuditRe
 if (auditIntegrityKeyBytes.Length < 32)
 	throw new InvalidOperationException("AuditRetention:IntegrityKey must decode to at least 32 bytes.");
 builder.Services.AddSingleton<IAuditRetentionStore>(_ => new AppendOnlyAuditRetentionStore(auditDirectory, auditRetentionDays, auditIntegrityKeyBytes));
+var sharedConnectionString = builder.Configuration.GetConnectionString("SharedWorkspace")
+	?? builder.Configuration["SharedData:ConnectionString"];
+if (string.IsNullOrWhiteSpace(sharedConnectionString))
+{
+	var sharedDirectory = builder.Configuration["SharedData:Directory"]
+		?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YASK-CIEM", "SharedApi");
+	Directory.CreateDirectory(sharedDirectory);
+	sharedConnectionString = $"Data Source={Path.Combine(sharedDirectory, "shared-workspace.db")};Cache=Shared";
+}
+var sharedWorkspaceStore = new SharedWorkspaceStore(sharedConnectionString);
+await sharedWorkspaceStore.InitializeAsync();
+builder.Services.AddSingleton(sharedWorkspaceStore);
 
 var app = builder.Build();
 
@@ -135,6 +147,8 @@ app.MapGet("/api/v1/audit/events", async (ClaimsPrincipal principal, long afterS
 	}
 })
 	.RequireAuthorization("CiemAuditRead");
+
+app.MapSharedWorkspaceEndpoints(sharedWorkspaceStore);
 
 app.Run();
 

@@ -34,7 +34,13 @@ public enum ScanCoverageStatus { Collected, NoData, Partial, Denied, Unavailable
 public sealed record ScanCoverageRecord(string Provider, string DataSource, ScanCoverageStatus Status, int Records, string Details);
 
 public enum WorkloadTrustStatus { Verified, Mismatch, Denied, Unavailable, Unsupported, NotConfigured }
-public sealed record WorkloadIdentityVerification(WorkloadTrustStatus Status, string Details);
+public sealed record WorkloadIdentityVerification(WorkloadTrustStatus Status, string Details)
+{
+    public string? Issuer { get; init; }
+    public string? Subject { get; init; }
+    public string? Audience { get; init; }
+    public string? Source { get; init; }
+}
 public sealed record KubernetesWorkloadTrace(
     CloudProviderType Provider,
     string Cluster,
@@ -45,7 +51,10 @@ public sealed record KubernetesWorkloadTrace(
     string? CloudIdentity,
     IReadOnlyList<string> KubernetesRoles,
     bool TokenInjectionEnabled,
-    WorkloadIdentityVerification Trust);
+    WorkloadIdentityVerification Trust)
+{
+    public bool IsRunningWorkload { get; init; }
+}
 
 public interface IIdentityProvider
 {

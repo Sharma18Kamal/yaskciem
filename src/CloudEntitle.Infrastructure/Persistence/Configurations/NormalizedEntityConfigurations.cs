@@ -19,6 +19,24 @@ internal static class PersistenceConversions
             value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null).GetHashCode(),
             value => new Dictionary<string, string>(value, StringComparer.OrdinalIgnoreCase));
 
+    public static ValueConverter<List<string>, string> StringListConverter { get; } =
+        new(value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
+            value => JsonSerializer.Deserialize<List<string>>(value, (JsonSerializerOptions?)null) ?? new());
+
+    public static ValueComparer<List<string>> StringListComparer { get; } =
+        new((left, right) => JsonSerializer.Serialize(left, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(right, (JsonSerializerOptions?)null),
+            value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null).GetHashCode(),
+            value => value.ToList());
+
+    public static ValueConverter<List<WorkloadFederationTrust>, string> FederationTrustsConverter { get; } =
+        new(value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
+            value => JsonSerializer.Deserialize<List<WorkloadFederationTrust>>(value, (JsonSerializerOptions?)null) ?? new());
+
+    public static ValueComparer<List<WorkloadFederationTrust>> FederationTrustsComparer { get; } =
+        new((left, right) => JsonSerializer.Serialize(left, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(right, (JsonSerializerOptions?)null),
+            value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null).GetHashCode(),
+            value => value.ToList());
+
     public static ValueConverter<IReadOnlyDictionary<string, string>, string> MetadataConverter { get; } =
         new(value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
             value => JsonSerializer.Deserialize<Dictionary<string, string>>(value, (JsonSerializerOptions?)null) ?? new());
@@ -54,6 +72,10 @@ public sealed class CloudPrincipalConfiguration : IEntityTypeConfiguration<Cloud
 {
     public void Configure(EntityTypeBuilder<CloudPrincipal> builder)
     {
+        builder.Property(entity => entity.OwnerIds).HasConversion(PersistenceConversions.StringListConverter)
+            .Metadata.SetValueComparer(PersistenceConversions.StringListComparer);
+        builder.Property(entity => entity.FederationTrusts).HasConversion(PersistenceConversions.FederationTrustsConverter)
+            .Metadata.SetValueComparer(PersistenceConversions.FederationTrustsComparer);
         builder.HasIndex(entity => new { entity.AccountId, entity.PrincipalId });
         builder.HasIndex(entity => new { entity.AccountId, entity.IdentityType, entity.IsPrivileged });
         builder.HasIndex(entity => new { entity.Email, entity.IsExternal });

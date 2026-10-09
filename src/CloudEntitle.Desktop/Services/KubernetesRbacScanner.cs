@@ -119,6 +119,44 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
                 var principalRecords = new Dictionary<string, CloudPrincipal>(StringComparer.OrdinalIgnoreCase);
                 var assignments = new List<CloudEffectiveAccessAssignment>();
                 var permissions = parsedRoles.SelectMany(role => role.Permissions).ToArray();
+                if (serviceAccountResult.IsSuccess)
+                {
+                    using var serviceAccounts = JsonDocument.Parse(serviceAccountResult.StandardOutput);
+                    foreach (var serviceAccount in ParseItems(serviceAccounts.RootElement, "ServiceAccount"))
+                    {
+                        if (!serviceAccount.TryGetProperty("metadata", out var metadata)) continue;
+                        var name = GetString(metadata, "name");
+                        if (string.IsNullOrWhiteSpace(name)) continue;
+                        var ns = GetString(metadata, "namespace") ?? "default";
+                        var principalId = GetSubjectId("ServiceAccount", name, ns);
+                        var annotations = metadata.TryGetProperty("annotations", out var annotationElement) && annotationElement.ValueKind == JsonValueKind.Object
+                            ? annotationElement
+                            : default;
+                        JsonElement ownerAnnotation = default;
+                        var hasOwnerAnnotation = annotations.ValueKind == JsonValueKind.Object
+                            && annotations.TryGetProperty("yask-ciem.io/owner", out ownerAnnotation);
+                        var ownerValue = hasOwnerAnnotation && ownerAnnotation.ValueKind == JsonValueKind.String ? ownerAnnotation.GetString() : null;
+                        var ownerIds = string.IsNullOrWhiteSpace(ownerValue) || ownerValue.Equals("unowned", StringComparison.OrdinalIgnoreCase)
+                            ? new List<string>()
+                            : ownerValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                        principalRecords[principalId] = new CloudPrincipal
+                        {
+                            Id = Guid.NewGuid(),
+                            AccountId = cluster.Id,
+                            CloudProvider = cloudProvider,
+                            Name = $"{ns}/{name}",
+                            PrincipalId = principalId,
+                            IdentityType = IdentityType.ServiceAccount,
+                            IsActive = true,
+                            OwnerIds = ownerIds,
+                            OwnerInventoryComplete = hasOwnerAnnotation,
+                            OwnerEvidenceSource = hasOwnerAnnotation ? "Kubernetes yask-ciem.io/owner annotation" : null,
+                            FederationInventoryComplete = true,
+                            ActivityEvidenceComplete = false,
+                            ActivityEvidenceSource = "Current Kubernetes Pod inventory; historical token use is not available."
+                        };
+                    }
+                }
                 foreach (var binding in bindings)
                 {
                     if (!binding.TryGetProperty("metadata", out var metadata)) continue;
@@ -174,6 +212,34 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
                 var traces = workloadResult.IsSuccess
                     ? await BuildWorkloadTracesAsync(workloadResult.StandardOutput, contextName, clusterName, cloudProvider, server, workloadIdentities, assignments, cancellationToken)
                     : Array.Empty<KubernetesWorkloadTrace>();
+                foreach (var trace in traces)
+                {
+                    var serviceAccountId = GetSubjectId("ServiceAccount", trace.ServiceAccount, trace.Namespace);
+                    if (!principalRecords.TryGetValue(serviceAccountId, out var principal)) continue;
+                    principal.LastObservedWorkloadAtUtc = trace.IsRunningWorkload ? DateTime.UtcNow : principal.LastObservedWorkloadAtUtc;
+                    if (trace.Trust.Status == WorkloadTrustStatus.Verified)
+                    {
+                        principal.FederationTrustVerified = true;
+                        if (!string.IsNullOrWhiteSpace(trace.Trust.Issuer) && !string.IsNullOrWhiteSpace(trace.Trust.Subject))
+                        {
+                            var trust = new WorkloadFederationTrust(trace.Trust.Issuer, trace.Trust.Subject,
+                                string.IsNullOrWhiteSpace(trace.Trust.Audience) ? Array.Empty<string>() : new[] { trace.Trust.Audience },
+                                trace.Trust.Source ?? "Kubernetes workload trust verifier");
+                            if (!principal.FederationTrusts.Any(existing => existing.Issuer == trust.Issuer
+                                && existing.Subject == trust.Subject
+                                && existing.Source == trust.Source
+                                && existing.Audiences.SequenceEqual(trust.Audiences, StringComparer.Ordinal)))
+                                principal.FederationTrusts.Add(trust);
+                            principal.FederationIssuer = trust.Issuer;
+                            principal.FederationSubject = trust.Subject;
+                            principal.FederationAudience = string.Join(",", trust.Audiences);
+                        }
+                    }
+                    else if (trace.Trust.Status == WorkloadTrustStatus.Mismatch)
+                    {
+                        principal.FederationTrustVerified = false;
+                    }
+                }
                 var configuredTraces = traces.Where(trace => !string.IsNullOrWhiteSpace(trace.CloudIdentity)).ToArray();
                 var trustStatus = configuredTraces.Length == 0 ? ScanCoverageStatus.NoData
                     : configuredTraces.All(trace => trace.Trust.Status == WorkloadTrustStatus.Verified) ? ScanCoverageStatus.Collected
@@ -226,7 +292,11 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
                 : identity.Provider != provider
                     ? new WorkloadIdentityVerification(WorkloadTrustStatus.Mismatch, $"The ServiceAccount annotation targets {identity.Provider}, but this context was identified as {provider}.")
                     : await _trustVerifier.VerifyAsync(provider, contextName, apiServer, ns, serviceAccount, identity.Identity, cancellationToken);
-            traces.Add(new KubernetesWorkloadTrace(provider, clusterName, ns, kind, workloadName, serviceAccount, identity?.Identity, roles, tokenInjection, trust));
+            var running = kind == "Pod" && GetNestedString(workload, "status", "phase")?.Equals("Running", StringComparison.OrdinalIgnoreCase) == true;
+            traces.Add(new KubernetesWorkloadTrace(provider, clusterName, ns, kind, workloadName, serviceAccount, identity?.Identity, roles, tokenInjection, trust)
+            {
+                IsRunningWorkload = running
+            });
         }
         return traces;
     }

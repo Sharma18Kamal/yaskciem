@@ -57,7 +57,11 @@ public sealed class LocalComplianceAssessmentHistoryStore : IComplianceAssessmen
                 .Take(limit)
                 .OrderBy(entry => entry.Assessment.AssessedAt)
                 .Select(entry => new ComplianceAssessmentTrendPoint(entry.Assessment.Id, framework, entry.Assessment.AssessedAt,
-                    entry.Assessment.Passed, entry.Assessment.Failed, entry.Assessment.Partial, entry.Assessment.NotAssessed))
+                    entry.Assessment.Passed, entry.Assessment.Failed, entry.Assessment.Partial, entry.Assessment.NotAssessed)
+                {
+                    MappingCatalogVersion = entry.Assessment.MappingCatalogVersion,
+                    ExceptionCount = entry.Assessment.Exceptions.Count
+                })
                 .ToArray();
         }
         finally

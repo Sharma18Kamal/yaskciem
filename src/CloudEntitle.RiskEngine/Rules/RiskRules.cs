@@ -97,6 +97,106 @@ public sealed class BroadScopeRule : RiskRuleBase { public override string RuleI
 public sealed class DormantPrivilegedIdentityRule : RiskRuleBase { public override string RuleId => "CIEM-005"; public override string Name => "Dormant Privileged Identity"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.Dormancy; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged).Select(a => (a, p: Principal(c, a.PrincipalId))).Where(x => x.p != null && x.p.LastActivityAt == null || x.p?.LastActivityAt < c.EvaluatedAt.AddDays(-c.Options.DormancyDays)).Select(x => Finding(c, x.a, x.p!.LastActivityAt == null ? RiskEvaluationState.Unknown : RiskEvaluationState.Confirmed, Name, "The privileged identity has insufficient or stale activity evidence.", $"LastActivity={x.p!.LastActivityAt?.ToString("O") ?? "Unknown"}")).ToArray()); }
 public sealed class ExternalPrivilegedIdentityRule : RiskRuleBase { public override string RuleId => "CIEM-006"; public override string Name => "External Privileged Identity"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.ExternalAccess; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged && Principal(c, a.PrincipalId)?.IsExternal == true).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "An external identity has privileged effective access.", "Principal.IsExternal=true")).ToArray()); }
 public sealed class PrivilegedServiceAccountRule : RiskRuleBase { public override string RuleId => "CIEM-007"; public override string Name => "Privileged Service Account"; public override RiskSeverity DefaultSeverity => RiskSeverity.High; public override RiskCategory Category => RiskCategory.ServiceIdentity; public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(Allowed(c).Where(a => a.IsPrivileged && Principal(c, a.PrincipalId)?.IdentityType is IdentityType.ServiceAccount or IdentityType.ServicePrincipal or IdentityType.ManagedIdentity).Select(a => Finding(c, a, RiskEvaluationState.Confirmed, Name, "A non-human identity has privileged effective access.", $"IdentityType={Principal(c, a.PrincipalId)?.IdentityType}")).ToArray()); }
+
+public sealed class OrphanedWorkloadIdentityRule : RiskRuleBase
+{
+    public override string RuleId => "CIEM-018";
+    public override string Name => "Orphaned Workload Identity";
+    public override RiskSeverity DefaultSeverity => RiskSeverity.High;
+    public override RiskCategory Category => RiskCategory.ServiceIdentity;
+
+    public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext context, CancellationToken cancellationToken = default)
+    {
+        var findings = context.Request.Principals
+            .Where(IsWorkloadIdentity)
+            .Where(principal => principal.ActivityEvidenceComplete == true
+                && principal.ActivityObservationDays >= context.Options.DormancyDays
+                && (!principal.LastActivityAt.HasValue
+                    || principal.LastActivityAt.Value.ToUniversalTime() <= context.EvaluatedAt.ToUniversalTime().AddDays(-context.Options.DormancyDays)))
+            .Where(principal => !context.Request.EffectiveAccess.Any(access => access.PrincipalId == principal.Id
+                && access.Decision is AccessDecision.Allow or AccessDecision.Conditional))
+            .Select(principal => CreateIdentityFinding(context, principal, RuleId, Name, RiskSeverity.High,
+                "No use was observed in a complete workload-identity observation window, and the identity has no effective access.",
+                $"LastActivity={principal.LastActivityAt?.ToString("O") ?? "none observed"}; ObservationDays={principal.ActivityObservationDays}; Source={principal.ActivityEvidenceSource ?? "not reported"}"))
+            .ToArray();
+        return Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(findings);
+    }
+
+    internal static bool IsWorkloadIdentity(CloudPrincipal principal)
+        => principal.IdentityType is IdentityType.ServicePrincipal or IdentityType.ServiceAccount or IdentityType.ManagedIdentity or IdentityType.Application;
+
+    internal static RiskFindingModel CreateIdentityFinding(RiskRuleContext context, CloudPrincipal principal, string ruleId,
+        string title, RiskSeverity severity, string description, string evidence)
+    {
+        var fingerprint = $"{ruleId}|{principal.CloudProvider}|{principal.AccountId}|{principal.PrincipalId ?? principal.Id.ToString("D")}|{evidence}";
+        var now = context.EvaluatedAt;
+        return new RiskFindingModel
+        {
+            Id = Stable(fingerprint),
+            RuleId = Stable(ruleId),
+            CloudProvider = Provider(principal.CloudProvider),
+            CloudAccountId = principal.AccountId,
+            PrincipalId = principal.Id,
+            Severity = severity,
+            Status = FindingStatus.Open,
+            Title = title,
+            Description = description,
+            Evidence = new RiskEvidence($"Identity={principal.Name}; Type={principal.IdentityType}; {evidence}"),
+            Recommendation = "Review the workload owner, observed-use evidence, trust configuration, and granted permissions before remediation.",
+            CreatedAt = now,
+            UpdatedAt = now,
+            DetectedAt = now,
+            LastEvaluatedAt = now,
+            EvaluationState = RiskEvaluationState.Confirmed,
+            Category = RiskCategory.ServiceIdentity,
+            Fingerprint = fingerprint
+        };
+    }
+}
+
+public sealed class UnownedWorkloadIdentityRule : RiskRuleBase
+{
+    public override string RuleId => "CIEM-019";
+    public override string Name => "Unowned Workload Identity";
+    public override RiskSeverity DefaultSeverity => RiskSeverity.Medium;
+    public override RiskCategory Category => RiskCategory.ServiceIdentity;
+
+    public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext context, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(context.Request.Principals
+            .Where(OrphanedWorkloadIdentityRule.IsWorkloadIdentity)
+            .Where(principal => principal.OwnerInventoryComplete == true && principal.OwnerIds.Count == 0)
+            .Select(principal => OrphanedWorkloadIdentityRule.CreateIdentityFinding(context, principal, RuleId, Name, DefaultSeverity,
+                "The complete owner inventory contains no accountable owner for this workload identity.",
+                $"OwnerInventoryComplete=true; FederationIssuer={principal.FederationIssuer ?? "not reported"}; CredentialInventoryComplete={principal.CredentialInventoryComplete?.ToString() ?? "unknown"}"))
+            .ToArray());
+}
+
+public sealed class OverprivilegedWorkloadIdentityRule : RiskRuleBase
+{
+    public override string RuleId => "CIEM-020";
+    public override string Name => "Overprivileged Workload Identity";
+    public override RiskSeverity DefaultSeverity => RiskSeverity.High;
+    public override RiskCategory Category => RiskCategory.ServiceIdentity;
+
+    public override Task<IReadOnlyCollection<RiskFindingModel>> EvaluateAsync(RiskRuleContext context, CancellationToken cancellationToken = default)
+    {
+        var findings = context.Request.EffectiveAccess
+            .Where(access => access.IsPrivileged && access.Decision is AccessDecision.Allow or AccessDecision.Conditional)
+            .Select(access => (access, principal: Principal(context, access.PrincipalId)))
+            .Where(item => item.principal is not null && OrphanedWorkloadIdentityRule.IsWorkloadIdentity(item.principal))
+            .GroupBy(item => item.principal!.Id)
+            .Select(group =>
+            {
+                var principal = group.First().principal!;
+                var grants = string.Join(", ", group.Select(item => item.access.Scope ?? item.access.AccessSource ?? "privileged access").Distinct());
+                return OrphanedWorkloadIdentityRule.CreateIdentityFinding(context, principal, RuleId, Name, DefaultSeverity,
+                    "The workload identity has one or more effective privileged grants.", $"PrivilegedGrantCount={group.Count()}; Grants={grants}");
+            })
+            .ToArray();
+        return Task.FromResult<IReadOnlyCollection<RiskFindingModel>>(findings);
+    }
+}
+
 public sealed class UnusedEntitlementRule : RiskRuleBase
 {
     public override string RuleId => "CIEM-008";

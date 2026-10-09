@@ -10,6 +10,15 @@ public enum ReviewDecision { Pending, Certified, NeedsInvestigation, Rejected, E
 
 public sealed record GovernanceOptions(int DormancyDays = 90, bool IncludeExternalIdentities = true, bool IncludeServiceIdentities = true);
 
+public sealed record AccessReviewTemplate(
+    string Id,
+    string Name,
+    string Description,
+    int DurationDays,
+    bool PrivilegedOnly = false,
+    bool WorkloadIdentitiesOnly = false,
+    bool ExternalOnly = false);
+
 public sealed record IdentityGovernanceRecord(
     Guid PrincipalId,
     Guid CloudAccountId,
@@ -35,6 +44,9 @@ public sealed record AccessReviewCampaign(
     IReadOnlyList<AccessReviewItem> Items)
 {
     public string? CreatedBy { get; init; }
+    public string? TemplateId { get; init; }
+    public int ReminderLeadDays { get; init; } = 3;
+    public int ReminderIntervalDays { get; init; } = 1;
     public IReadOnlyList<AccessReviewAuditEntry> AuditTrail { get; init; } = Array.Empty<AccessReviewAuditEntry>();
 }
 
@@ -44,9 +56,22 @@ public sealed record AccessReviewCandidate(
     Guid? AccessPathId,
     CloudProvider Provider,
     string AccessSummary,
-    string EvidenceSnapshot);
+    string EvidenceSnapshot,
+    string? SuggestedReviewer = null,
+    IdentityType IdentityType = IdentityType.Unknown,
+    bool IsPrivileged = false,
+    bool IsExternal = false);
 
 public sealed record AccessReviewAuditEntry(DateTime Timestamp, string Actor, string Action, string Details);
+
+public sealed record AccessReviewAttestation(
+    string Reviewer,
+    string Actor,
+    ReviewDecision Decision,
+    string Comment,
+    DateTime AttestedAtUtc,
+    string EvidenceSha256,
+    string EvidenceSnapshot);
 
 public sealed record AccessReviewItem(
     Guid Id,
@@ -62,8 +87,12 @@ public sealed record AccessReviewItem(
     DateTime? DecidedAt)
 {
     public string? AssignedReviewer { get; init; }
+    public string? OwnerSnapshot { get; init; }
     public DateTime? DueAt { get; init; }
     public string EvidenceSnapshot { get; init; } = string.Empty;
+    public int ReminderCount { get; init; }
+    public DateTime? LastReminderAt { get; init; }
+    public IReadOnlyList<AccessReviewAttestation> Attestations { get; init; } = Array.Empty<AccessReviewAttestation>();
     public DateTime? ExceptionExpiresAt { get; init; }
     public DateTime? ExceptionExpiredAt { get; init; }
     public DateTime? EscalatedAt { get; init; }

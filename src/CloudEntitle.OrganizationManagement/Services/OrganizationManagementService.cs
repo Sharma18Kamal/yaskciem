@@ -127,6 +127,23 @@ public sealed class OrganizationManagementService
 
     public IReadOnlyList<OrganizationProfile> GetOrganizations() => _organizations.Values.OrderBy(item => item.Name).ToArray();
 
+    public IReadOnlyList<OrganizationProfile> GetOrganizationsForIdentity(OrganizationIdentity identity)
+    {
+        ValidateIdentity(identity);
+        return _organizations.Values.Where(organization => IsTenantMatch(organization, identity)
+                && _members.Values.Any(member => member.OrganizationId == organization.Id && member.IsActive
+                    && (member.UserId == identity.UserId || member.IsPending && string.Equals(member.Email, identity.Email, StringComparison.OrdinalIgnoreCase))))
+            .OrderBy(item => item.Name).ToArray();
+    }
+
+    public OrganizationMember? GetCurrentMember(Guid organizationId, OrganizationIdentity identity)
+    {
+        var organization = RequireOrganization(organizationId);
+        if (identity is null || identity.UserId == Guid.Empty || string.IsNullOrWhiteSpace(identity.TenantId)
+            || !IsTenantMatch(organization, identity) || organization.Status != OrganizationStatus.Active) return null;
+        return _members.Values.FirstOrDefault(item => item.OrganizationId == organizationId && item.IsActive && item.UserId == identity.UserId);
+    }
+
     public OrganizationMemberRole? GetCurrentRole(Guid organizationId, OrganizationIdentity identity)
     {
         var organization = RequireOrganization(organizationId);

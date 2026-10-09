@@ -11,7 +11,10 @@ public interface IAuditRetentionStore
 {
     Task<CentralAuditEventDto> AppendAsync(Guid tenantId, Guid actorObjectId, CentralAuditAppendRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CentralAuditEventDto>> ReadAsync(Guid tenantId, long afterSequence, int limit, CancellationToken cancellationToken = default);
+    Task<AuditStoreReadiness> CheckReadinessAsync(CancellationToken cancellationToken = default);
 }
+
+public sealed record AuditStoreReadiness(bool Ready, bool ProductionReady, string Details);
 
 public sealed class AppendOnlyAuditRetentionStore : IAuditRetentionStore, IDisposable
 {
@@ -101,6 +104,10 @@ public sealed class AppendOnlyAuditRetentionStore : IAuditRetentionStore, IDispo
             gate.Release();
         }
     }
+
+    public Task<AuditStoreReadiness> CheckReadinessAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(new AuditStoreReadiness(true, false,
+            "Development file audit store is available but is not multi-instance safe or storage-immutable."));
 
     private string GetTenantPath(Guid tenantId) => Path.Combine(_directory, $"{tenantId:N}.audit.jsonl");
 

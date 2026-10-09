@@ -54,7 +54,13 @@ public sealed class CloudWorkloadTrustVerifier(ICloudCommandRunner commandRunner
         var expectedProvider = $"arn:aws:iam::{arn[4]}:oidc-provider/{issuerUri.Host}{issuerUri.AbsolutePath}";
         var expectedSubject = $"system:serviceaccount:{ns}:{serviceAccount}";
         return HasAwsWebIdentityTrust(trust, expectedProvider, expectedSubject)
-            ? new(WorkloadTrustStatus.Verified, $"IAM role trust matches EKS OIDC issuer and subject {expectedSubject}.")
+            ? new WorkloadIdentityVerification(WorkloadTrustStatus.Verified, $"IAM role trust matches EKS OIDC issuer and subject {expectedSubject}.")
+            {
+                Issuer = issuerUri.AbsoluteUri,
+                Subject = expectedSubject,
+                Audience = "sts.amazonaws.com",
+                Source = "AWS EKS OIDC role trust"
+            }
             : new(WorkloadTrustStatus.Mismatch, $"IAM role trust does not contain the expected EKS issuer, audience, and subject {expectedSubject}.");
     }
 
@@ -104,7 +110,13 @@ public sealed class CloudWorkloadTrustVerifier(ICloudCommandRunner commandRunner
             return new(WorkloadTrustStatus.Mismatch, $"The service account IAM policy lacks roles/iam.workloadIdentityUser for {ns}/{serviceAccount}.");
         if (matchingBinding.TryGetProperty("condition", out var condition) && condition.ValueKind == JsonValueKind.Object)
             return new(WorkloadTrustStatus.Unavailable, "A condition restricts the matching GKE workload binding; its runtime context was not evaluated.");
-        return new(WorkloadTrustStatus.Verified, $"GKE Workload Identity binding matches {ns}/{serviceAccount} on {cloudServiceAccount}.");
+        return new WorkloadIdentityVerification(WorkloadTrustStatus.Verified, $"GKE Workload Identity binding matches {ns}/{serviceAccount} on {cloudServiceAccount}.")
+        {
+            Issuer = workloadPool,
+            Subject = expectedPrincipal,
+            Audience = cloudServiceAccount,
+            Source = "GKE Workload Identity IAM binding"
+        };
     }
 
     private async Task<WorkloadIdentityVerification> VerifyAzureAsync(string? apiServer, string ns, string serviceAccount, string clientId, CancellationToken cancellationToken)
@@ -159,7 +171,13 @@ public sealed class CloudWorkloadTrustVerifier(ICloudCommandRunner commandRunner
                 && audiences.ValueKind == JsonValueKind.Array
                 && audiences.EnumerateArray().Any(audience => audience.GetString() == "api://AzureADTokenExchange"));
         return verified
-            ? new(WorkloadTrustStatus.Verified, $"AKS federated credential matches OIDC issuer, audience, and subject {expectedSubject}.")
+            ? new WorkloadIdentityVerification(WorkloadTrustStatus.Verified, $"AKS federated credential matches OIDC issuer, audience, and subject {expectedSubject}.")
+            {
+                Issuer = issuer,
+                Subject = expectedSubject,
+                Audience = "api://AzureADTokenExchange",
+                Source = "AKS federated identity credential"
+            }
             : new(WorkloadTrustStatus.Mismatch, $"No Azure federated credential matches {expectedSubject} and the AKS OIDC issuer.");
     }
 

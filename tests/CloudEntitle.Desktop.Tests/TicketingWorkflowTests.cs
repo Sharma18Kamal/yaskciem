@@ -40,6 +40,7 @@ public sealed class TicketingWorkflowTests
             var body = handler.Requests[0].Body;
             Assert.Contains("ticket evidence payload", body, StringComparison.Ordinal);
             Assert.Contains("aws-unused-role-fingerprint", body, StringComparison.Ordinal);
+            Assert.Contains($"yask-ciem://recommendations/{recommendation.Id:D}", body, StringComparison.Ordinal);
             Assert.Equal("Basic", handler.Requests[0].AuthorizationScheme);
             Assert.False(string.IsNullOrWhiteSpace(handler.Requests[0].IdempotencyKey));
 
@@ -56,6 +57,18 @@ public sealed class TicketingWorkflowTests
         {
             if (Directory.Exists(requestDirectory)) Directory.Delete(requestDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void TicketingEvidenceLink_ShouldAcceptOnlyRecommendationDeepLinks()
+    {
+        var recommendationId = Guid.NewGuid();
+        var link = TicketingEvidenceLink.ForRecommendation(recommendationId);
+
+        Assert.True(TicketingEvidenceLink.TryGetRecommendationId(link, out var parsedId));
+        Assert.Equal(recommendationId, parsedId);
+        Assert.False(TicketingEvidenceLink.TryGetRecommendationId("https://example.com/recommendations/" + recommendationId, out _));
+        Assert.False(TicketingEvidenceLink.TryGetRecommendationId(link + "?tenant=other", out _));
     }
 
     [Fact]
@@ -77,6 +90,38 @@ public sealed class TicketingWorkflowTests
         Assert.Equal("Created", result.Ticket.Status);
         Assert.Contains("/rest/servicedeskapi/request", handler.Requests[0].Uri.AbsolutePath, StringComparison.Ordinal);
         Assert.Equal("https://acme.atlassian.net/servicedesk/customer/portal/1/HELP-21", result.Ticket.TicketUrl);
+    }
+
+    [Fact]
+    public async Task JiraClosureVerification_ShouldBeSetAfterFreshClosedStatusAndClearedIfReopened()
+    {
+        var statusRead = 0;
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Post
+            ? JsonResponse("{\"key\":\"CIEM-3\"}")
+            : JsonResponse(Interlocked.Increment(ref statusRead) == 1
+                ? "{\"fields\":{\"status\":{\"name\":\"Done\",\"statusCategory\":{\"key\":\"done\"}}}}"
+                : statusRead == 2
+                    ? "{\"fields\":{\"status\":{}}}"
+                    : "{\"fields\":{\"status\":{\"name\":\"In Progress\",\"statusCategory\":{\"key\":\"indeterminate\"}}}}"));
+        var workflow = new TicketingWorkflowService(
+            new InMemorySettingsStore(new JiraConnectionSettings("https://acme.atlassian.net", SelectedProvider: TicketingProvider.Jira,
+                ProviderConfigurations: new Dictionary<TicketingProvider, TicketingProviderConfiguration>
+                {
+                    [TicketingProvider.Jira] = new("api-user", "CIEM", "Task")
+                })),
+            new InMemoryCredentialStore(new TicketingCredentials("api-user", "test-token")),
+            new InMemoryRequestStore(), new HttpClient(handler));
+
+        var created = await workflow.CreateOrGetAsync(CreateRecommendation("closure-fingerprint"));
+        var closed = await workflow.RefreshStatusAsync(created.Ticket);
+        Assert.NotNull(closed.ClosureVerifiedAtUtc);
+
+        var statusMissing = await workflow.RefreshStatusAsync(closed);
+        Assert.NotNull(statusMissing.ClosureVerifiedAtUtc);
+
+        var reopened = await workflow.RefreshStatusAsync(statusMissing);
+        Assert.Null(reopened.ClosureVerifiedAtUtc);
+        Assert.Equal("In Progress", reopened.Status);
     }
 
     [Fact]
@@ -107,6 +152,33 @@ public sealed class TicketingWorkflowTests
     }
 
     [Fact]
+    public async Task ServiceNowClosureVerification_ShouldIgnoreOnHoldAndVerifyResolvedOrClosed()
+    {
+        var statusRead = 0;
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Post
+            ? JsonResponse("{\"result\":{\"sys_id\":\"abc123\",\"number\":\"INC0010001\"}}")
+            : JsonResponse(Interlocked.Increment(ref statusRead) == 1
+                ? "{\"result\":{\"state\":\"3\",\"number\":\"INC0010001\"}}"
+                : "{\"result\":{\"state\":\"7\",\"number\":\"INC0010001\"}}"));
+        var workflow = new TicketingWorkflowService(
+            new InMemorySettingsStore(new JiraConnectionSettings(string.Empty, SelectedProvider: TicketingProvider.ServiceNow,
+                ProviderUrls: new Dictionary<TicketingProvider, string> { [TicketingProvider.ServiceNow] = "https://acme.service-now.com" },
+                ProviderConfigurations: new Dictionary<TicketingProvider, TicketingProviderConfiguration>
+                {
+                    [TicketingProvider.ServiceNow] = new(RequestType: "software")
+                })),
+            new InMemoryCredentialStore(new TicketingCredentials("api-user", "test-token")),
+            new InMemoryRequestStore(), new HttpClient(handler));
+
+        var created = await workflow.CreateOrGetAsync(CreateRecommendation("servicenow-closure-fingerprint"));
+        var onHold = await workflow.RefreshStatusAsync(created.Ticket);
+        Assert.Null(onHold.ClosureVerifiedAtUtc);
+
+        var closed = await workflow.RefreshStatusAsync(onHold);
+        Assert.NotNull(closed.ClosureVerifiedAtUtc);
+    }
+
+    [Fact]
     public async Task ConcurrentCreateRequests_ShouldSubmitOnlyOnce()
     {
         var handler = new RecordingHandler(_ => JsonResponse("{\"key\":\"CIEM-2\"}"));
@@ -125,6 +197,62 @@ public sealed class TicketingWorkflowTests
 
         Assert.Single(handler.Requests);
         Assert.Equal(1, results.Count(result => result.AlreadyExists));
+    }
+
+    [Fact]
+    public async Task SeparateWorkflowInstances_ShouldDeduplicateUsingSharedLocalRequestStore()
+    {
+        var requestDirectory = Path.Combine(Path.GetTempPath(), "YaskCiemTicketingTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(requestDirectory);
+        var recommendation = CreateRecommendation("cross-instance-fingerprint");
+        var firstHandler = new RecordingHandler(_ => JsonResponse("{\"key\":\"CIEM-4\"}"));
+        var secondHandler = new RecordingHandler(_ => JsonResponse("{\"key\":\"CIEM-5\"}"));
+        var settings = new InMemorySettingsStore(new JiraConnectionSettings("https://acme.atlassian.net", SelectedProvider: TicketingProvider.Jira,
+            ProviderConfigurations: new Dictionary<TicketingProvider, TicketingProviderConfiguration>
+            {
+                [TicketingProvider.Jira] = new("api-user", "CIEM", "Task")
+            }));
+        var credentials = new InMemoryCredentialStore(new TicketingCredentials("api-user", "test-token"));
+        var first = new TicketingWorkflowService(settings, credentials,
+            new LocalTicketingRequestStore(Path.Combine(requestDirectory, "requests.json")), new HttpClient(firstHandler));
+        var second = new TicketingWorkflowService(settings, credentials,
+            new LocalTicketingRequestStore(Path.Combine(requestDirectory, "requests.json")), new HttpClient(secondHandler));
+
+        try
+        {
+            var results = await Task.WhenAll(first.CreateOrGetAsync(recommendation), second.CreateOrGetAsync(recommendation));
+
+            Assert.Single(firstHandler.Requests.Concat(secondHandler.Requests));
+            Assert.Equal(1, results.Count(result => result.AlreadyExists));
+        }
+        finally
+        {
+            if (Directory.Exists(requestDirectory)) Directory.Delete(requestDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SeparateRequestStores_ShouldPreserveConcurrentUpdates()
+    {
+        var requestDirectory = Path.Combine(Path.GetTempPath(), "YaskCiemTicketingTests", Guid.NewGuid().ToString("N"));
+        var requestPath = Path.Combine(requestDirectory, "requests.json");
+        var records = Enumerable.Range(0, 24).Select(index => new TicketingRequestRecord(
+            Guid.NewGuid(), TicketingProvider.Jira, $"concurrent-{index}", $"CIEM-{index}",
+            $"https://acme.atlassian.net/browse/CIEM-{index}", "Created", null, DateTime.UtcNow, DateTime.UtcNow));
+
+        try
+        {
+            await Task.WhenAll(records.Select(async record =>
+                await new LocalTicketingRequestStore(requestPath).SaveAsync(record)));
+
+            var store = new LocalTicketingRequestStore(requestPath);
+            foreach (var record in records)
+                Assert.NotNull(await store.FindAsync(record.Provider, record.DedupeKey));
+        }
+        finally
+        {
+            if (Directory.Exists(requestDirectory)) Directory.Delete(requestDirectory, recursive: true);
+        }
     }
 
     [Fact]

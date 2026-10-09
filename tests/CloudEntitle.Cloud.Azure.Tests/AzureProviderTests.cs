@@ -95,6 +95,17 @@ public class AzureProviderTests
         Assert.Contains(result.Principals, principal => principal.Name == "Entra User" && principal.IdentityType == IdentityType.User);
         Assert.Contains(result.Principals, principal => principal.Name == "Security Group" && principal.IdentityType == IdentityType.Group);
         Assert.Contains(result.Principals, principal => principal.Name == "Workload Identity" && principal.IdentityType == IdentityType.ManagedIdentity);
+        var workload = Assert.Single(result.Principals, principal => principal.Name == "Workload Identity");
+        Assert.True(workload.OwnerInventoryComplete);
+        Assert.Contains("owner-1", workload.OwnerIds);
+        Assert.True(workload.CredentialInventoryComplete);
+        Assert.Equal(DateTime.Parse("2026-01-01T00:00:00Z").ToUniversalTime(), workload.CredentialLastRotatedAtUtc);
+        Assert.Equal(DateTime.Parse("2027-01-01T00:00:00Z").ToUniversalTime(), workload.CredentialExpiresAtUtc);
+        var federatedApp = Assert.Single(result.Principals, principal => principal.Name == "Federated Application");
+        Assert.True(federatedApp.FederationInventoryComplete);
+        Assert.Null(federatedApp.FederationTrustVerified);
+        Assert.Equal("https://token.actions.githubusercontent.com", Assert.Single(federatedApp.FederationTrusts).Issuer);
+        Assert.Contains("api://AzureADTokenExchange", federatedApp.FederationTrusts[0].Audiences);
         Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Active (PIM)" && assignment.Role == "Global Administrator");
         Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Eligible (PIM)" && assignment.Role == "Security Administrator");
     }
@@ -193,13 +204,18 @@ public class AzureProviderTests
                     ? "{\"value\":[{\"id\":\"user-1\",\"displayName\":\"Entra User\",\"userPrincipalName\":\"entra@example.com\",\"accountEnabled\":true}]}"
                     : url.Contains("/groups?", StringComparison.Ordinal)
                         ? "{\"value\":[{\"id\":\"group-1\",\"displayName\":\"Security Group\",\"securityEnabled\":true}]}"
-                        : url.Contains("/servicePrincipals?", StringComparison.Ordinal)
-                            ? "{\"value\":[{\"id\":\"sp-1\",\"displayName\":\"Workload Identity\",\"servicePrincipalType\":\"ManagedIdentity\",\"accountEnabled\":true}]}"
+                        : url.Contains("/owners?", StringComparison.Ordinal)
+                            ? "{\"value\":[{\"id\":\"owner-1\"}]}"
+                            : url.Contains("/servicePrincipals?", StringComparison.Ordinal)
+                                ? "{\"value\":[{\"id\":\"sp-1\",\"displayName\":\"Workload Identity\",\"appId\":\"client-managed\",\"servicePrincipalType\":\"ManagedIdentity\",\"accountEnabled\":true,\"passwordCredentials\":[{\"startDateTime\":\"2026-01-01T00:00:00Z\",\"endDateTime\":\"2027-01-01T00:00:00Z\"}],\"keyCredentials\":[]},{\"id\":\"sp-2\",\"displayName\":\"Federated Application\",\"appId\":\"client-app\",\"servicePrincipalType\":\"Application\",\"accountEnabled\":true,\"passwordCredentials\":[],\"keyCredentials\":[]}]}"
                             : url.Contains("roleAssignmentScheduleInstances", StringComparison.Ordinal)
                                 ? "{\"value\":[{\"principalId\":\"user-1\",\"principal\":{\"displayName\":\"Entra User\"},\"roleDefinition\":{\"displayName\":\"Global Administrator\"},\"directoryScopeId\":\"/\"}]}"
                                 : "{\"value\":[{\"principalId\":\"user-1\",\"principal\":{\"displayName\":\"Entra User\"},\"roleDefinition\":{\"displayName\":\"Security Administrator\"},\"directoryScopeId\":\"/\"}]}";
                 return Task.FromResult(new CloudCommandResult(0, graphOutput, string.Empty));
             }
+
+            if (arguments.Contains("federated-credential"))
+                return Task.FromResult(new CloudCommandResult(0, "[{\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"repo:org/project:environment:prod\",\"audiences\":[\"api://AzureADTokenExchange\"]}]", string.Empty));
 
             var output = arguments[0] == "account" && arguments.Contains("list")
                 ? multipleSubscriptions

@@ -27,6 +27,30 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <TextBlock Text="CONTROL EXCEPTIONS" Style="{StaticResource CardLabel}" Margin="0,14,0,4"/>
+                    <Grid Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" Text="{Binding ExceptionControlId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Internal CIEM control ID" Margin="0,0,5,0"/>
+                        <TextBox Grid.Column="1" Text="{Binding ExceptionReference, UpdateSourceTrigger=PropertyChanged}" ToolTip="Exception or ticket reference" Margin="5,0"/>
+                        <TextBox Grid.Column="2" Text="{Binding ExceptionRecordedBy, UpdateSourceTrigger=PropertyChanged}" ToolTip="Exception recorded by" Margin="5,0"/>
+                        <DatePicker Grid.Column="3" SelectedDate="{Binding ExceptionExpiresAt, Mode=TwoWay}" ToolTip="Exception expiry date" Margin="5,0,0,0"/>
+                    </Grid>
+                    <TextBox Text="{Binding ExceptionRationale, UpdateSourceTrigger=PropertyChanged}" ToolTip="Exception rationale" Margin="0,6,0,0"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <TextBox Text="{Binding ExceptionEvidenceReference, UpdateSourceTrigger=PropertyChanged}" ToolTip="Approval evidence reference (optional)" Width="280"/>
+                        <Button Content="Add exception" Command="{Binding AddComplianceExceptionCommand}" IsEnabled="{Binding CanAddComplianceException}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                        <Button Content="Remove selected" Command="{Binding RemoveComplianceExceptionCommand}" IsEnabled="{Binding CanRemoveComplianceException}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                    </StackPanel>
+                    <DataGrid ItemsSource="{Binding ComplianceExceptionDrafts}" SelectedItem="{Binding SelectedComplianceException, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="150" Margin="0,6,0,0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Control" Binding="{Binding ControlId}" Width="110"/>
+                            <DataGridTextColumn Header="Reference" Binding="{Binding Reference}" Width="110"/>
+                            <DataGridTextColumn Header="Recorded by" Binding="{Binding RecordedBy}" Width="150"/>
+                            <DataGridTextColumn Header="Expires" Binding="{Binding ExpiresAtUtc, StringFormat=d}" Width="110"/>
+                            <DataGridTextColumn Header="Rationale" Binding="{Binding Rationale}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <TextBlock Text="Exports are signed evidence snapshots, not a compliance certification or auditor attestation." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                         <Button Content="Load assessment history" Command="{Binding LoadComplianceHistoryCommand}" Style="{StaticResource QuietButton}"/>
                         <TextBlock Text="{Binding ComplianceHistoryStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
@@ -39,7 +63,8 @@
                                     <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource SuccessBrush}" Margin="10,0,0,0"><Run Text="Pass "/><Run Text="{Binding Passed, Mode=OneWay}"/></TextBlock>
                                     <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource CriticalBrush}" Margin="10,0,0,0"><Run Text="Fail "/><Run Text="{Binding Failed, Mode=OneWay}"/></TextBlock>
                                     <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}" Margin="10,0,0,0"><Run Text="Partial "/><Run Text="{Binding Partial, Mode=OneWay}"/></TextBlock>
-                                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Margin="10,0,0,0"><Run Text="Not assessed "/><Run Text="{Binding NotAssessed, Mode=OneWay}"/></TextBlock>
+                                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Margin="10,0,0,0"><Run Text="Exceptions "/><Run Text="{Binding ExceptionCount, Mode=OneWay}"/></TextBlock>
+                                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Margin="10,0,0,0"><Run Text="Not assessed "/><Run Text="{Binding NotAssessed, Mode=OneWay}"/><Run Text=" | mapping "/><Run Text="{Binding MappingCatalogVersion, Mode=OneWay}"/></TextBlock>
                                 </DockPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -125,6 +150,14 @@
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL FINDINGS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CriticalFindings}" Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="LAST SCAN" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding LastScan}" Foreground="{StaticResource PrimaryBrush}" FontSize="18" FontWeight="SemiBold" Margin="0,12,0,0"/></StackPanel></Border>
             </UniformGrid>
+            <UniformGrid Columns="3" Rows="2" Margin="0,4,0,8">
+                <Border Style="{StaticResource MetricCard}" ToolTip="{Binding EvidenceAgeDetails}"><StackPanel><TextBlock Text="EVIDENCE AGE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding EvidenceAge}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding EvidenceAgeDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}" ToolTip="{Binding SourceCoverageDetails}"><StackPanel><TextBlock Text="SOURCE COVERAGE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding SourceCoverageSummary}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding SourceCoverageDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}" ToolTip="{Binding UnsupportedPermissionSourceDetails}"><StackPanel><TextBlock Text="UNSUPPORTED PERMISSION SOURCES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding UnsupportedPermissionSourceCount}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding UnsupportedPermissionSourceDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}" ToolTip="{Binding AttributionDetails}"><StackPanel><TextBlock Text="ATTRIBUTION CONFIDENCE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding AttributionConfidence}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding AttributionDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}" ToolTip="{Binding UnknownEvaluationDetails}"><StackPanel><TextBlock Text="UNKNOWN EVALUATIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding UnknownEvaluationTotal}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding UnknownEvaluationDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}" ToolTip="{Binding UnsupportedEvaluationDetails}"><StackPanel><TextBlock Text="UNSUPPORTED EVALUATIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding UnsupportedEvaluationTotal}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding UnsupportedEvaluationDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
+            </UniformGrid>
             <Grid Margin="0,4,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="RISK BY PROVIDER" Style="{StaticResource CardLabel}"/><ItemsControl ItemsSource="{Binding FindingsByProvider}" Margin="0,10,0,0"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,3"><TextBlock Text="{Binding Label}" Foreground="{StaticResource PrimaryBrush}"/><TextBlock Text="{Binding Value}" DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}"/></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
@@ -178,8 +211,14 @@
                         <DataGridTextColumn Header="Type" Binding="{Binding IdentityType}" Width="110"/>
                         <DataGridTextColumn Header="Email" Binding="{Binding Email}" Width="180"/>
                         <DataGridTextColumn Header="Principal ID" Binding="{Binding PrincipalId}" Width="*"/>
+                        <DataGridTextColumn Header="Owner" Binding="{Binding OwnerSummary}" Width="180"/>
                         <DataGridCheckBoxColumn Header="Privileged" Binding="{Binding IsPrivileged}" Width="90"/>
-                        <DataGridTextColumn Header="Last activity" Binding="{Binding LastActivity}" Width="200"/>
+                        <DataGridTextColumn Header="Last activity" Binding="{Binding LastActivityAt}" Width="160"/>
+                        <DataGridTextColumn Header="Workload observed" Binding="{Binding LastObservedWorkloadAtUtc}" Width="160"/>
+                        <DataGridTextColumn Header="Credential rotated" Binding="{Binding CredentialLastRotatedAtUtc}" Width="160"/>
+                        <DataGridTextColumn Header="Credential expires" Binding="{Binding CredentialExpiresAtUtc}" Width="160"/>
+                        <DataGridTextColumn Header="Federation trust" Binding="{Binding FederationSummary}" Width="240"/>
+                        <DataGridCheckBoxColumn Header="Federation verified" Binding="{Binding FederationTrustVerified}" Width="130"/>
                     </DataGrid.Columns>
                 </DataGrid>
                 <TextBlock Text="No scanned identities match this search. Run a scan from Dashboard to discover identities." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
@@ -557,6 +596,7 @@
                                         <Run Text="Open linked ticket: "/><Run Text="{Binding TicketingRequest.ExternalId, Mode=OneWay}"/>
                                     </Hyperlink>
                                 </TextBlock>
+                                <TextBlock Text="{Binding TicketingClosureMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
                                 <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
@@ -682,6 +722,24 @@
                             <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL / EFFECTIVE ACCESS" Style="{StaticResource CardLabel}"/><TextBlock Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"><Run Text="{Binding ConsolidatedCriticalFindings, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding ConsolidatedEffectiveAccess, Mode=OneWay}"/></TextBlock></StackPanel></Border>
                         </UniformGrid>
                         <TextBlock Text="{Binding ConsolidatedCoverage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="SHARED SCAN HISTORY" Style="{StaticResource CardLabel}"/>
+                                <Button Content="Publish latest scan summary" Command="{Binding PublishSharedScanSummaryCommand}" IsEnabled="{Binding CanPublishSharedScanSummary}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Share aggregate counts and coverage for this organization's bound accounts. Resource-level findings are not uploaded here."/>
+                                <TextBlock Text="{Binding SharedScanSummaryStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <DataGrid ItemsSource="{Binding SharedScanSummaries}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="55" MaxHeight="140" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Completed" Binding="{Binding CompletedAtUtc, StringFormat=g}" Width="150"/>
+                                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="100"/>
+                                        <DataGridTextColumn Header="Accounts" Binding="{Binding Accounts.Count}" Width="75"/>
+                                        <DataGridTextColumn Header="Identities" Binding="{Binding Identities}" Width="75"/>
+                                        <DataGridTextColumn Header="Resources" Binding="{Binding Resources}" Width="75"/>
+                                        <DataGridTextColumn Header="Findings" Binding="{Binding Findings}" Width="75"/>
+                                        <DataGridTextColumn Header="Critical" Binding="{Binding CriticalFindings}" Width="75"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </Border>
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="CLOUD ACCOUNT BINDINGS" Style="{StaticResource CardLabel}"/>
@@ -786,15 +844,17 @@
                     <StackPanel>
                         <TextBlock Text="CREATE ACCESS REVIEW" Style="{StaticResource CardLabel}"/>
                         <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0" Text="{Binding CampaignName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Campaign name" Margin="0,0,8,0"/>
-                            <TextBox Grid.Column="1" Text="{Binding CampaignDurationDays, UpdateSourceTrigger=PropertyChanged}" ToolTip="Campaign duration in days" Margin="4,0"/>
-                            <TextBox Grid.Column="2" Text="{Binding AssignedReviewerName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Default assigned reviewer" Margin="4,0"/>
-                            <TextBox Grid.Column="3" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" ToolTip="Your audit actor name" Margin="8,0,0,0"/>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="0.7*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0" ItemsSource="{Binding Templates}" DisplayMemberPath="Name" SelectedItem="{Binding SelectedTemplate, Mode=TwoWay}" ToolTip="Campaign template" Margin="0,0,8,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding CampaignName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Campaign name" Margin="4,0"/>
+                            <TextBox Grid.Column="2" Text="{Binding CampaignDurationDays, UpdateSourceTrigger=PropertyChanged}" ToolTip="Campaign duration in days" Margin="4,0"/>
+                            <TextBox Grid.Column="3" Text="{Binding AssignedReviewerName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Fallback reviewer; identity owners are assigned first" Margin="4,0"/>
+                            <TextBox Grid.Column="4" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" ToolTip="Your audit actor name" Margin="8,0,0,0"/>
                         </Grid>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                             <Button Content="Create from Current Scan" Command="{Binding CreateCampaignCommand}" IsEnabled="{Binding CanCreateCampaign}" Style="{StaticResource PrimaryButton}"/>
                             <Button Content="Refresh" Command="{Binding RefreshCampaignsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <TextBlock Text="{Binding ReminderMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </StackPanel>
@@ -822,8 +882,10 @@
                                 <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80"/>
                                 <DataGridTextColumn Header="Access" Binding="{Binding AccessSummary}" Width="*"/>
                                 <DataGridTextColumn Header="Assigned reviewer" Binding="{Binding AssignedReviewer}" Width="130"/>
+                                <DataGridTextColumn Header="Owner" Binding="{Binding OwnerSnapshot}" Width="130"/>
                                 <DataGridTextColumn Header="Decision" Binding="{Binding Decision}" Width="115"/>
                                 <DataGridTextColumn Header="Due" Binding="{Binding DueAt, StringFormat=d}" Width="90"/>
+                                <DataGridTextColumn Header="Reminders" Binding="{Binding ReminderCount}" Width="75"/>
                                 <DataGridTextColumn Header="Status" Binding="{Binding EscalationReason}" Width="120"/>
                             </DataGrid.Columns>
                         </DataGrid>
@@ -834,6 +896,10 @@
                             <StackPanel>
                                 <TextBlock Text="REVIEW EVIDENCE" Style="{StaticResource CardLabel}"/>
                                 <TextBlock Text="{Binding SelectedItem.EvidenceSnapshot}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,10" TextWrapping="Wrap"/>
+                                <TextBlock Text="ATTESTATIONS" Style="{StaticResource CardLabel}" Margin="0,0,0,5"/>
+                                <ItemsControl ItemsSource="{Binding SelectedAttestations}" Margin="0,0,0,8">
+                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding AttestedAtUtc, Mode=OneWay, StringFormat=g}"/><Run Text=" | reviewer: "/><Run Text="{Binding Reviewer, Mode=OneWay}"/><Run Text=" | actor: "/><Run Text="{Binding Actor, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Decision, Mode=OneWay}"/><Run Text=" | SHA-256: "/><Run Text="{Binding EvidenceSha256, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                                </ItemsControl>
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" Text="{Binding AssignedReviewerName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Assigned reviewer" Margin="0,0,6,0"/>

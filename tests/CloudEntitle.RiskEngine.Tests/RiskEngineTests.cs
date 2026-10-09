@@ -181,6 +181,89 @@ public sealed class RiskEngineTests
     }
 
     [Fact]
+    public async Task WorkloadIdentityGovernance_ShouldFindOrphanedAndUnownedEvenWithoutAccess()
+    {
+        var now = DateTime.UtcNow;
+        var principal = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(),
+            AccountId = Guid.NewGuid(),
+            CloudProvider = CloudProviderType.Azure,
+            Name = "stale-unowned-app",
+            IdentityType = IdentityType.ServicePrincipal,
+            IsActive = true,
+            OwnerInventoryComplete = true,
+            ActivityEvidenceComplete = true,
+            ActivityObservationDays = 180,
+            LastActivityAt = now.AddDays(-120),
+            ActivityEvidenceSource = "Complete test observation"
+        };
+        var request = EmptyRequest(new[] { principal }) with { EvaluatedAt = now };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.Contains(result.Findings, finding => finding.RuleId == Stable("CIEM-018") && finding.PrincipalId == principal.Id);
+        Assert.Contains(result.Findings, finding => finding.RuleId == Stable("CIEM-019") && finding.PrincipalId == principal.Id);
+    }
+
+    [Fact]
+    public async Task WorkloadIdentityGovernance_ShouldNotInferOrphanedFromIncompleteUseCoverage()
+    {
+        var principal = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(),
+            AccountId = Guid.NewGuid(),
+            CloudProvider = CloudProviderType.Gcp,
+            Name = "unknown-use-service-account",
+            IdentityType = IdentityType.ServiceAccount,
+            OwnerInventoryComplete = false,
+            ActivityEvidenceComplete = false,
+            LastActivityAt = null
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(EmptyRequest(new[] { principal }));
+
+        Assert.DoesNotContain(result.Findings, finding => finding.RuleId == Stable("CIEM-018") || finding.RuleId == Stable("CIEM-019"));
+    }
+
+    [Fact]
+    public async Task WorkloadIdentityGovernance_ShouldFlagPrivilegedEffectiveAccess()
+    {
+        var principal = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(),
+            AccountId = Guid.NewGuid(),
+            CloudProvider = CloudProviderType.Kubernetes,
+            Name = "automation-service-account",
+            IdentityType = IdentityType.ServiceAccount
+        };
+        var access = new DomainEffectiveAccess
+        {
+            Id = Guid.NewGuid(),
+            Provider = CloudEntitle.Domain.CloudProvider.Kubernetes,
+            CloudAccountId = principal.AccountId,
+            PrincipalId = principal.Id,
+            AccessType = AccessType.Allow,
+            Decision = AccessDecision.Allow,
+            IsPrivileged = true,
+            Scope = "clusters/prod"
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(EmptyRequest(new[] { principal }) with
+        {
+            EffectiveAccess = new[] { access }
+        });
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-020"));
+        Assert.Equal(principal.Id, finding.PrincipalId);
+        Assert.Contains("PrivilegedGrantCount=1", finding.Evidence.Summary, StringComparison.Ordinal);
+    }
+
+    private static RiskEvaluationRequest EmptyRequest(IReadOnlyList<CloudPrincipal> principals)
+        => new(Array.Empty<CloudAccount>(), principals, Array.Empty<CloudResource>(), Array.Empty<CloudRole>(), Array.Empty<CloudPolicy>(),
+            Array.Empty<CloudPermission>(), Array.Empty<NormalizedEntitlement>(), Array.Empty<DomainEffectiveAccess>(), Array.Empty<DomainAccessPath>(), Array.Empty<ActivityRecord>());
+
+    [Fact]
     public async Task ExploitableAttackPath_ShouldPrioritizeNonHumanIdentityToPublicSensitiveVulnerableResource()
     {
         var fixture = FixtureData.Create(action: "storage.read", resource: "production-resource", privileged: true, external: true, identityType: IdentityType.ServiceAccount);

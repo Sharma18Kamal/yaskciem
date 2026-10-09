@@ -33,10 +33,21 @@ public sealed class ComplianceExportService
             controlId = control.ControlId,
             evidence = control.EvidenceLineage
         }), JsonOptions);
+        var controlLineageBytes = JsonSerializer.SerializeToUtf8Bytes(assessment.Controls.Select(control => new ComplianceControlLineage(
+            control.ControlId, control.Framework, assessment.MappingCatalogVersion, control.Mappings, control.EvidenceLineage)
+        {
+            Exceptions = control.Exceptions
+        }), JsonOptions);
+        var exceptionsBytes = JsonSerializer.SerializeToUtf8Bytes(assessment.Exceptions, JsonOptions);
         var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            schemaVersion = "1.1",
+            schemaVersion = "1.2",
             product = "YASK-CIEM",
+            assessmentType = "EvidenceSnapshot",
+            isCertification = false,
+            evidenceCaveat = assessment.EvidenceCaveat,
+            mappingCatalogVersion = assessment.MappingCatalogVersion,
+            standardVersions = assessment.SelectedStandards.ToDictionary(standard => standard.ToString(), ComplianceStandardCatalog.GetStandardVersion),
             organizationId = metadata.OrganizationId,
             organizationName = metadata.OrganizationName,
             entraTenantId = metadata.EntraTenantId,
@@ -56,16 +67,20 @@ public sealed class ComplianceExportService
                 assessment.Failed,
                 assessment.Partial,
                 assessment.NotAssessed,
-                total = assessment.Controls.Count
+                total = assessment.Controls.Count,
+                exceptions = assessment.Exceptions.Count,
+                activeExceptions = assessment.Exceptions.Count(exception => exception.Status == ComplianceExceptionStatus.Active),
+                expiredExceptions = assessment.Exceptions.Count(exception => exception.Status == ComplianceExceptionStatus.Expired)
             },
             files = new Dictionary<string, string>
             {
                 ["assessment.json"] = Sha256(assessmentBytes),
                 ["controls.csv"] = Sha256(controlsBytes),
                 ["control-mappings.csv"] = Sha256(mappingsBytes),
-                ["evidence-lineage.json"] = Sha256(lineageBytes)
-            },
-            evidenceCaveat = "Assessment reflects the supplied snapshot; crosswalks are informative mappings, not a certification or provider authorization decision."
+                ["evidence-lineage.json"] = Sha256(lineageBytes),
+                ["control-lineage.json"] = Sha256(controlLineageBytes),
+                ["exceptions.json"] = Sha256(exceptionsBytes)
+            }
         }, JsonOptions);
         var signature = signer.Sign(manifestBytes);
 
@@ -77,6 +92,8 @@ public sealed class ComplianceExportService
             AddBytes(archive, "controls.csv", controlsBytes);
             AddBytes(archive, "control-mappings.csv", mappingsBytes);
             AddBytes(archive, "evidence-lineage.json", lineageBytes);
+            AddBytes(archive, "control-lineage.json", controlLineageBytes);
+            AddBytes(archive, "exceptions.json", exceptionsBytes);
             AddJson(archive, "signature.json", signature);
         }
 
@@ -85,7 +102,7 @@ public sealed class ComplianceExportService
 
     private static string CreateControlCsv(ComplianceAssessment assessment)
     {
-        var builder = new StringBuilder("ControlId,Framework,Title,State,EvidenceCount,Evidence,Gaps,Standards\r\n");
+        var builder = new StringBuilder("ControlId,Framework,Title,State,EvidenceCount,Evidence,Gaps,Exceptions,Standards\r\n");
         foreach (var control in assessment.Controls)
         {
             builder.AppendLine(string.Join(",", new[]
@@ -97,7 +114,8 @@ public sealed class ComplianceExportService
                 control.EvidenceCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 string.Join(" | ", control.Evidence),
                 string.Join(" | ", control.Gaps),
-                string.Join(" | ", control.Mappings.Select(mapping => $"{mapping.Standard}:{mapping.Reference}"))
+                string.Join(" | ", control.Exceptions.Select(exception => $"{exception.Reference}:{exception.Status}:{exception.ExpiresAtUtc:O}")),
+                string.Join(" | ", control.Mappings.Select(mapping => $"{mapping.Standard} {mapping.StandardVersion}:{mapping.Reference}"))
             }.Select(EscapeCsv)));
         }
         return builder.ToString();
@@ -105,10 +123,11 @@ public sealed class ComplianceExportService
 
     private static string CreateMappingCsv(ComplianceAssessment assessment)
     {
-        var builder = new StringBuilder("ControlId,Standard,Reference,Rationale\r\n");
+        var builder = new StringBuilder("ControlId,SourceControlId,Standard,StandardVersion,MappingCatalogVersion,Reference,Relationship,Rationale\r\n");
         foreach (var control in assessment.Controls)
         foreach (var mapping in control.Mappings)
-            builder.AppendLine(string.Join(",", new[] { control.ControlId, mapping.Standard.ToString(), mapping.Reference, mapping.Rationale }.Select(EscapeCsv)));
+            builder.AppendLine(string.Join(",", new[] { control.ControlId, mapping.SourceControlId, mapping.Standard.ToString(), mapping.StandardVersion,
+                mapping.MappingCatalogVersion, mapping.Reference, mapping.Relationship, mapping.Rationale }.Select(EscapeCsv)));
         return builder.ToString();
     }
 

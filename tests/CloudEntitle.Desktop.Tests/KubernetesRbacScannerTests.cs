@@ -30,6 +30,13 @@ public sealed class KubernetesRbacScannerTests
         Assert.Equal("apps/app", $"{podTrace.Namespace}/{podTrace.ServiceAccount}");
         Assert.Contains("ClusterRole/cluster-admin", podTrace.KubernetesRoles);
         Assert.Equal(WorkloadTrustStatus.Verified, podTrace.Trust.Status);
+        Assert.Equal("https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE", podTrace.Trust.Issuer);
+        Assert.Equal("system:serviceaccount:apps:app", podTrace.Trust.Subject);
+        var serviceAccount = Assert.Single(cluster.Principals, principal => principal.IdentityType == IdentityType.ServiceAccount);
+        Assert.True(serviceAccount.FederationTrustVerified);
+        Assert.Equal("system:serviceaccount:apps:app", Assert.Single(serviceAccount.FederationTrusts).Subject);
+        Assert.True(serviceAccount.LastObservedWorkloadAtUtc.HasValue);
+        Assert.False(serviceAccount.ActivityEvidenceComplete);
         Assert.Contains(cluster.Coverage, item => item.DataSource.EndsWith("Pods and Deployments", StringComparison.Ordinal) && item.Status == ScanCoverageStatus.Collected);
     }
 
@@ -119,13 +126,13 @@ public sealed class KubernetesRbacScannerTests
             if (arguments.Contains("serviceaccounts"))
             {
                 return Task.FromResult(new CloudCommandResult(0,
-                    "{\"items\":[{\"kind\":\"ServiceAccount\",\"metadata\":{\"name\":\"app\",\"namespace\":\"apps\",\"annotations\":{\"eks.amazonaws.com/role-arn\":\"arn:aws:iam::123456789012:role/app\"}}}]}", string.Empty));
+                    "{\"items\":[{\"kind\":\"ServiceAccount\",\"metadata\":{\"name\":\"app\",\"namespace\":\"apps\",\"annotations\":{\"eks.amazonaws.com/role-arn\":\"arn:aws:iam::123456789012:role/app\",\"yask-ciem.io/owner\":\"platform@example.invalid\"}}}]}", string.Empty));
             }
 
             if (arguments.Contains("pods,deployments"))
             {
                 return Task.FromResult(new CloudCommandResult(0,
-                    "{\"items\":[{\"kind\":\"Pod\",\"metadata\":{\"name\":\"app-0\",\"namespace\":\"apps\"},\"spec\":{\"serviceAccountName\":\"app\"}},{\"kind\":\"Deployment\",\"metadata\":{\"name\":\"app\",\"namespace\":\"apps\"},\"spec\":{\"template\":{\"metadata\":{\"labels\":{}},\"spec\":{\"serviceAccountName\":\"app\"}}}}]}", string.Empty));
+                    "{\"items\":[{\"kind\":\"Pod\",\"metadata\":{\"name\":\"app-0\",\"namespace\":\"apps\"},\"spec\":{\"serviceAccountName\":\"app\"},\"status\":{\"phase\":\"Running\"}},{\"kind\":\"Deployment\",\"metadata\":{\"name\":\"app\",\"namespace\":\"apps\"},\"spec\":{\"template\":{\"metadata\":{\"labels\":{}},\"spec\":{\"serviceAccountName\":\"app\"}}}}]}", string.Empty));
             }
 
             return Task.FromResult(new CloudCommandResult(0, "{\"items\":[]}", string.Empty));

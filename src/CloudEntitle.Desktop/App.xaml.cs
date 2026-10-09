@@ -37,6 +37,9 @@ public partial class App : System.Windows.Application
 	protected override async void OnStartup(StartupEventArgs e)
 	{
 		base.OnStartup(e);
+		var linkedRecommendationId = e.Args.Length > 0 && TicketingEvidenceLink.TryGetRecommendationId(e.Args[0], out var recommendationId)
+			? recommendationId
+			: (Guid?)null;
 		var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CloudEntitle", "Logs");
 		Directory.CreateDirectory(logDirectory);
 		Log.Logger = new LoggerConfiguration().MinimumLevel.Information().WriteTo.File(Path.Combine(logDirectory, "application-.log"), rollingInterval: RollingInterval.Day).CreateLogger();
@@ -85,6 +88,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IComplianceBundleSigner, WindowsComplianceBundleSigner>();
 		services.AddSingleton<IComplianceAssessmentHistoryStore, LocalComplianceAssessmentHistoryStore>();
 		services.AddSingleton<IComplianceExportWorkflow, ComplianceExportWorkflow>();
+		var sharedWorkspaceConfigured = false;
 		var centralApiUrl = Environment.GetEnvironmentVariable("YASK_CIEM_API_BASE_URL");
 		if (!string.IsNullOrWhiteSpace(centralApiUrl))
 		{
@@ -92,13 +96,18 @@ public partial class App : System.Windows.Application
 			{
 				services.AddSingleton(new CiemApiClient(new HttpClient { BaseAddress = centralApiUri }));
 				services.AddSingleton<ICentralAuditSyncService, CentralAuditSyncService>();
+				services.AddSingleton<ISharedOrganizationApi, SharedOrganizationApi>();
+				services.AddSingleton<ISharedScanSummaryPublisher, SharedScanSummaryPublisher>();
+				services.AddSingleton<IAccessReviewStore, SharedAccessReviewStore>();
+				sharedWorkspaceConfigured = true;
 			}
 			else
 			{
 				Log.Warning("Central audit synchronization is disabled because YASK_CIEM_API_BASE_URL is not a valid HTTPS URL");
 			}
 		}
-		services.AddSingleton<IAccessReviewStore, LocalAccessReviewStore>();
+		if (!sharedWorkspaceConfigured)
+			services.AddSingleton<IAccessReviewStore, LocalAccessReviewStore>();
 		services.AddSingleton<ICloudProvider>(provider => new AzureProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new AwsProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
 		services.AddSingleton<ICloudProvider>(provider => new GcpProvider(provider.GetRequiredService<ICloudCommandRunner>(), useLiveDiscovery: true));
@@ -128,8 +137,11 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<MainWindow>();
 		_services = services.BuildServiceProvider();
 		await _services.GetRequiredService<ContinuousMonitoringService>().InitializeAsync();
-		await _services.GetRequiredService<MainWindowViewModel>().InitializeTrialAsync();
+		var mainViewModel = _services.GetRequiredService<MainWindowViewModel>();
+		await mainViewModel.InitializeTrialAsync();
 		_services.GetRequiredService<MainWindow>().Show();
+		if (linkedRecommendationId is { } id)
+			await mainViewModel.OpenRecommendationAsync(id);
 	}
 
 	protected override void OnExit(ExitEventArgs e)
