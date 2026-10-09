@@ -1,0 +1,32 @@
+{
+  "AzureAd": {
+    "Instance": "https://login.microsoftonline.com/",
+    "TenantId": "organizations",
+    "ClientId": "<api-app-client-id>",
+    "Audience": "<api-app-id-uri>"
+  },
+  "ConnectionStrings": {
+    "Postgres": "<set-through-secret-provider>"
+  },
+  "AuditRetention": {
+    "Provider": "Postgres",
+    "MinimumRetentionDays": 2555,
+    "IntegrityKeyId": "<active-key-id>",
+    "IntegrityKeys": {
+      "<active-key-id>": "<base64-32-or-more-random-bytes>"
+    }
+  },
+  "AuditArchive": {
+    "Provider": "S3ObjectLock",
+    "Endpoint": "https://<object-store-host>:<port>",
+    "Region": "<S3-signing-region>",
+    "Bucket": "<object-lock-enabled-bucket>",
+    "ObjectPrefix": "yask-ciem/audit/v1",
+    "SegmentEventCount": 500,
+    "PollIntervalSeconds": 60,
+    "MaxPendingEvents": 5000,
+    "MaxLagMinutes": 60,
+    "DatabaseCredentialTarget": "YASK-CIEM/LicenseServer/AuditArchive/Postgres",
+    "S3CredentialTarget": "YASK-CIEM/LicenseServer/AuditArchive/S3"
+  }
+}

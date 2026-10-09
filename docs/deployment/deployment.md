@@ -11,4 +11,6 @@
 
 - MSI installer for enterprise deployment
 - MSIX installer for app store-style installation
+- Self-hosted License Server bundle: [YASK-CIEM-LicenseServer-win-x64-1.0.0.48.zip](../../artifacts/license-server-1.0.0.48/YASK-CIEM-LicenseServer-win-x64-1.0.0.48.zip) with [SHA-256 sidecar](../../artifacts/license-server-1.0.0.48/YASK-CIEM-LicenseServer-win-x64-1.0.0.48.zip.sha256)
+- Follow the [Self-Hosted License Server Deployment](license-server-hosting.md) guide; PostgreSQL, Object Lock storage, Entra registration, and secrets are provisioned separately.
 - GitHub Actions for restore, build, and test automation
