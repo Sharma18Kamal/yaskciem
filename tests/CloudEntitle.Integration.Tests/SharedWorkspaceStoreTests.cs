@@ -11,12 +11,13 @@ namespace CloudEntitle.Integration.Tests;
 
 public sealed class SharedWorkspaceStoreTests
 {
-    [Fact]
+    [PostgreSqlFact]
     public async Task OrganizationDirectories_ShouldPersistPerTenantAndEnforceGlobalAccountBindingUniqueness()
     {
         var directory = Path.Combine(Path.GetTempPath(), "YaskCiemSharedWorkspaceTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var store = new SharedWorkspaceStore($"Data Source={Path.Combine(directory, "shared.db")};Pooling=False");
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
         await store.InitializeAsync();
         var tenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();
@@ -47,12 +48,13 @@ public sealed class SharedWorkspaceStoreTests
         }
     }
 
-    [Fact]
+    [PostgreSqlFact]
     public async Task ReviewsAndScanSummaries_ShouldBeSharedButIsolatedByTenantAndOrganization()
     {
         var directory = Path.Combine(Path.GetTempPath(), "YaskCiemSharedWorkspaceTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var store = new SharedWorkspaceStore($"Data Source={Path.Combine(directory, "shared.db")};Pooling=False");
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
         await store.InitializeAsync();
         var tenantId = Guid.NewGuid();
         var organizationId = Guid.NewGuid();
@@ -81,12 +83,13 @@ public sealed class SharedWorkspaceStoreTests
         }
     }
 
-    [Fact]
+    [PostgreSqlFact]
     public async Task OrganizationStore_ShouldRejectStaleConcurrentWrites()
     {
         var directory = Path.Combine(Path.GetTempPath(), "YaskCiemSharedWorkspaceTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var store = new SharedWorkspaceStore($"Data Source={Path.Combine(directory, "shared.db")};Pooling=False");
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
         await store.InitializeAsync();
         var tenantId = Guid.NewGuid();
         try

@@ -4,11 +4,17 @@ using CloudEntitle.LicenseServer.Services;
 using CloudEntitle.Security.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Identity.Web;
+using Npgsql;
 using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHealthChecks();
+var postgresConnectionString = builder.Configuration.GetConnectionString("Postgres");
+if (string.IsNullOrWhiteSpace(postgresConnectionString))
+	throw new InvalidOperationException("Configure ConnectionStrings:Postgres before starting the License Server.");
+using var postgresDataSource = new NpgsqlDataSourceBuilder(postgresConnectionString).Build();
+
 var entraConfiguration = builder.Configuration.GetSection("AzureAd");
 var apiClientId = entraConfiguration["ClientId"];
 if (string.IsNullOrWhiteSpace(apiClientId))
@@ -39,30 +45,15 @@ IAuditRetentionStore auditStore;
 var auditProvider = builder.Configuration["AuditRetention:Provider"];
 var auditIntegrityKey = builder.Configuration["AuditRetention:IntegrityKey"];
 var integrityKeyBytes = TryDecodeAuditIntegrityKey(auditIntegrityKey);
-if (!string.IsNullOrWhiteSpace(auditProvider) && auditProvider.Equals("AzureBlob", StringComparison.OrdinalIgnoreCase))
+if (!string.IsNullOrWhiteSpace(auditProvider) && auditProvider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
 {
-	var storageUri = builder.Configuration["AuditRetention:BlobServiceUri"];
-	var containerName = builder.Configuration["AuditRetention:ContainerName"];
-	var accountResourceId = builder.Configuration["AuditRetention:StorageAccountResourceId"];
-	var managedIdentityClientId = builder.Configuration["AuditRetention:ManagedIdentityClientId"];
-	if (auditRetentionDays is < 1 or > 36500 || integrityKeyBytes is null
-		|| !Uri.TryCreate(storageUri, UriKind.Absolute, out var parsedStorageUri)
-		|| string.IsNullOrWhiteSpace(containerName) || string.IsNullOrWhiteSpace(accountResourceId)
-		|| string.IsNullOrWhiteSpace(managedIdentityClientId))
+	if (auditRetentionDays is < 1 or > 36500 || integrityKeyBytes is null)
 	{
-		auditStore = new UnavailableAuditRetentionStore("Azure Blob audit configuration is incomplete; configure HTTPS storage URI, container, account resource ID, managed identity client ID, a retention period, and an integrity key from a secret provider.");
+		auditStore = new UnavailableAuditRetentionStore("PostgreSQL audit configuration is incomplete; configure the audit retention period and an integrity key from a secret provider.");
 	}
 	else
 	{
-		try
-		{
-			auditStore = new AzureBlobAuditRetentionStore(parsedStorageUri, containerName, accountResourceId,
-				auditRetentionDays, integrityKeyBytes, managedIdentityClientId);
-		}
-		catch (Exception exception)
-		{
-			auditStore = new UnavailableAuditRetentionStore($"Azure Blob audit configuration is invalid: {exception.Message}");
-		}
+		auditStore = new PostgresAuditRetentionStore(postgresDataSource, auditRetentionDays, integrityKeyBytes);
 	}
 }
 else if (builder.Environment.IsDevelopment() && (string.IsNullOrWhiteSpace(auditProvider) || auditProvider.Equals("LocalFile", StringComparison.OrdinalIgnoreCase))
@@ -74,22 +65,12 @@ else if (builder.Environment.IsDevelopment() && (string.IsNullOrWhiteSpace(audit
 }
 else
 {
-	auditStore = new UnavailableAuditRetentionStore("Production requires AuditRetention:Provider=AzureBlob and a verified locked Azure Blob retention policy; the local file store is development-only.");
+	auditStore = new UnavailableAuditRetentionStore("Production requires AuditRetention:Provider=Postgres and an initialized PostgreSQL audit schema; the local file store is development-only.");
 }
 if (integrityKeyBytes is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(integrityKeyBytes);
-builder.Services.AddSingleton<IAuditRetentionStore>(auditStore);
-var sharedConnectionString = builder.Configuration.GetConnectionString("SharedWorkspace")
-	?? builder.Configuration["SharedData:ConnectionString"];
-if (string.IsNullOrWhiteSpace(sharedConnectionString))
-{
-	var sharedDirectory = builder.Configuration["SharedData:Directory"]
-		?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YASK-CIEM", "SharedApi");
-	Directory.CreateDirectory(sharedDirectory);
-	sharedConnectionString = $"Data Source={Path.Combine(sharedDirectory, "shared-workspace.db")};Cache=Shared";
-}
-var sharedWorkspaceStore = new SharedWorkspaceStore(sharedConnectionString);
-await sharedWorkspaceStore.InitializeAsync();
-builder.Services.AddSingleton(sharedWorkspaceStore);
+builder.Services.AddSingleton<IAuditRetentionStore>(_ => auditStore);
+var sharedWorkspaceStore = new SharedWorkspaceStore(postgresDataSource);
+builder.Services.AddSingleton<SharedWorkspaceStore>(_ => sharedWorkspaceStore);
 
 var app = builder.Build();
 
@@ -105,15 +86,16 @@ app.UseAuthorization();
 app.MapHealthChecks("/health");
 
 app.MapGet("/api/v1/health", () => Results.Ok(new ApiHealthResponse("Healthy", ApiContractVersion.Current, DateTime.UtcNow))).AllowAnonymous();
-app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, CancellationToken cancellationToken) =>
+app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) =>
 {
 	var audit = await retentionStore.CheckReadinessAsync(cancellationToken);
-	var productionReady = audit.Ready && audit.ProductionReady;
+	var workspaceReady = await workspaceStore.IsReadyAsync(cancellationToken);
+	var productionReady = audit.Ready && audit.ProductionReady && workspaceReady;
 	var response = new ApiReadinessResponse(productionReady ? "Ready" : "NotReady", true, productionReady, ApiContractVersion.Current)
 	{
-		AuditStorageReady = audit.Ready,
+		AuditStorageReady = audit.Ready && workspaceReady,
 		ProductionReady = productionReady,
-		AuditStorageDetails = audit.Details
+		AuditStorageDetails = workspaceReady ? audit.Details : $"{audit.Details} PostgreSQL shared-workspace schema is unavailable."
 	};
 	return Results.Json(response, statusCode: productionReady ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
 }).AllowAnonymous();

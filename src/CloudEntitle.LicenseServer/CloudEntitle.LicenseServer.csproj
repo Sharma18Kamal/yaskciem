@@ -8,9 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.Identity" Version="1.17.2" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.13.0" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.16.0" />
+    <PackageReference Include="Npgsql" Version="9.0.4" />
     <ProjectReference Include="..\CloudEntitle.Licensing\CloudEntitle.Licensing.csproj" />
     <ProjectReference Include="..\CloudEntitle.Integration\CloudEntitle.Integration.csproj" />
     <ProjectReference Include="..\CloudEntitle.Security\CloudEntitle.Security.csproj" />

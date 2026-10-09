@@ -22,12 +22,13 @@ namespace CloudEntitle.Integration.Tests;
 
 public sealed class SharedWorkspaceEndpointTests
 {
-    [Fact]
+    [PostgreSqlFact]
     public async Task OrganizationEndpoints_ShouldDeriveTenantFromAuthenticatedClaimsAndIsolateDirectories()
     {
         var directory = Path.Combine(Path.GetTempPath(), "YaskCiemSharedEndpointTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var store = new SharedWorkspaceStore($"Data Source={Path.Combine(directory, "shared.db")};Pooling=False");
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
         await store.InitializeAsync();
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");

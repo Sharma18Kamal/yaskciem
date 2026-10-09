@@ -1,8 +1,8 @@
 using System.IO;
 using System.Security.Cryptography;
-using System.Text.Json;
 using CloudEntitle.Integration.Contracts;
 using CloudEntitle.LicenseServer.Services;
+using Npgsql;
 using Xunit;
 
 namespace CloudEntitle.Integration.Tests;
@@ -10,23 +10,12 @@ namespace CloudEntitle.Integration.Tests;
 public sealed class CentralAuditRetentionTests
 {
     [Fact]
-    public void AzureAuditReadiness_ShouldRequireLockedWormAndHardenedStorage()
+    public void PostgresAuditStore_ShouldRequireRetentionAndIntegrityKeyConfiguration()
     {
-        using var account = JsonDocument.Parse("""{"publicNetworkAccess":"Disabled","allowSharedKeyAccess":false,"supportsHttpsTrafficOnly":true,"minimumTlsVersion":"TLS1_2","networkAcls":{"defaultAction":"Deny"}}""");
-        using var lockedPolicy = JsonDocument.Parse("""{"state":"Locked","immutabilityPeriodSinceCreationInDays":2555,"allowProtectedAppendWrites":true}""");
-        using var unlockedPolicy = JsonDocument.Parse("""{"state":"Unlocked","immutabilityPeriodSinceCreationInDays":2555,"allowProtectedAppendWrites":true}""");
-        using var insecureAccount = JsonDocument.Parse("""{"publicNetworkAccess":"Enabled","allowSharedKeyAccess":true,"supportsHttpsTrafficOnly":true,"minimumTlsVersion":"TLS1_2","networkAcls":{"defaultAction":"Allow"}}""");
+        using var dataSource = new NpgsqlDataSourceBuilder("Host=localhost;Database=yask_test;Username=yask_test;Password=test").Build();
 
-        var ready = AzureBlobAuditRetentionStore.ValidateRemoteConfiguration(account.RootElement, true, lockedPolicy.RootElement, 2555);
-        var unlocked = AzureBlobAuditRetentionStore.ValidateRemoteConfiguration(account.RootElement, true, unlockedPolicy.RootElement, 2555);
-        var insecure = AzureBlobAuditRetentionStore.ValidateRemoteConfiguration(insecureAccount.RootElement, true, lockedPolicy.RootElement, 2555);
-        var unprotectedContainer = AzureBlobAuditRetentionStore.ValidateRemoteConfiguration(account.RootElement, false, lockedPolicy.RootElement, 2555);
-
-        Assert.True(ready.Ready);
-        Assert.True(ready.ProductionReady);
-        Assert.False(unlocked.ProductionReady);
-        Assert.False(insecure.ProductionReady);
-        Assert.False(unprotectedContainer.ProductionReady);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgresAuditRetentionStore(dataSource, 0, RandomNumberGenerator.GetBytes(32)));
+        Assert.Throws<ArgumentException>(() => new PostgresAuditRetentionStore(dataSource, 30, RandomNumberGenerator.GetBytes(16)));
     }
 
     [Fact]
@@ -40,6 +29,40 @@ public sealed class CentralAuditRetentionTests
         Assert.True(readiness.Ready);
         Assert.False(readiness.ProductionReady);
         Assert.Contains("not multi-instance safe", readiness.Details, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [PostgreSqlFact]
+    public async Task PostgresAuditStore_ShouldSequenceDeduplicateIsolateAndDetectTampering()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new PostgresAuditRetentionStore(database.ConnectionString, 30, RandomNumberGenerator.GetBytes(32));
+        await store.InitializeAsync();
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var eventId = Guid.NewGuid();
+        var request = new CentralAuditAppendRequest("User.Login", "token=secret", null,
+            new Dictionary<string, string> { ["api-token"] = "secret" }, eventId);
+
+        var first = await store.AppendAsync(tenantId, actorId, request);
+        var duplicate = await store.AppendAsync(tenantId, Guid.NewGuid(), request);
+        var parallel = await Task.WhenAll(Enumerable.Range(0, 8).Select(index => store.AppendAsync(tenantId, actorId,
+            new CentralAuditAppendRequest($"Event.{index}", "concurrent", null, new Dictionary<string, string>()))));
+
+        Assert.Equal(first.Hash, duplicate.Hash);
+        Assert.Equal("token=[REDACTED]", first.Description);
+        Assert.Equal("[REDACTED]", first.Metadata["api-token"]);
+        Assert.Equal(9, (await store.ReadAsync(tenantId, 0, 20)).Count);
+        Assert.Empty(await store.ReadAsync(Guid.NewGuid(), 0, 20));
+        Assert.Equal(Enumerable.Range(2, 8).Select(value => (long)value).Order(), parallel.Select(entry => entry.Sequence).Order());
+
+        await using var tamperDataSource = new NpgsqlDataSourceBuilder(database.ConnectionString).Build();
+        await using var connection = await tamperDataSource.OpenConnectionAsync();
+        await using (var disableTrigger = new NpgsqlCommand("ALTER TABLE ciem_audit_events DISABLE TRIGGER TR_CiemAuditEvents_AppendOnly", connection))
+            await disableTrigger.ExecuteNonQueryAsync();
+        await using var tamper = new NpgsqlCommand("UPDATE ciem_audit_events SET event_json = replace(event_json, 'Event.', 'Tamper.') WHERE tenant_id = @tenant AND sequence = 2", connection);
+        tamper.Parameters.AddWithValue("tenant", tenantId);
+        await tamper.ExecuteNonQueryAsync();
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.ReadAsync(tenantId, 0, 20));
     }
 
     [Fact]
