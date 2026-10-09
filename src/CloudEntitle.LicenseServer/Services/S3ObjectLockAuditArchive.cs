@@ -8,21 +8,23 @@ namespace CloudEntitle.LicenseServer.Services;
 
 public sealed class AuditArchiveStatus
 {
-    private Snapshot _snapshot = new(false, "WORM audit archive has not passed its startup check.", 0, null, null);
+    private Snapshot _snapshot = new(false, "WORM audit archive has not passed its startup check.", 0, null, null, false);
 
     public Snapshot Current => Volatile.Read(ref _snapshot);
 
-    public void Set(bool ready, string details, AuditArchiveProgress? progress = null)
+    public bool Set(bool ready, string details, AuditArchiveProgress? progress = null)
     {
         var previous = Current;
+        var changed = !previous.Checked || previous.Ready != ready;
         Volatile.Write(ref _snapshot, new Snapshot(ready, details,
             progress?.PendingEvents ?? previous.PendingEvents,
             progress?.OldestPendingAtUtc ?? previous.OldestPendingAtUtc,
-            progress?.LastSuccessfulArchiveAtUtc ?? previous.LastSuccessfulArchiveAtUtc));
+            progress?.LastSuccessfulArchiveAtUtc ?? previous.LastSuccessfulArchiveAtUtc, true));
+        return changed;
     }
 
     public sealed record Snapshot(bool Ready, string Details, long PendingEvents,
-        DateTime? OldestPendingAtUtc, DateTime? LastSuccessfulArchiveAtUtc);
+        DateTime? OldestPendingAtUtc, DateTime? LastSuccessfulArchiveAtUtc, bool Checked);
 }
 
 public sealed class S3ObjectLockAuditArchive : IAuditSegmentArchive, IDisposable
@@ -163,8 +165,11 @@ public sealed class AuditArchiveWorker(
     int pollIntervalSeconds,
     long maximumPendingEvents,
     int maximumLagMinutes,
+    string? alertWebhookUrl,
     ILogger<AuditArchiveWorker> logger) : BackgroundService
 {
+    private static readonly HttpClient AlertClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -185,20 +190,57 @@ public sealed class AuditArchiveWorker(
                 var details = lagging
                     ? $"WORM archive lag threshold exceeded: {progress.PendingEvents} pending event(s), oldest pending age {laggedBy.TotalMinutes:F0} minute(s)."
                     : "S3-compatible audit archive is reachable with versioning and COMPLIANCE Object Lock retention.";
-                status.Set(!lagging, details, progress);
+                var ready = !lagging;
+                var changed = status.Set(ready, details, progress);
                 if (lagging)
                     logger.LogWarning("WORM audit archive is lagging: {PendingEvents} pending event(s), oldest pending age {OldestPendingAgeMinutes} minute(s).",
                         progress.PendingEvents, laggedBy.TotalMinutes);
+                if (changed) await SendStateAlertAsync(ready, details, progress, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
                 var details = SensitiveDataRedactor.RedactText(exception.Message);
-                status.Set(false, $"WORM audit archive unavailable: {details}");
+                var failureDetails = $"WORM audit archive unavailable: {details}";
+                var changed = status.Set(false, failureDetails);
                 logger.LogError("WORM audit archive worker failed: {Details}", details);
+                if (changed) await SendStateAlertAsync(false, failureDetails, null, stoppingToken);
             }
 
             await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(pollIntervalSeconds, 5, 3600)), stoppingToken);
+        }
+    }
+
+    private async Task SendStateAlertAsync(bool ready, string details, AuditArchiveProgress? progress,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(alertWebhookUrl)) return;
+        if (!Uri.TryCreate(alertWebhookUrl, UriKind.Absolute, out var webhookUri)
+            || webhookUri.Scheme != Uri.UriSchemeHttps)
+        {
+            logger.LogError("Archive alert webhook must be an HTTPS URL; alert was not sent.");
+            return;
+        }
+
+        var payload = JsonContent.Create(new
+        {
+            source = "YASK-CIEM audit archive",
+            status = ready ? "healthy" : "unhealthy",
+            details,
+            pendingEvents = progress?.PendingEvents ?? status.Current.PendingEvents,
+            oldestPendingAtUtc = progress?.OldestPendingAtUtc ?? status.Current.OldestPendingAtUtc,
+            lastSuccessfulArchiveAtUtc = progress?.LastSuccessfulArchiveAtUtc ?? status.Current.LastSuccessfulArchiveAtUtc,
+            timestampUtc = DateTime.UtcNow
+        });
+        try
+        {
+            using var response = await AlertClient.PostAsync(webhookUri, payload, cancellationToken);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch
+        {
+            logger.LogWarning("Could not deliver the audit archive state-change alert webhook.");
         }
     }
 }

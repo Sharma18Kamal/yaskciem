@@ -75,15 +75,35 @@ var sharedWorkspaceStore = new SharedWorkspaceStore(postgresDataSource);
 builder.Services.AddSingleton<SharedWorkspaceStore>(_ => sharedWorkspaceStore);
 
 var auditArchiveConfiguration = builder.Configuration.GetSection("AuditArchive");
-var auditArchiveDatabase = builder.Configuration.GetConnectionString("AuditArchive");
+var archiveCredentialError = string.Empty;
+WindowsGenericCredential? archiveDatabaseCredential = null;
+WindowsGenericCredential? s3Credential = null;
+try
+{
+	var databaseCredentialTarget = auditArchiveConfiguration["DatabaseCredentialTarget"]
+		?? "YASK-CIEM/LicenseServer/AuditArchive/Postgres";
+	var s3CredentialTarget = auditArchiveConfiguration["S3CredentialTarget"]
+		?? "YASK-CIEM/LicenseServer/AuditArchive/S3";
+	archiveDatabaseCredential = WindowsGenericCredentialStore.Read(databaseCredentialTarget);
+	s3Credential = WindowsGenericCredentialStore.Read(s3CredentialTarget);
+}
+catch (Exception exception)
+{
+	archiveCredentialError = SensitiveDataRedactor.RedactText(exception.Message);
+	auditArchiveStatus.Set(false, $"Unable to read archive credentials from Windows Credential Manager: {archiveCredentialError}");
+}
+var auditArchiveDatabase = builder.Configuration.GetConnectionString("AuditArchive") ?? archiveDatabaseCredential?.Secret;
 var auditArchiveProvider = auditArchiveConfiguration["Provider"];
+var archiveAccessKey = auditArchiveConfiguration["AccessKey"] ?? s3Credential?.UserName;
+var archiveSecretKey = auditArchiveConfiguration["SecretKey"] ?? s3Credential?.Secret;
 if (auditArchiveProvider?.Equals("S3ObjectLock", StringComparison.OrdinalIgnoreCase) == true
     && !string.IsNullOrWhiteSpace(auditArchiveDatabase)
+    && string.IsNullOrEmpty(archiveCredentialError)
     && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Endpoint"])
     && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Region"])
     && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Bucket"])
-    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["AccessKey"])
-    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["SecretKey"])
+	&& !string.IsNullOrWhiteSpace(archiveAccessKey)
+	&& !string.IsNullOrWhiteSpace(archiveSecretKey)
     && integrityKeyBytes is not null)
 {
 	NpgsqlDataSource? archiveDataSource = null;
@@ -97,9 +117,11 @@ if (auditArchiveProvider?.Equals("S3ObjectLock", StringComparison.OrdinalIgnoreC
 		var pollIntervalSeconds = auditArchiveConfiguration.GetValue("PollIntervalSeconds", 60);
 		var maximumPendingEvents = auditArchiveConfiguration.GetValue("MaxPendingEvents", 5000L);
 		var maximumLagMinutes = auditArchiveConfiguration.GetValue("MaxLagMinutes", 60);
+		var alertWebhookUrl = builder.Configuration["Monitoring:AlertWebhookUrl"]
+			?? Environment.GetEnvironmentVariable("YASK_CIEM_ALERT_WEBHOOK_URL");
 		archiveDestination = new S3ObjectLockAuditArchive(
 			auditArchiveConfiguration["Endpoint"]!, auditArchiveConfiguration["Region"]!, auditArchiveConfiguration["Bucket"]!,
-			auditArchiveConfiguration["AccessKey"]!, auditArchiveConfiguration["SecretKey"]!, archiveRetentionDays);
+			archiveAccessKey!, archiveSecretKey!, archiveRetentionDays);
 		var segmentArchiver = new PostgresAuditSegmentArchiver(archiveDataSource, integrityKeys!,
 			segmentEventCount, archiveRetentionDays, objectPrefix);
 		builder.Services.AddSingleton(archiveDataSource);
@@ -110,6 +132,7 @@ if (auditArchiveProvider?.Equals("S3ObjectLock", StringComparison.OrdinalIgnoreC
 			serviceProvider.GetRequiredService<IAuditSegmentArchive>(),
 			serviceProvider.GetRequiredService<AuditArchiveStatus>(), pollIntervalSeconds,
 			maximumPendingEvents, maximumLagMinutes,
+			alertWebhookUrl,
 			serviceProvider.GetRequiredService<ILogger<AuditArchiveWorker>>()));
 	}
 	catch (Exception exception)

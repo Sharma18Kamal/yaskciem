@@ -2,6 +2,8 @@
 param(
     [Parameter(Mandatory)]
     [string]$BackupDirectory,
+    [ValidateRange(1, 3650)]
+    [int]$RetentionDays = 35,
     [string]$PgDumpPath,
     [string]$PgRestorePath
 )
@@ -42,7 +44,15 @@ try {
     Move-Item -LiteralPath $temporaryPath -Destination $backupPath
     $hash = Get-FileHash -LiteralPath $backupPath -Algorithm SHA256
     Set-Content -LiteralPath "$backupPath.sha256" -Value "$($hash.Hash) *$(Split-Path -Leaf $backupPath)" -Encoding ascii
+    $cutoff = [DateTime]::UtcNow.AddDays(-$RetentionDays)
+    Get-ChildItem -LiteralPath $directory -Filter 'yask-ciem-postgres-*.dump' -File |
+        Where-Object { $_.LastWriteTimeUtc -lt $cutoff -and $_.FullName -ne $backupPath } |
+        ForEach-Object {
+            Remove-Item -LiteralPath $_.FullName -Force
+            Remove-Item -LiteralPath "$($_.FullName).sha256" -Force -ErrorAction SilentlyContinue
+        }
     Write-Output "Backup verified: $backupPath"
+    Write-Output "Retention applied: $RetentionDays day(s)."
     Write-Output "SHA256: $($hash.Hash)"
 }
 catch {

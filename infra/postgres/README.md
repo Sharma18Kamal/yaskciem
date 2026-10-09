@@ -42,6 +42,16 @@ Configure the License Server with:
 - `AuditArchive__AccessKey` and `AuditArchive__SecretKey` from a secret provider. Grant only bucket-versioning/Object-Lock inspection, object read/metadata, object write, and retention extension permissions.
 - Optional `AuditArchive__ObjectPrefix` (default `yask-ciem/audit/v1`), `AuditArchive__SegmentEventCount` (default 500), and `AuditArchive__PollIntervalSeconds` (default 60).
 
+Use [`audit-archive.settings.example.json`](audit-archive.settings.example.json) as the non-secret settings template. Copy its `AuditArchive` section into the License Server's production configuration and replace the endpoint, signing region, and bucket with values from the storage administrator. The endpoint must be HTTPS and the signing region must match the S3-compatible service's configured SigV4 region. Supply `ConnectionStrings__AuditArchive`, `AuditArchive__AccessKey`, and `AuditArchive__SecretKey` separately through the secret provider; do not add them to the JSON file. Readiness remains unhealthy until the configured bucket passes versioning/Object Lock/COMPLIANCE checks.
+
+On Windows, administrators can collect these values interactively using:
+
+```powershell
+./scripts/configure-audit-archive.ps1 -SettingsPath 'C:\Program Files\YASK-CIEM\LicenseServer\appsettings.Production.json'
+```
+
+Run the wizard as the same Windows identity that runs the License Server. It prompts for the non-secret endpoint, signing region, and bucket, merges those into the settings file, and stores the archive PostgreSQL connection string and S3 credentials in that identity's Windows Credential Manager. Secret prompts are masked; secret values are never written to the JSON file. Restart the License Server under that same identity after setup. If the service runs as a dedicated account, run the wizard in that account's session (or use your enterprise secret provider instead).
+
 The archive database login is intentionally separate because it must read all tenant audit rows to seal segments; PostgreSQL RLS grants this cross-tenant read only to the `yask_ciem_archiver` role. `/api/v1/readiness` remains HTTP 503 until the bucket's versioning and COMPLIANCE retention configuration has been verified and the archive worker is healthy. The WORM bucket itself must be provisioned and managed by a separate storage administrator; the application does not create or weaken its retention policy.
 
 Readiness reports the pending archive event count, oldest unarchived event time, and last successful segment time. Defaults mark archive readiness unhealthy when more than 5,000 events are pending or the oldest pending event exceeds 60 minutes. Tune with `AuditArchive__MaxPendingEvents` and `AuditArchive__MaxLagMinutes`; the worker logs a structured warning when either threshold is exceeded. PostgreSQL connection/schema checks and archive connectivity/Object Lock checks are both required for HTTP 200 from `/api/v1/readiness`.
@@ -54,11 +64,57 @@ Install PostgreSQL client tools matching the server's major version. Configure t
 ./scripts/backup-postgres.ps1 -BackupDirectory 'D:\YASK-CIEM-Backups'
 $env:YASK_CIEM_ALLOW_RESTORE_TEST = 'YES'
 ./scripts/test-postgres-restore.ps1 `
-	-BackupFile 'D:\YASK-CIEM-Backups\yask-ciem-postgres-<timestamp>.dump' `
-	-RestoreDatabaseName 'yask_ciem_restore_<change-id>'
+  -BackupFile 'D:\YASK-CIEM-Backups\yask-ciem-postgres-<timestamp>.dump' `
+  -RestoreDatabaseName 'yask_ciem_restore_<change-id>'
 ```
 
 The restore drill verifies the SHA-256 sidecar and archive format, creates a new database only when its name matches the guarded `yask_ciem_restore_*` pattern and does not equal `PGDATABASE`, restores into it, checks required workspace/audit/archive tables and row-count queries, then drops only the database it created. Run this on a schedule and before upgrades; retain the dump and checksum together under the organization's backup retention policy. Do not point it at production. A successful drill should also be followed by application-level HMAC-chain verification and an Object Lock archive retrieval test before recording the recovery exercise as complete.
+
+### Scheduling and Alerts
+
+Configure the task account's `PGHOST`, `PGDATABASE`, `PGUSER`, and protected `PGPASSFILE` (or approved SSPI mapping), plus `YASK_CIEM_ALERT_WEBHOOK_URL` as an HTTPS secret in the task account's environment. The account needs read access to the database, write access to the backup directory, and `CREATEDB`/`DROPDB` capability for the guarded restore-drill databases. The alert URL is never printed in task logs.
+
+Register a daily 02:00 backup and Sunday 03:00 restore drill (defaults; adjust for the organization's window):
+
+```powershell
+./scripts/register-postgres-maintenance-tasks.ps1 `
+  -BackupDirectory 'D:\YASK-CIEM-Backups' `
+  -RetentionDays 35 `
+  -BackupTime '02:00' `
+  -RestoreTime '03:00'
+```
+
+The script prompts for the Windows task account and registers limited-privilege tasks. The runner sends HTTPS success/failure alerts; archive worker alerts use `Monitoring__AlertWebhookUrl` or `YASK_CIEM_ALERT_WEBHOOK_URL` and fire on health-state changes (including recovery). Verify both tasks in Task Scheduler after registration. Run `scripts/run-postgres-maintenance.ps1 -Mode Backup ...` manually to verify credentials and webhook delivery before relying on the schedule.
+
+## Existing SQLite Workspace Migration
+
+The utility migrates the former shared License Server workspace SQLite database, not the desktop's local `cloudentitle.db`. It supports the four shared tables for organization directories, account bindings, access reviews, and scan summaries. It does not migrate central audit history or desktop inventory/findings.
+
+First run a read-only count:
+
+```powershell
+dotnet run --project tools/CloudEntitle.PostgresMaintenance -- migrate-sqlite 'C:\path\to\shared-workspace.db'
+```
+
+After a PostgreSQL backup, confirm the destination database and load the required schema, configure `ConnectionStrings__Postgres` using an authorized migration login, then apply explicitly:
+
+```powershell
+$env:YASK_CIEM_ALLOW_SQLITE_MIGRATION = 'YES'
+dotnet run --project tools/CloudEntitle.PostgresMaintenance -- migrate-sqlite 'C:\path\to\shared-workspace.db' --apply
+Remove-Item Env:YASK_CIEM_ALLOW_SQLITE_MIGRATION
+```
+
+The migration uses one PostgreSQL transaction, never overwrites destination rows, and aborts on key conflicts. Compare source/destination counts and representative tenant records before cutover; keep the source database unchanged until accepted.
+
+## Object-Lock Archive Reconciliation
+
+Run this read-only command from an operator host with the archive PostgreSQL connection, S3 Object Lock credentials, and every retained audit integrity key loaded from the approved secret provider. Configure `AuditRetention__IntegrityKey` for a legacy-only store, or `AuditRetention__IntegrityKeys__<key-id>` for each retained key (including `legacy` for older records) and `AuditRetention__IntegrityKeyId` for the active key ID:
+
+```powershell
+dotnet run --project tools/CloudEntitle.PostgresMaintenance -- reconcile-archive
+```
+
+The command checks each ledger row against the stored object SHA-256, manifest tenant/sequence range/last hash, object metadata, COMPLIANCE mode, and retain-until date. It also recomputes every event HMAC using that event's recorded key ID, verifies tenant and sequence continuity, and checks the previous-hash chain through the segment's terminal ledger hash. It exits nonzero and identifies mismatched ledger keys without printing credentials or object contents. Run on a schedule and alert on nonzero exit; missing historical keys or any chain/object mismatch is a failed reconciliation.
 
 ## HMAC Key Rotation
 

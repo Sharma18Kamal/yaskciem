@@ -1,0 +1,15 @@
+{
+  "AuditArchive": {
+    "Provider": "S3ObjectLock",
+    "Endpoint": "https://<object-store-host>:<port>",
+    "Region": "<S3-signing-region>",
+    "Bucket": "<object-lock-enabled-bucket>",
+    "DatabaseCredentialTarget": "YASK-CIEM/LicenseServer/AuditArchive/Postgres",
+    "S3CredentialTarget": "YASK-CIEM/LicenseServer/AuditArchive/S3",
+    "ObjectPrefix": "yask-ciem/audit/v1",
+    "SegmentEventCount": 500,
+    "PollIntervalSeconds": 60,
+    "MaxPendingEvents": 5000,
+    "MaxLagMinutes": 60
+  }
+}
