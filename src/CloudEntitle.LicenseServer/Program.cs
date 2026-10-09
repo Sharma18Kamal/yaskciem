@@ -34,20 +34,50 @@ builder.Services.AddAuthorization(options =>
 			|| context.User.Claims.Any(claim => claim.Type == "roles" && claim.Value == "Ciem.Audit.Read")));
 });
 
-var auditDirectory = builder.Configuration["AuditRetention:Directory"]
-	?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YASK-CIEM", "CentralAudit");
 var auditRetentionDays = builder.Configuration.GetValue("AuditRetention:MinimumRetentionDays", 2555);
-if (auditRetentionDays is < 1 or > 36500)
-	throw new InvalidOperationException("AuditRetention:MinimumRetentionDays must be between 1 and 36500.");
+IAuditRetentionStore auditStore;
+var auditProvider = builder.Configuration["AuditRetention:Provider"];
 var auditIntegrityKey = builder.Configuration["AuditRetention:IntegrityKey"];
-if (string.IsNullOrWhiteSpace(auditIntegrityKey))
-	throw new InvalidOperationException("Configure AuditRetention:IntegrityKey using a secret provider before starting the shared API.");
-byte[] auditIntegrityKeyBytes;
-try { auditIntegrityKeyBytes = Convert.FromBase64String(auditIntegrityKey); }
-catch (FormatException exception) { throw new InvalidOperationException("AuditRetention:IntegrityKey must be Base64-encoded.", exception); }
-if (auditIntegrityKeyBytes.Length < 32)
-	throw new InvalidOperationException("AuditRetention:IntegrityKey must decode to at least 32 bytes.");
-builder.Services.AddSingleton<IAuditRetentionStore>(_ => new AppendOnlyAuditRetentionStore(auditDirectory, auditRetentionDays, auditIntegrityKeyBytes));
+var integrityKeyBytes = TryDecodeAuditIntegrityKey(auditIntegrityKey);
+if (!string.IsNullOrWhiteSpace(auditProvider) && auditProvider.Equals("AzureBlob", StringComparison.OrdinalIgnoreCase))
+{
+	var storageUri = builder.Configuration["AuditRetention:BlobServiceUri"];
+	var containerName = builder.Configuration["AuditRetention:ContainerName"];
+	var accountResourceId = builder.Configuration["AuditRetention:StorageAccountResourceId"];
+	var managedIdentityClientId = builder.Configuration["AuditRetention:ManagedIdentityClientId"];
+	if (auditRetentionDays is < 1 or > 36500 || integrityKeyBytes is null
+		|| !Uri.TryCreate(storageUri, UriKind.Absolute, out var parsedStorageUri)
+		|| string.IsNullOrWhiteSpace(containerName) || string.IsNullOrWhiteSpace(accountResourceId)
+		|| string.IsNullOrWhiteSpace(managedIdentityClientId))
+	{
+		auditStore = new UnavailableAuditRetentionStore("Azure Blob audit configuration is incomplete; configure HTTPS storage URI, container, account resource ID, managed identity client ID, a retention period, and an integrity key from a secret provider.");
+	}
+	else
+	{
+		try
+		{
+			auditStore = new AzureBlobAuditRetentionStore(parsedStorageUri, containerName, accountResourceId,
+				auditRetentionDays, integrityKeyBytes, managedIdentityClientId);
+		}
+		catch (Exception exception)
+		{
+			auditStore = new UnavailableAuditRetentionStore($"Azure Blob audit configuration is invalid: {exception.Message}");
+		}
+	}
+}
+else if (builder.Environment.IsDevelopment() && (string.IsNullOrWhiteSpace(auditProvider) || auditProvider.Equals("LocalFile", StringComparison.OrdinalIgnoreCase))
+	&& auditRetentionDays is >= 1 and <= 36500 && integrityKeyBytes is not null)
+{
+	var auditDirectory = builder.Configuration["AuditRetention:Directory"]
+		?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YASK-CIEM", "CentralAudit");
+	auditStore = new AppendOnlyAuditRetentionStore(auditDirectory, auditRetentionDays, integrityKeyBytes);
+}
+else
+{
+	auditStore = new UnavailableAuditRetentionStore("Production requires AuditRetention:Provider=AzureBlob and a verified locked Azure Blob retention policy; the local file store is development-only.");
+}
+if (integrityKeyBytes is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(integrityKeyBytes);
+builder.Services.AddSingleton<IAuditRetentionStore>(auditStore);
 var sharedConnectionString = builder.Configuration.GetConnectionString("SharedWorkspace")
 	?? builder.Configuration["SharedData:ConnectionString"];
 if (string.IsNullOrWhiteSpace(sharedConnectionString))
@@ -75,7 +105,18 @@ app.UseAuthorization();
 app.MapHealthChecks("/health");
 
 app.MapGet("/api/v1/health", () => Results.Ok(new ApiHealthResponse("Healthy", ApiContractVersion.Current, DateTime.UtcNow))).AllowAnonymous();
-app.MapGet("/api/v1/readiness", () => Results.Ok(new ApiReadinessResponse("Ready", true, true, ApiContractVersion.Current))).AllowAnonymous();
+app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, CancellationToken cancellationToken) =>
+{
+	var audit = await retentionStore.CheckReadinessAsync(cancellationToken);
+	var productionReady = audit.Ready && audit.ProductionReady;
+	var response = new ApiReadinessResponse(productionReady ? "Ready" : "NotReady", true, productionReady, ApiContractVersion.Current)
+	{
+		AuditStorageReady = audit.Ready,
+		ProductionReady = productionReady,
+		AuditStorageDetails = audit.Details
+	};
+	return Results.Json(response, statusCode: productionReady ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
+}).AllowAnonymous();
 app.MapGet("/api/v1/providers", () => Results.Ok(new ApiEnvelope<IReadOnlyList<ProviderCapabilityDto>>(
 	new[]
 	{
@@ -155,3 +196,16 @@ app.Run();
 static bool HasScope(ClaimsPrincipal principal, string requiredScope)
     => principal.FindAll("scp").SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
         .Contains(requiredScope, StringComparer.Ordinal);
+
+static byte[]? TryDecodeAuditIntegrityKey(string? value)
+{
+	if (string.IsNullOrWhiteSpace(value)) return null;
+	try
+	{
+		var bytes = Convert.FromBase64String(value);
+		if (bytes.Length >= 32) return bytes;
+		System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes);
+		return null;
+	}
+	catch (FormatException) { return null; }
+}

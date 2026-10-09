@@ -20,13 +20,16 @@ public sealed class AzureBlobAuditRetentionStore : IAuditRetentionStore, IDispos
     private const int MaximumAppendAttempts = 8;
     private const int MaximumAppendBytes = 4 * 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly HttpClient ManagementClient = new();
+    private static readonly HttpClient ManagementClient = new() { Timeout = TimeSpan.FromSeconds(10) };
     private readonly BlobContainerClient _container;
     private readonly TokenCredential _credential;
     private readonly string _storageAccountResourceId;
     private readonly int _minimumRetentionDays;
     private readonly byte[] _integrityKey;
     private readonly bool _ownsCredential;
+    private readonly SemaphoreSlim _readinessGate = new(1, 1);
+    private AuditStoreReadiness? _cachedReadiness;
+    private DateTime _readinessCacheExpiresAtUtc;
 
     public AzureBlobAuditRetentionStore(
         Uri blobServiceUri,
@@ -59,36 +62,53 @@ public sealed class AzureBlobAuditRetentionStore : IAuditRetentionStore, IDispos
 
     public async Task<AuditStoreReadiness> CheckReadinessAsync(CancellationToken cancellationToken = default)
     {
+        if (_cachedReadiness is { } cached && DateTime.UtcNow < _readinessCacheExpiresAtUtc) return cached;
+        await _readinessGate.WaitAsync(cancellationToken);
         try
         {
+            if (_cachedReadiness is { } cachedAfterLock && DateTime.UtcNow < _readinessCacheExpiresAtUtc) return cachedAfterLock;
             var containerProperties = await _container.GetPropertiesAsync(cancellationToken: cancellationToken);
-            if (containerProperties.Value.HasImmutabilityPolicy != true || containerProperties.Value.PublicAccess is not null and not PublicAccessType.None)
-                return new(false, false, "Audit container is not private with an immutability policy.");
-
             var account = await GetArmResourceAsync(_storageAccountResourceId, "2026-06-01", cancellationToken);
             var accountProperties = account.RootElement.GetProperty("properties");
-            if (ReadString(accountProperties, "publicNetworkAccess") != "Disabled"
-                || ReadBoolean(accountProperties, "allowSharedKeyAccess")
-                || !ReadBoolean(accountProperties, "supportsHttpsTrafficOnly")
-                || ReadString(accountProperties, "minimumTlsVersion") is not ("TLS1_2" or "TLS1_3")
-                || ReadString(ReadProperty(accountProperties, "networkAcls"), "defaultAction") != "Deny")
-                return new(false, false, "Storage account must disable public access and shared keys, require HTTPS/TLS 1.2+, and default-deny network traffic.");
-
             var policy = await GetArmResourceAsync($"{_storageAccountResourceId}/blobServices/default/containers/{_container.Name}/immutabilityPolicies/default", "2026-06-01", cancellationToken);
-            var policyProperties = policy.RootElement.GetProperty("properties");
-            var retentionDays = ReadInt32(policyProperties, "immutabilityPeriodSinceCreationInDays");
-            if (ReadString(policyProperties, "state") != "Locked"
-                || retentionDays < _minimumRetentionDays
-                || !ReadBoolean(policyProperties, "allowProtectedAppendWrites"))
-                return new(false, false, $"Audit container immutability must be Locked for at least {_minimumRetentionDays} days with protected append writes enabled.");
-
-            return new(true, true, $"Locked container-level WORM verified for {retentionDays} days; protected append enabled; account networking and shared-key restrictions verified.");
+            var result = ValidateRemoteConfiguration(accountProperties,
+                containerProperties.Value.HasImmutabilityPolicy == true
+                    && (containerProperties.Value.PublicAccess is null or PublicAccessType.None),
+                policy.RootElement.GetProperty("properties"), _minimumRetentionDays);
+            _cachedReadiness = result;
+            _readinessCacheExpiresAtUtc = DateTime.UtcNow.AddSeconds(result.ProductionReady ? 30 : 5);
+            return result;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception)
         {
-            return new(false, false, $"Azure Blob audit readiness check failed: {SensitiveDataRedactor.RedactText(exception.Message)}");
+            var result = new AuditStoreReadiness(false, false, $"Azure Blob audit readiness check failed: {SensitiveDataRedactor.RedactText(exception.Message)}");
+            _cachedReadiness = result;
+            _readinessCacheExpiresAtUtc = DateTime.UtcNow.AddSeconds(5);
+            return result;
         }
+        finally { _readinessGate.Release(); }
+    }
+
+    public static AuditStoreReadiness ValidateRemoteConfiguration(JsonElement accountProperties, bool containerPrivateAndImmutable,
+        JsonElement immutabilityPolicy, int minimumRetentionDays)
+    {
+        if (!containerPrivateAndImmutable)
+            return new(false, false, "Audit container is not private with an immutability policy.");
+        if (ReadString(accountProperties, "publicNetworkAccess") != "Disabled"
+            || ReadBoolean(accountProperties, "allowSharedKeyAccess")
+            || !ReadBoolean(accountProperties, "supportsHttpsTrafficOnly")
+            || ReadString(accountProperties, "minimumTlsVersion") is not ("TLS1_2" or "TLS1_3")
+            || ReadString(ReadProperty(accountProperties, "networkAcls"), "defaultAction") != "Deny")
+            return new(false, false, "Storage account must disable public access and shared keys, require HTTPS/TLS 1.2+, and default-deny network traffic.");
+
+        var retentionDays = ReadInt32(immutabilityPolicy, "immutabilityPeriodSinceCreationInDays");
+        if (ReadString(immutabilityPolicy, "state") != "Locked"
+            || retentionDays < minimumRetentionDays
+            || !ReadBoolean(immutabilityPolicy, "allowProtectedAppendWrites"))
+            return new(false, false, $"Audit container immutability must be Locked for at least {minimumRetentionDays} days with protected append writes enabled.");
+
+        return new(true, true, $"Locked container-level WORM verified for {retentionDays} days; protected append enabled; account networking and shared-key restrictions verified.");
     }
 
     public async Task<CentralAuditEventDto> AppendAsync(Guid tenantId, Guid actorObjectId, CentralAuditAppendRequest request,
@@ -136,10 +156,10 @@ public sealed class AzureBlobAuditRetentionStore : IAuditRetentionStore, IDispos
             try
             {
                 await using var stream = new MemoryStream(bytes, writable: false);
-                await log.AppendBlockAsync(stream, new AppendBlobAppendBlockOptions
+                await log.AppendBlockAsync(stream, conditions: new AppendBlobRequestConditions
                 {
-                    Conditions = new AppendBlobRequestConditions { IfAppendPositionEqual = scan.ByteLength }
-                }, cancellationToken);
+                    IfAppendPositionEqual = scan.ByteLength
+                }, cancellationToken: cancellationToken);
                 return entry;
             }
             catch (RequestFailedException exception) when (exception.Status == (int)HttpStatusCode.PreconditionFailed
@@ -165,7 +185,7 @@ public sealed class AzureBlobAuditRetentionStore : IAuditRetentionStore, IDispos
         var readiness = await CheckReadinessAsync(cancellationToken);
         if (!readiness.ProductionReady) throw new InvalidOperationException(readiness.Details);
         var log = _container.GetAppendBlobClient($"{tenantId:N}.audit.jsonl");
-        return (await ReadAndVerifyAsync(log, tenantId, afterSequence, limit, null, cancellationToken)).VisibleEntries;
+        return (await ReadAndVerifyAsync(log, tenantId, afterSequence, limit, Guid.Empty, cancellationToken)).VisibleEntries;
     }
 
     private async Task<AuditLogScan> ReadAndVerifyAsync(AppendBlobClient log, Guid tenantId, long afterSequence, int limit,
@@ -293,6 +313,7 @@ public sealed class AzureBlobAuditRetentionStore : IAuditRetentionStore, IDispos
     public void Dispose()
     {
         CryptographicOperations.ZeroMemory(_integrityKey);
+        _readinessGate.Dispose();
         if (_ownsCredential && _credential is IDisposable disposableCredential) disposableCredential.Dispose();
     }
 

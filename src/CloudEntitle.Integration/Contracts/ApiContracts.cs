@@ -10,7 +10,12 @@ public static class ApiContractVersion
 }
 
 public sealed record ApiHealthResponse(string Status, string Version, DateTime UtcTime);
-public sealed record ApiReadinessResponse(string Status, bool DatabaseReady, bool ConfigurationReady, string Version);
+public sealed record ApiReadinessResponse(string Status, bool DatabaseReady, bool ConfigurationReady, string Version)
+{
+    public bool AuditStorageReady { get; init; }
+    public bool ProductionReady { get; init; }
+    public string AuditStorageDetails { get; init; } = string.Empty;
+}
 public sealed record ProviderCapabilityDto(CloudProvider Provider, bool ReadOnly, bool ConnectorAvailable, string AuthenticationMode);
 public sealed record ApiIdentityDto(Guid TenantId, Guid UserObjectId);
 public sealed record CreateOrganizationRequest(string Name, string TenantKey);

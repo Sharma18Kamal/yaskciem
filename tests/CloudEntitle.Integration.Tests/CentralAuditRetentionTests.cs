@@ -1,5 +1,6 @@
 using System.IO;
 using System.Security.Cryptography;
+using System.Text.Json;
 using CloudEntitle.Integration.Contracts;
 using CloudEntitle.LicenseServer.Services;
 using Xunit;
@@ -8,6 +9,39 @@ namespace CloudEntitle.Integration.Tests;
 
 public sealed class CentralAuditRetentionTests
 {
+    [Fact]
+    public void AzureAuditReadiness_ShouldRequireLockedWormAndHardenedStorage()
+    {
+        using var account = JsonDocument.Parse("""{"publicNetworkAccess":"Disabled","allowSharedKeyAccess":false,"supportsHttpsTrafficOnly":true,"minimumTlsVersion":"TLS1_2","networkAcls":{"defaultAction":"Deny"}}""");
+        using var lockedPolicy = JsonDocument.Parse("""{"state":"Locked","immutabilityPeriodSinceCreationInDays":2555,"allowProtectedAppendWrites":true}""");
+        using var unlockedPolicy = JsonDocument.Parse("""{"state":"Unlocked","immutabilityPeriodSinceCreationInDays":2555,"allowProtectedAppendWrites":true}""");
+        using var insecureAccount = JsonDocument.Parse("""{"publicNetworkAccess":"Enabled","allowSharedKeyAccess":true,"supportsHttpsTrafficOnly":true,"minimumTlsVersion":"TLS1_2","networkAcls":{"defaultAction":"Allow"}}""");
+
+        var ready = AzureBlobAuditRetentionStore.ValidateRemoteConfiguration(account.RootElement, true, lockedPolicy.RootElement, 2555);
+        var unlocked = AzureBlobAuditRetentionStore.ValidateRemoteConfiguration(account.RootElement, true, unlockedPolicy.RootElement, 2555);
+        var insecure = AzureBlobAuditRetentionStore.ValidateRemoteConfiguration(insecureAccount.RootElement, true, lockedPolicy.RootElement, 2555);
+        var unprotectedContainer = AzureBlobAuditRetentionStore.ValidateRemoteConfiguration(account.RootElement, false, lockedPolicy.RootElement, 2555);
+
+        Assert.True(ready.Ready);
+        Assert.True(ready.ProductionReady);
+        Assert.False(unlocked.ProductionReady);
+        Assert.False(insecure.ProductionReady);
+        Assert.False(unprotectedContainer.ProductionReady);
+    }
+
+    [Fact]
+    public async Task LocalFileAuditStore_ShouldNeverReportProductionReadiness()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "YaskCiemLocalAuditReadiness", Guid.NewGuid().ToString("N"));
+        using var store = new AppendOnlyAuditRetentionStore(directory, 30, RandomNumberGenerator.GetBytes(32));
+
+        var readiness = await store.CheckReadinessAsync();
+
+        Assert.True(readiness.Ready);
+        Assert.False(readiness.ProductionReady);
+        Assert.Contains("not multi-instance safe", readiness.Details, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task AppendAsync_ShouldSequenceByTenantRedactSensitiveDataAndRejectTampering()
     {
