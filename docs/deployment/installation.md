@@ -9,6 +9,8 @@ YASK-CIEM supports Windows 10/11. Choose the installation method supplied by you
 - Install only the cloud CLI tools you plan to use: Azure CLI (`az`), AWS CLI (`aws`), and/or Google Cloud CLI (`gcloud`). Cloud discovery is optional until you configure a provider.
 - Obtain installation files from your organization’s trusted release location. Do not install unsigned packages or trust a signing certificate from an unknown source.
 
+> **PostgreSQL is not required for the desktop app.** Install it only when preparing a self-hosted License Server/backend. For online and offline server prerequisites, follow [Install PostgreSQL for Self-Hosted YASK-CIEM](postgresql-installation.md).
+
 ## Current Setup EXE
 
 The current local build is [YASK-CIEM-Setup-1.0.0.39.exe](../../artifacts/installer-1.0.0.39/YASK-CIEM-Setup-1.0.0.39.exe). It contains the self-contained MSIX, the matching public publisher certificate, and the .NET runtime; a separate .NET Desktop Runtime installation is not required. Run it and follow the Windows prompts, then launch **YASK-CIEM** from Start.

@@ -13,27 +13,36 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
     private readonly NpgsqlDataSource _dataSource;
     private readonly bool _ownsDataSource;
     private readonly int _minimumRetentionDays;
-    private readonly byte[] _integrityKey;
+    private readonly AuditIntegrityKeyRing _integrityKeys;
+    private readonly bool _ownsIntegrityKeys;
 
     public PostgresAuditRetentionStore(string connectionString, int minimumRetentionDays, ReadOnlySpan<byte> integrityKey)
-        : this(new NpgsqlDataSourceBuilder(connectionString).Build(), minimumRetentionDays, integrityKey, ownsDataSource: true)
+        : this(new NpgsqlDataSourceBuilder(connectionString).Build(), minimumRetentionDays,
+            CreateLegacyKeyRing(integrityKey), ownsDataSource: true, ownsIntegrityKeys: true)
     {
     }
 
     public PostgresAuditRetentionStore(NpgsqlDataSource dataSource, int minimumRetentionDays, ReadOnlySpan<byte> integrityKey)
-        : this(dataSource, minimumRetentionDays, integrityKey, ownsDataSource: false)
+        : this(dataSource, minimumRetentionDays, CreateLegacyKeyRing(integrityKey), ownsDataSource: false, ownsIntegrityKeys: true)
     {
     }
 
-    private PostgresAuditRetentionStore(NpgsqlDataSource dataSource, int minimumRetentionDays, ReadOnlySpan<byte> integrityKey, bool ownsDataSource)
+    public PostgresAuditRetentionStore(NpgsqlDataSource dataSource, int minimumRetentionDays, AuditIntegrityKeyRing integrityKeys)
+        : this(dataSource, minimumRetentionDays, integrityKeys, ownsDataSource: false, ownsIntegrityKeys: false)
+    {
+    }
+
+    private PostgresAuditRetentionStore(NpgsqlDataSource dataSource, int minimumRetentionDays, AuditIntegrityKeyRing integrityKeys,
+        bool ownsDataSource, bool ownsIntegrityKeys)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         if (minimumRetentionDays is < 1 or > 36500) throw new ArgumentOutOfRangeException(nameof(minimumRetentionDays));
-        if (integrityKey.Length < 32) throw new ArgumentException("The audit integrity key must contain at least 32 bytes.", nameof(integrityKey));
+        ArgumentNullException.ThrowIfNull(integrityKeys);
         _dataSource = dataSource;
         _ownsDataSource = ownsDataSource;
         _minimumRetentionDays = minimumRetentionDays;
-        _integrityKey = integrityKey.ToArray();
+        _integrityKeys = integrityKeys;
+        _ownsIntegrityKeys = ownsIntegrityKeys;
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -67,6 +76,20 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
             BEFORE UPDATE OR DELETE ON ciem_audit_events
             FOR EACH ROW EXECUTE FUNCTION yask_reject_audit_event_mutation()
             """;
+        const string isolateByTenant = """
+            ALTER TABLE ciem_audit_heads ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE ciem_audit_heads FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS ciem_audit_heads_tenant_isolation ON ciem_audit_heads;
+            CREATE POLICY ciem_audit_heads_tenant_isolation ON ciem_audit_heads
+                USING (tenant_id::text = current_setting('app.tenant_id', true))
+                WITH CHECK (tenant_id::text = current_setting('app.tenant_id', true));
+            ALTER TABLE ciem_audit_events ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE ciem_audit_events FORCE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS ciem_audit_events_tenant_isolation ON ciem_audit_events;
+            CREATE POLICY ciem_audit_events_tenant_isolation ON ciem_audit_events
+                USING (tenant_id::text = current_setting('app.tenant_id', true))
+                WITH CHECK (tenant_id::text = current_setting('app.tenant_id', true))
+            """;
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using (var command = new NpgsqlCommand(createHeads, connection))
@@ -74,6 +97,8 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
         await using (var command = new NpgsqlCommand(createEvents, connection))
             await command.ExecuteNonQueryAsync(cancellationToken);
         await using (var command = new NpgsqlCommand(protectEvents, connection))
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        await using (var command = new NpgsqlCommand(isolateByTenant, connection))
             await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -91,6 +116,28 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
                                  AND tgname = 'tr_ciemauditevents_appendonly'
                                  AND tgenabled IN ('O', 'A')
                          )
+                        AND EXISTS (
+                            SELECT 1 FROM pg_class
+                            WHERE oid = to_regclass('ciem_audit_heads')
+                              AND relrowsecurity AND relforcerowsecurity
+                        )
+                        AND EXISTS (
+                            SELECT 1 FROM pg_class
+                            WHERE oid = to_regclass('ciem_audit_events')
+                              AND relrowsecurity AND relforcerowsecurity
+                        )
+                                                 AND EXISTS (
+                                                            SELECT 1 FROM pg_policies
+                                                            WHERE schemaname = current_schema()
+                                                                AND tablename = 'ciem_audit_heads'
+                                                                AND policyname = 'ciem_audit_heads_tenant_isolation'
+                                                 )
+                                                 AND EXISTS (
+                                                            SELECT 1 FROM pg_policies
+                                                            WHERE schemaname = current_schema()
+                                                                AND tablename = 'ciem_audit_events'
+                                                                AND policyname = 'ciem_audit_events_tenant_isolation'
+                                                 )
                 """, connection);
             var schemaReady = (bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false);
             return schemaReady
@@ -122,6 +169,7 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await SetTenantContextAsync(connection, transaction, tenantId, cancellationToken);
         await using (var ensureHead = new NpgsqlCommand("""
             INSERT INTO ciem_audit_heads (tenant_id, last_sequence, last_hash)
             VALUES (@tenant_id, 0, @zero_hash)
@@ -167,7 +215,10 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
         var entry = new CentralAuditEventDto(lastSequence + 1,
             request.EventId == Guid.Empty ? Guid.NewGuid() : request.EventId, tenantId, actorObjectId,
             eventType, description, recordedAtUtc, sourceTimestamp, metadata,
-            lastHash, string.Empty, recordedAtUtc.AddDays(_minimumRetentionDays));
+            lastHash, string.Empty, recordedAtUtc.AddDays(_minimumRetentionDays))
+        {
+            IntegrityKeyId = _integrityKeys.CurrentKeyId
+        };
         entry = entry with { Hash = ComputeHash(entry) };
 
         await using (var insertEvent = new NpgsqlCommand("""
@@ -210,6 +261,7 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
+        await SetTenantContextAsync(connection, transaction, tenantId, cancellationToken);
         var head = await ReadHeadAsync(connection, transaction, tenantId, cancellationToken);
         var entries = await ReadAndVerifyAsync(connection, transaction, tenantId, head.Sequence, head.Hash, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -229,6 +281,14 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
         return await reader.ReadAsync(cancellationToken)
             ? (reader.GetInt64(0), reader.GetString(1))
             : (0, new string('0', 64));
+    }
+
+    private static async Task SetTenantContextAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid tenantId, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("SELECT set_config('app.tenant_id', @tenant_id, true)", connection, transaction);
+        command.Parameters.AddWithValue("tenant_id", tenantId.ToString("D"));
+        await command.ExecuteScalarAsync(cancellationToken);
     }
 
     private async Task<List<CentralAuditEventDto>> ReadAndVerifyAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
@@ -274,21 +334,46 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
 
     private string ComputeHash(CentralAuditEventDto entry)
     {
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            entry.Sequence,
-            entry.EventId,
-            entry.TenantId,
-            entry.ActorObjectId,
-            entry.EventType,
-            entry.Description,
-            entry.RecordedAtUtc,
-            entry.SourceTimestampUtc,
-            metadata = entry.Metadata.OrderBy(pair => pair.Key, StringComparer.Ordinal).ToDictionary(pair => pair.Key, pair => pair.Value),
-            entry.PreviousHash,
-            entry.RetainUntilUtc
-        }, JsonOptions);
-        return Convert.ToHexString(HMACSHA256.HashData(_integrityKey, payload)).ToLowerInvariant();
+        var metadata = entry.Metadata.OrderBy(pair => pair.Key, StringComparer.Ordinal).ToDictionary(pair => pair.Key, pair => pair.Value);
+        var payload = entry.IntegrityKeyId == "legacy"
+            ? JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                entry.Sequence,
+                entry.EventId,
+                entry.TenantId,
+                entry.ActorObjectId,
+                entry.EventType,
+                entry.Description,
+                entry.RecordedAtUtc,
+                entry.SourceTimestampUtc,
+                metadata,
+                entry.PreviousHash,
+                entry.RetainUntilUtc
+            }, JsonOptions)
+            : JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                entry.Sequence,
+                entry.EventId,
+                entry.TenantId,
+                entry.ActorObjectId,
+                entry.EventType,
+                entry.Description,
+                entry.RecordedAtUtc,
+                entry.SourceTimestampUtc,
+                metadata,
+                entry.PreviousHash,
+                entry.RetainUntilUtc,
+                entry.IntegrityKeyId
+            }, JsonOptions);
+        return Convert.ToHexString(HMACSHA256.HashData(_integrityKeys.GetKey(entry.IntegrityKeyId), payload)).ToLowerInvariant();
+    }
+
+    private static AuditIntegrityKeyRing CreateLegacyKeyRing(ReadOnlySpan<byte> integrityKey)
+    {
+        if (integrityKey.Length < 32) throw new ArgumentException("The audit integrity key must contain at least 32 bytes.", nameof(integrityKey));
+        var key = integrityKey.ToArray();
+        try { return new AuditIntegrityKeyRing("legacy", new Dictionary<string, byte[]> { ["legacy"] = key }); }
+        finally { CryptographicOperations.ZeroMemory(key); }
     }
 
     private static void Validate(CentralAuditAppendRequest? request)
@@ -315,7 +400,7 @@ public sealed class PostgresAuditRetentionStore : IAuditRetentionStore, IDisposa
 
     public void Dispose()
     {
-        CryptographicOperations.ZeroMemory(_integrityKey);
+        if (_ownsIntegrityKeys) _integrityKeys.Dispose();
         if (_ownsDataSource) _dataSource.Dispose();
     }
 }

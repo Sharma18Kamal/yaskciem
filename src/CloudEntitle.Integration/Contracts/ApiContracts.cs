@@ -15,6 +15,11 @@ public sealed record ApiReadinessResponse(string Status, bool DatabaseReady, boo
     public bool AuditStorageReady { get; init; }
     public bool ProductionReady { get; init; }
     public string AuditStorageDetails { get; init; } = string.Empty;
+    public bool AuditArchiveReady { get; init; }
+    public string AuditArchiveDetails { get; init; } = string.Empty;
+    public long AuditArchivePendingEvents { get; init; }
+    public DateTime? AuditArchiveOldestPendingAtUtc { get; init; }
+    public DateTime? AuditArchiveLastSuccessAtUtc { get; init; }
 }
 public sealed record ProviderCapabilityDto(CloudProvider Provider, bool ReadOnly, bool ConnectorAvailable, string AuthenticationMode);
 public sealed record ApiIdentityDto(Guid TenantId, Guid UserObjectId);
@@ -68,7 +73,10 @@ public sealed record SharedScanSummaryDto(
     int HighFindings,
     IReadOnlyList<SharedScanCoverageDto> Coverage);
 public sealed record CentralAuditAppendRequest(string EventType, string Description, DateTime? SourceTimestampUtc, IReadOnlyDictionary<string, string> Metadata, Guid EventId = default);
-public sealed record CentralAuditEventDto(long Sequence, Guid EventId, Guid TenantId, Guid ActorObjectId, string EventType, string Description, DateTime RecordedAtUtc, DateTime? SourceTimestampUtc, IReadOnlyDictionary<string, string> Metadata, string PreviousHash, string Hash, DateTime RetainUntilUtc);
+public sealed record CentralAuditEventDto(long Sequence, Guid EventId, Guid TenantId, Guid ActorObjectId, string EventType, string Description, DateTime RecordedAtUtc, DateTime? SourceTimestampUtc, IReadOnlyDictionary<string, string> Metadata, string PreviousHash, string Hash, DateTime RetainUntilUtc)
+{
+    public string IntegrityKeyId { get; init; } = "legacy";
+}
 public sealed record PostureSummaryDto(int CloudAccounts, int Identities, int Resources, int Entitlements, int RiskFindings, int CriticalFindings, DateTime? LastScanAt);
 public sealed record ApiError(string Code, string Message, string CorrelationId);
 public sealed record ApiEnvelope<T>(T Data, string CorrelationId, string Version);

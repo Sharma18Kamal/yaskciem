@@ -51,6 +51,19 @@ CREATE TABLE IF NOT EXISTS ciem_audit_events (
     UNIQUE (tenant_id, event_id)
 );
 
+CREATE TABLE IF NOT EXISTS ciem_audit_archive_segments (
+    tenant_id uuid NOT NULL,
+    first_sequence bigint NOT NULL CHECK (first_sequence > 0),
+    last_sequence bigint NOT NULL CHECK (last_sequence >= first_sequence),
+    last_hash text NOT NULL,
+    sha256 text NOT NULL,
+    object_key text NOT NULL UNIQUE,
+    retain_until_utc timestamptz NOT NULL,
+    archived_at_utc timestamptz NOT NULL,
+    PRIMARY KEY (tenant_id, first_sequence),
+    UNIQUE (tenant_id, last_sequence)
+);
+
 CREATE OR REPLACE FUNCTION yask_reject_audit_event_mutation() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -63,18 +76,48 @@ CREATE TRIGGER TR_CiemAuditEvents_AppendOnly
 BEFORE UPDATE OR DELETE ON ciem_audit_events
 FOR EACH ROW EXECUTE FUNCTION yask_reject_audit_event_mutation();
 
+ALTER TABLE ciem_audit_heads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ciem_audit_heads FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ciem_audit_heads_tenant_isolation ON ciem_audit_heads;
+CREATE POLICY ciem_audit_heads_tenant_isolation ON ciem_audit_heads
+    USING (tenant_id::text = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.tenant_id', true));
+
+ALTER TABLE ciem_audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ciem_audit_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ciem_audit_events_tenant_isolation ON ciem_audit_events;
+CREATE POLICY ciem_audit_events_tenant_isolation ON ciem_audit_events
+    USING (tenant_id::text = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.tenant_id', true));
+
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'yask_ciem_runtime') THEN
         CREATE ROLE yask_ciem_runtime NOLOGIN;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'yask_ciem_archiver') THEN
+        CREATE ROLE yask_ciem_archiver NOLOGIN;
+    END IF;
 END;
 $$;
 
+DROP POLICY IF EXISTS ciem_audit_heads_archive_read ON ciem_audit_heads;
+CREATE POLICY ciem_audit_heads_archive_read ON ciem_audit_heads
+    FOR SELECT TO yask_ciem_archiver USING (true);
+DROP POLICY IF EXISTS ciem_audit_events_archive_read ON ciem_audit_events;
+CREATE POLICY ciem_audit_events_archive_read ON ciem_audit_events
+    FOR SELECT TO yask_ciem_archiver USING (true);
+
 GRANT USAGE ON SCHEMA public TO yask_ciem_runtime;
+GRANT USAGE ON SCHEMA public TO yask_ciem_archiver;
 GRANT SELECT, INSERT, UPDATE ON SharedOrganizationDirectories TO yask_ciem_runtime;
 GRANT SELECT, INSERT, DELETE ON SharedAccountBindings TO yask_ciem_runtime;
 GRANT SELECT, INSERT, UPDATE ON SharedAccessReviewCampaigns TO yask_ciem_runtime;
 GRANT SELECT, INSERT ON SharedScanSummaries TO yask_ciem_runtime;
 GRANT SELECT, INSERT, UPDATE ON ciem_audit_heads TO yask_ciem_runtime;
+REVOKE ALL ON ciem_audit_events FROM PUBLIC;
+REVOKE UPDATE, DELETE, TRUNCATE ON ciem_audit_events FROM yask_ciem_runtime;
 GRANT SELECT, INSERT ON ciem_audit_events TO yask_ciem_runtime;
+REVOKE ALL ON ciem_audit_archive_segments FROM PUBLIC;
+GRANT SELECT, INSERT ON ciem_audit_heads, ciem_audit_events TO yask_ciem_archiver;
+GRANT SELECT, INSERT ON ciem_audit_archive_segments TO yask_ciem_archiver;

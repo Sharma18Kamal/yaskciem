@@ -10,6 +10,8 @@ using System.Security.Claims;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHealthChecks();
+var auditArchiveStatus = new AuditArchiveStatus();
+builder.Services.AddSingleton(auditArchiveStatus);
 var postgresConnectionString = builder.Configuration.GetConnectionString("Postgres");
 if (string.IsNullOrWhiteSpace(postgresConnectionString))
 	throw new InvalidOperationException("Configure ConnectionStrings:Postgres before starting the License Server.");
@@ -43,17 +45,18 @@ builder.Services.AddAuthorization(options =>
 var auditRetentionDays = builder.Configuration.GetValue("AuditRetention:MinimumRetentionDays", 2555);
 IAuditRetentionStore auditStore;
 var auditProvider = builder.Configuration["AuditRetention:Provider"];
-var auditIntegrityKey = builder.Configuration["AuditRetention:IntegrityKey"];
-var integrityKeyBytes = TryDecodeAuditIntegrityKey(auditIntegrityKey);
+var integrityKeys = AuditIntegrityKeyRing.FromConfiguration(builder.Configuration);
+var integrityKeyBytes = integrityKeys?.CopyCurrentKey();
+if (integrityKeys is not null) builder.Services.AddSingleton(integrityKeys);
 if (!string.IsNullOrWhiteSpace(auditProvider) && auditProvider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
 {
-	if (auditRetentionDays is < 1 or > 36500 || integrityKeyBytes is null)
+	if (auditRetentionDays is < 1 or > 36500 || integrityKeys is null)
 	{
-		auditStore = new UnavailableAuditRetentionStore("PostgreSQL audit configuration is incomplete; configure the audit retention period and an integrity key from a secret provider.");
+		auditStore = new UnavailableAuditRetentionStore("PostgreSQL audit configuration is incomplete; configure the retention period and versioned integrity keys through a secret provider.");
 	}
 	else
 	{
-		auditStore = new PostgresAuditRetentionStore(postgresDataSource, auditRetentionDays, integrityKeyBytes);
+		auditStore = new PostgresAuditRetentionStore(postgresDataSource, auditRetentionDays, integrityKeys);
 	}
 }
 else if (builder.Environment.IsDevelopment() && (string.IsNullOrWhiteSpace(auditProvider) || auditProvider.Equals("LocalFile", StringComparison.OrdinalIgnoreCase))
@@ -67,10 +70,60 @@ else
 {
 	auditStore = new UnavailableAuditRetentionStore("Production requires AuditRetention:Provider=Postgres and an initialized PostgreSQL audit schema; the local file store is development-only.");
 }
-if (integrityKeyBytes is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(integrityKeyBytes);
 builder.Services.AddSingleton<IAuditRetentionStore>(_ => auditStore);
 var sharedWorkspaceStore = new SharedWorkspaceStore(postgresDataSource);
 builder.Services.AddSingleton<SharedWorkspaceStore>(_ => sharedWorkspaceStore);
+
+var auditArchiveConfiguration = builder.Configuration.GetSection("AuditArchive");
+var auditArchiveDatabase = builder.Configuration.GetConnectionString("AuditArchive");
+var auditArchiveProvider = auditArchiveConfiguration["Provider"];
+if (auditArchiveProvider?.Equals("S3ObjectLock", StringComparison.OrdinalIgnoreCase) == true
+    && !string.IsNullOrWhiteSpace(auditArchiveDatabase)
+    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Endpoint"])
+    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Region"])
+    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Bucket"])
+    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["AccessKey"])
+    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["SecretKey"])
+    && integrityKeyBytes is not null)
+{
+	NpgsqlDataSource? archiveDataSource = null;
+	S3ObjectLockAuditArchive? archiveDestination = null;
+	try
+	{
+		archiveDataSource = new NpgsqlDataSourceBuilder(auditArchiveDatabase).Build();
+		var archiveRetentionDays = builder.Configuration.GetValue("AuditRetention:MinimumRetentionDays", 2555);
+		var segmentEventCount = auditArchiveConfiguration.GetValue("SegmentEventCount", 500);
+		var objectPrefix = auditArchiveConfiguration["ObjectPrefix"] ?? "yask-ciem/audit/v1";
+		var pollIntervalSeconds = auditArchiveConfiguration.GetValue("PollIntervalSeconds", 60);
+		var maximumPendingEvents = auditArchiveConfiguration.GetValue("MaxPendingEvents", 5000L);
+		var maximumLagMinutes = auditArchiveConfiguration.GetValue("MaxLagMinutes", 60);
+		archiveDestination = new S3ObjectLockAuditArchive(
+			auditArchiveConfiguration["Endpoint"]!, auditArchiveConfiguration["Region"]!, auditArchiveConfiguration["Bucket"]!,
+			auditArchiveConfiguration["AccessKey"]!, auditArchiveConfiguration["SecretKey"]!, archiveRetentionDays);
+		var segmentArchiver = new PostgresAuditSegmentArchiver(archiveDataSource, integrityKeys!,
+			segmentEventCount, archiveRetentionDays, objectPrefix);
+		builder.Services.AddSingleton(archiveDataSource);
+		builder.Services.AddSingleton<IAuditSegmentArchive>(archiveDestination);
+		builder.Services.AddSingleton(segmentArchiver);
+		builder.Services.AddHostedService(serviceProvider => new AuditArchiveWorker(
+			serviceProvider.GetRequiredService<PostgresAuditSegmentArchiver>(),
+			serviceProvider.GetRequiredService<IAuditSegmentArchive>(),
+			serviceProvider.GetRequiredService<AuditArchiveStatus>(), pollIntervalSeconds,
+			maximumPendingEvents, maximumLagMinutes,
+			serviceProvider.GetRequiredService<ILogger<AuditArchiveWorker>>()));
+	}
+	catch (Exception exception)
+	{
+		archiveDestination?.Dispose();
+		archiveDataSource?.Dispose();
+		auditArchiveStatus.Set(false, $"WORM audit archive configuration failed: {SensitiveDataRedactor.RedactText(exception.Message)}");
+	}
+}
+else
+{
+	auditArchiveStatus.Set(false, "Configure AuditArchive:Provider=S3ObjectLock, the independent archive PostgreSQL connection, HTTPS endpoint, bucket, region, and secret-provider credentials.");
+}
+if (integrityKeyBytes is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(integrityKeyBytes);
 
 var app = builder.Build();
 
@@ -86,16 +139,23 @@ app.UseAuthorization();
 app.MapHealthChecks("/health");
 
 app.MapGet("/api/v1/health", () => Results.Ok(new ApiHealthResponse("Healthy", ApiContractVersion.Current, DateTime.UtcNow))).AllowAnonymous();
-app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) =>
+app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, SharedWorkspaceStore workspaceStore,
+	AuditArchiveStatus archiveStatus, CancellationToken cancellationToken) =>
 {
 	var audit = await retentionStore.CheckReadinessAsync(cancellationToken);
 	var workspaceReady = await workspaceStore.IsReadyAsync(cancellationToken);
-	var productionReady = audit.Ready && audit.ProductionReady && workspaceReady;
-	var response = new ApiReadinessResponse(productionReady ? "Ready" : "NotReady", true, productionReady, ApiContractVersion.Current)
+	var archive = archiveStatus.Current;
+	var productionReady = audit.Ready && audit.ProductionReady && workspaceReady && archive.Ready;
+	var response = new ApiReadinessResponse(productionReady ? "Ready" : "NotReady", audit.Ready && workspaceReady, productionReady, ApiContractVersion.Current)
 	{
 		AuditStorageReady = audit.Ready && workspaceReady,
 		ProductionReady = productionReady,
-		AuditStorageDetails = workspaceReady ? audit.Details : $"{audit.Details} PostgreSQL shared-workspace schema is unavailable."
+		AuditStorageDetails = workspaceReady ? audit.Details : $"{audit.Details} PostgreSQL shared-workspace schema is unavailable.",
+		AuditArchiveReady = archive.Ready,
+		AuditArchiveDetails = archive.Details,
+		AuditArchivePendingEvents = archive.PendingEvents,
+		AuditArchiveOldestPendingAtUtc = archive.OldestPendingAtUtc,
+		AuditArchiveLastSuccessAtUtc = archive.LastSuccessfulArchiveAtUtc
 	};
 	return Results.Json(response, statusCode: productionReady ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
 }).AllowAnonymous();
@@ -173,21 +233,7 @@ app.MapGet("/api/v1/audit/events", async (ClaimsPrincipal principal, long afterS
 
 app.MapSharedWorkspaceEndpoints(sharedWorkspaceStore);
 
-app.Run();
-
 static bool HasScope(ClaimsPrincipal principal, string requiredScope)
-    => principal.FindAll("scp").SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        .Contains(requiredScope, StringComparer.Ordinal);
-
-static byte[]? TryDecodeAuditIntegrityKey(string? value)
-{
-	if (string.IsNullOrWhiteSpace(value)) return null;
-	try
-	{
-		var bytes = Convert.FromBase64String(value);
-		if (bytes.Length >= 32) return bytes;
-		System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes);
-		return null;
-	}
-	catch (FormatException) { return null; }
-}
+	=> principal.FindAll("scp").SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+		.Contains(requiredScope, StringComparer.Ordinal);
+app.Run();
