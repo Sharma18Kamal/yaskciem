@@ -816,7 +816,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
                 if (selected.Length < _availableAccounts.Count)
                     selectedAccountKeys = selected.ToHashSet(StringComparer.OrdinalIgnoreCase);
             }
-            _liveScan = await _liveCloudScanService.ScanAsync(selectedAccountKeys, cancellation.Token);
+            _liveScan = await Task.Run(() => _liveCloudScanService.ScanAsync(selectedAccountKeys, cancellation.Token), cancellation.Token);
             ScanStatusMessage = FormatScanSummary(_liveScan);
             await RefreshAsync();
         }

@@ -6,6 +6,7 @@ using CloudEntitle.Application.Interfaces;
 
 public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
 {
+    private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(3);
     public async Task<CloudCommandResult> RunAsync(
         string command,
         IReadOnlyList<string> arguments,
@@ -20,6 +21,7 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
                 : executable.IsBatchFile ? "cmd.exe" : executable.Path,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
@@ -57,9 +59,12 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
 
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
+        process.StandardInput.Close();
+        using var timeout = new CancellationTokenSource(CommandTimeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
         {
-            await process.WaitForExitAsync(cancellationToken);
+            await process.WaitForExitAsync(linked.Token);
         }
         catch (OperationCanceledException)
         {
@@ -76,7 +81,8 @@ public sealed class ProcessCloudCommandRunner : ICloudCommandRunner
 
             await process.WaitForExitAsync(CancellationToken.None);
             await Task.WhenAll(outputTask, errorTask);
-            throw;
+            if (cancellationToken.IsCancellationRequested) throw;
+            return new CloudCommandResult(-1, string.Empty, $"{command} timed out after {CommandTimeout.TotalMinutes:0} minutes.");
         }
 
         return new CloudCommandResult(

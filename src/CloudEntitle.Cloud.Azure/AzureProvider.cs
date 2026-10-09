@@ -10,6 +10,10 @@ using CloudEntitle.Cloud.Azure.Mappers;
 
 public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvider, IRoleProvider, IPermissionProvider, ICloudEffectiveAccessProvider, IEntraDirectoryProvider, ICloudProviderDiagnostics
 {
+    private const string MicrosoftFirstPartyTenantId = "f8cdef31-a31e-4b4a-93e4-5f571e91255a";
+    private const int GraphBatchSize = 10;
+    private static readonly TimeSpan EntraEnrichmentBudget = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan EntraDirectoryBudget = TimeSpan.FromMinutes(4);
     private readonly ICloudCommandRunner? _commandRunner;
     private readonly bool _useLiveDiscovery;
     private readonly Dictionary<Guid, CloudAccount> _accounts = new();
@@ -264,17 +268,22 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
         return element.ValueKind == JsonValueKind.String ? element.GetString() : null;
     }
 
-    public async Task<EntraDirectoryScanResult> DiscoverEntraDirectoryAsync(Guid accountId, CancellationToken cancellationToken = default)
+    public async Task<EntraDirectoryScanResult> DiscoverEntraDirectoryAsync(Guid accountId, CancellationToken callerToken = default)
     {
         if (!_useLiveDiscovery)
         {
             return new EntraDirectoryScanResult(Array.Empty<CloudPrincipal>(), Array.Empty<CloudEffectiveAccessAssignment>(), Array.Empty<string>());
         }
 
+        using var directoryBudget = CancellationTokenSource.CreateLinkedTokenSource(callerToken);
+        directoryBudget.CancelAfter(EntraDirectoryBudget);
+        var cancellationToken = directoryBudget.Token;
         var principals = new List<CloudPrincipal>();
         var accessAssignments = new List<CloudEffectiveAccessAssignment>();
         var messages = new List<string>();
 
+        try
+        {
         await LoadDirectoryCollectionAsync("users", "https://graph.microsoft.com/v1.0/users?$select=id,displayName,userPrincipalName,accountEnabled&$top=999", element =>
         {
             principals.Add(new CloudPrincipal
@@ -312,13 +321,18 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
             "eligible PIM assignments",
             "https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilityScheduleInstances?$expand=principal,roleDefinition&$top=999",
             "Eligible (PIM)");
+        }
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        {
+            messages.Add($"Azure Entra directory discovery stopped after {EntraDirectoryBudget.TotalSeconds:0} seconds; results are partial.");
+        }
 
         messages.Add($"Azure Entra: discovered {principals.Count} directory identities and {accessAssignments.Count} PIM role schedule(s).");
         return new EntraDirectoryScanResult(principals, accessAssignments, messages);
 
         async Task LoadServicePrincipalsAsync()
         {
-            const string servicePrincipalUrl = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,displayName,appId,servicePrincipalType,accountEnabled,passwordCredentials,keyCredentials&$top=999";
+            const string servicePrincipalUrl = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,displayName,appId,servicePrincipalType,appOwnerOrganizationId,accountEnabled,passwordCredentials,keyCredentials&$top=999";
             IReadOnlyList<JsonElement> servicePrincipals;
             try
             {
@@ -330,6 +344,7 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
                 return;
             }
 
+            var pending = new List<(CloudPrincipal Principal, string PrincipalId, string? AppId)>();
             foreach (var element in servicePrincipals)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -348,47 +363,101 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
                 MapCredentialEvidence(element, principal);
                 principals.Add(principal);
 
-                if (string.IsNullOrWhiteSpace(principalId)) continue;
-                try
-                {
-                    var owners = await GetGraphCollectionAsync($"https://graph.microsoft.com/v1.0/servicePrincipals/{Uri.EscapeDataString(principalId)}/owners?$select=id&$top=999", cancellationToken);
-                    principal.OwnerIds = owners.Select(owner => ReadString(owner, "id")).Where(id => !string.IsNullOrWhiteSpace(id)).Cast<string>().ToList();
-                    principal.OwnerInventoryComplete = true;
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    principal.OwnerInventoryComplete = false;
-                    messages.Add($"Azure Entra owners unavailable for {principal.Name}: {exception.Message}");
-                }
+                // Microsoft first-party apps number in the hundreds and each lookup spawns the Azure CLI.
+                if (string.IsNullOrWhiteSpace(principalId)
+                    || string.Equals(ReadString(element, "appOwnerOrganizationId"), MicrosoftFirstPartyTenantId, StringComparison.OrdinalIgnoreCase)) continue;
+                pending.Add((principal, principalId, principal.IdentityType == IdentityType.ServicePrincipal ? ReadString(element, "appId") : null));
+            }
 
-                if (principal.IdentityType != IdentityType.ServicePrincipal || string.IsNullOrWhiteSpace(ReadString(element, "appId"))) continue;
-                var federatedCredentials = await RunAzAsync(new[] { "ad", "app", "federated-credential", "list", "--id", ReadString(element, "appId")!, "--output", "json" }, cancellationToken);
-                if (!federatedCredentials.IsSuccess)
+            // Owners and federated credentials go through Graph $batch (20 per CLI call) under a time budget so a large tenant cannot stall the scan.
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(EntraEnrichmentBudget);
+            var batches = pending.Chunk(GraphBatchSize).ToArray();
+            var ownersFailed = 0;
+            var federationFailed = 0;
+            try
+            {
+                await Parallel.ForEachAsync(batches, new ParallelOptions { MaxDegreeOfParallelism = 3, CancellationToken = budget.Token }, async (batch, token) =>
                 {
-                    principal.FederationInventoryComplete = false;
-                    messages.Add($"Azure Entra federated credentials unavailable for {principal.Name}: {federatedCredentials.StandardError.Trim()}");
-                    continue;
-                }
-
-                try
-                {
-                    using var federationDocument = JsonDocument.Parse(federatedCredentials.StandardOutput);
-                    principal.FederationTrusts = ParseFederationTrusts(federationDocument.RootElement);
-                    principal.FederationInventoryComplete = true;
-                    if (principal.FederationTrusts.Count > 0)
+                    var requests = new List<(string Id, string Url)>();
+                    for (var index = 0; index < batch.Length; index++)
                     {
-                        var firstTrust = principal.FederationTrusts[0];
-                        principal.FederationIssuer = firstTrust.Issuer;
-                        principal.FederationSubject = firstTrust.Subject;
-                        principal.FederationAudience = string.Join(",", firstTrust.Audiences);
+                        requests.Add(($"o{index}", $"/servicePrincipals/{Uri.EscapeDataString(batch[index].PrincipalId)}/owners?$select=id&$top=999"));
+                        if (!string.IsNullOrWhiteSpace(batch[index].AppId))
+                            requests.Add(($"f{index}", $"/applications(appId='{Uri.EscapeDataString(batch[index].AppId!)}')/federatedIdentityCredentials"));
                     }
-                }
-                catch (JsonException exception)
+
+                    var responses = await GraphBatchAsync(requests, token);
+                    for (var index = 0; index < batch.Length; index++)
+                    {
+                        var principal = batch[index].Principal;
+                        if (responses.TryGetValue($"o{index}", out var owners) && owners.Status is >= 200 and < 300 && owners.Body.ValueKind == JsonValueKind.Object
+                            && !owners.Body.TryGetProperty("@odata.nextLink", out _))
+                        {
+                            principal.OwnerIds = (owners.Body.TryGetProperty("value", out var ownerValues) && ownerValues.ValueKind == JsonValueKind.Array ? ownerValues.EnumerateArray() : Enumerable.Empty<JsonElement>())
+                                .Select(owner => ReadString(owner, "id")).Where(id => !string.IsNullOrWhiteSpace(id)).Cast<string>().ToList();
+                            principal.OwnerInventoryComplete = true;
+                        }
+                        else
+                        {
+                            principal.OwnerInventoryComplete = false;
+                            Interlocked.Increment(ref ownersFailed);
+                        }
+
+                        if (string.IsNullOrWhiteSpace(batch[index].AppId)) continue;
+                        if (responses.TryGetValue($"f{index}", out var federation) && federation.Status is >= 200 and < 300
+                            && federation.Body.ValueKind == JsonValueKind.Object && federation.Body.TryGetProperty("value", out var federationValues))
+                        {
+                            principal.FederationTrusts = ParseFederationTrusts(federationValues);
+                            principal.FederationInventoryComplete = true;
+                            if (principal.FederationTrusts.Count > 0)
+                            {
+                                var firstTrust = principal.FederationTrusts[0];
+                                principal.FederationIssuer = firstTrust.Issuer;
+                                principal.FederationSubject = firstTrust.Subject;
+                                principal.FederationAudience = string.Join(",", firstTrust.Audiences);
+                            }
+                        }
+                        else
+                        {
+                            principal.FederationInventoryComplete = false;
+                            Interlocked.Increment(ref federationFailed);
+                        }
+                    }
+                });
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                lock (messages) messages.Add($"Azure Entra owner and federated-credential lookups stopped after {EntraEnrichmentBudget.TotalSeconds:0} seconds; remaining identities are reported as incomplete.");
+            }
+
+            if (ownersFailed > 0) lock (messages) messages.Add($"Azure Entra owners unavailable for {ownersFailed} service principal(s).");
+            if (federationFailed > 0) lock (messages) messages.Add($"Azure Entra federated credentials unavailable for {federationFailed} application(s).");
+        }
+
+        async Task<Dictionary<string, (int Status, JsonElement Body)>> GraphBatchAsync(IReadOnlyList<(string Id, string Url)> requests, CancellationToken token)
+        {
+            var results = new Dictionary<string, (int Status, JsonElement Body)>();
+            var payload = JsonSerializer.Serialize(new { requests = requests.Select(request => new { id = request.Id, method = "GET", url = request.Url }) });
+            var result = await RunAzAsync(new[] { "rest", "--method", "POST", "--url", "https://graph.microsoft.com/v1.0/$batch", "--body", payload, "--output", "json" }, token);
+            if (!result.IsSuccess) return results;
+            try
+            {
+                using var document = JsonDocument.Parse(result.StandardOutput);
+                if (!document.RootElement.TryGetProperty("responses", out var responses) || responses.ValueKind != JsonValueKind.Array) return results;
+                foreach (var response in responses.EnumerateArray())
                 {
-                    principal.FederationInventoryComplete = false;
-                    messages.Add($"Azure Entra federated credential response was invalid for {principal.Name}: {exception.Message}");
+                    var id = ReadString(response, "id");
+                    if (id is null) continue;
+                    var status = response.TryGetProperty("status", out var statusElement) && statusElement.TryGetInt32(out var code) ? code : 0;
+                    results[id] = (status, response.TryGetProperty("body", out var body) ? body.Clone() : default);
                 }
             }
+            catch (JsonException)
+            {
+            }
+
+            return results;
         }
 
         static void MapCredentialEvidence(JsonElement servicePrincipal, CloudPrincipal principal)
@@ -716,7 +785,7 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
         {
             cancellationToken.ThrowIfCancellationRequested();
             result = await _commandRunner!.RunAsync("az", arguments, cancellationToken);
-            if (result.IsSuccess || attempt == 2) return result;
+            if (result.IsSuccess || attempt == 2 || IsPermanentFailure(result.StandardError)) return result;
             await Task.Delay(TimeSpan.FromMilliseconds(100 * Math.Pow(2, attempt)), cancellationToken);
         }
 
@@ -724,6 +793,10 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
     }
 
     private sealed record RoleAssignmentRecord(string? PrincipalId, string? RoleId, string? Scope);
+
+    private static bool IsPermanentFailure(string error)
+        => new[] { "Forbidden", "Unauthorized", "AuthorizationFailed", "Authorization_RequestDenied", "PermissionScopeNotGranted", "Insufficient privileges", "NotFound", "BadRequest", "az login", "timed out" }
+            .Any(marker => error.Contains(marker, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsPrivilegedAssignment(JsonElement assignment)
         => assignment.TryGetProperty("roleDefinitionName", out var role)

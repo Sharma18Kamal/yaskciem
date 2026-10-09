@@ -61,7 +61,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IMonitoringScheduleStore, LocalMonitoringScheduleStore>();
 		services.AddSingleton<ContinuousMonitoringService>();
 		services.AddSingleton<ITrialService, TrialService>();
-		services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
+		services.AddSingleton<ICloudCommandRunner>(_ => new LoggingCloudCommandRunner(new ProcessCloudCommandRunner()));
 		services.AddSingleton<IPostureNotificationChannel>(_ => new WebhookPostureNotificationChannel());
 		services.AddSingleton<IJiraConnectionSettingsStore, LocalJiraConnectionSettingsStore>();
 		services.AddSingleton<ITicketingCredentialStore, WindowsTicketingCredentialStore>();
