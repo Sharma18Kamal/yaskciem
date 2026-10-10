@@ -8,6 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>YASK-CIEM-Setup</AssemblyName>
     <Version>$(Version)</Version>
+    <InformationalVersion>$(Version)+$(BuildTimestamp)</InformationalVersion>
     <PublishSingleFile>true</PublishSingleFile>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>

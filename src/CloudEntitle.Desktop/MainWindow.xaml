@@ -9,9 +9,28 @@
         <Border Grid.Row="0" Background="{StaticResource HeaderBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="28,0" MouseLeftButtonDown="WindowHeader_MouseLeftButtonDown">
             <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="YASK-CIEM" Foreground="{StaticResource PrimaryBrush}" FontSize="18" FontWeight="Bold"/>
-                    <TextBlock Text="Cloud identity exposure management" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="42" Height="42" CornerRadius="11" Margin="0,0,14,0" VerticalAlignment="Center">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#2F79BF" Offset="0"/>
+                                <GradientStop Color="#193B5D" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <Border.Effect><DropShadowEffect Color="#2F79BF" BlurRadius="12" ShadowDepth="2" Opacity="0.35"/></Border.Effect>
+                        <TextBlock Text="Y" Foreground="White" FontFamily="Segoe UI Variable Display, Segoe UI" FontSize="24" FontWeight="Black" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+                    </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="YASK-CIEM" FontFamily="Segoe UI Variable Display, Segoe UI Semibold, Segoe UI" FontSize="26" FontWeight="ExtraBold">
+                            <TextBlock.Foreground>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="#193B5D" Offset="0"/>
+                                    <GradientStop Color="#2F79BF" Offset="1"/>
+                                </LinearGradientBrush>
+                            </TextBlock.Foreground>
+                        </TextBlock>
+                        <TextBlock Text="CLOUD IDENTITY EXPOSURE MANAGEMENT" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="1,1,0,0"/>
+                    </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <Border Style="{StaticResource StatusPill}" ToolTip="Fourteen-day local trial status. The trial continues across app reinstalls on this Windows installation."><TextBlock Text="{Binding TrialStatusText}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>

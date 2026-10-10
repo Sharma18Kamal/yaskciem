@@ -16,6 +16,7 @@ if (-not [Version]::TryParse($PackageVersion, [ref]$version) -or $version.Revisi
 $msiThirdVersion = ($version.Build * 1000) + $version.Revision
 if ($msiThirdVersion -gt 65535) { throw 'The encoded MSI version component cannot exceed 65535.' }
 $msiVersion = "$($version.Major).$($version.Minor).$msiThirdVersion"
+$buildTimestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd\THH:mm\Z')
 $outputDirectory = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     Join-Path $repositoryRoot "artifacts\native-installers-$PackageVersion"
 }
@@ -59,7 +60,7 @@ New-Item $outputDirectory -ItemType Directory -Force | Out-Null
 & $publishScript -Configuration Release -Runtime win-x64 -OutputPath $publishDirectory
 if ($LASTEXITCODE -ne 0) { throw "Desktop publish failed with exit code $LASTEXITCODE." }
 
-& $WixExePath build -arch x64 -d "ProductVersion=$msiVersion" -b "PublishedApp=$publishDirectory" -o $msiPath $wixSource
+& $WixExePath build -arch x64 -d "ProductVersion=$msiVersion" -d "FullVersion=$PackageVersion" -d "BuildTimestamp=$buildTimestamp" -b "PublishedApp=$publishDirectory" -o $msiPath $wixSource
 if ($LASTEXITCODE -ne 0) { throw "WiX MSI build failed with exit code $LASTEXITCODE." }
 
 & $signtoolPath sign /fd SHA256 /s My /sha1 $CertificateThumbprint $msiPath
@@ -73,7 +74,8 @@ if ($LASTEXITCODE -ne 0) { throw "Setup project restore failed with exit code $L
     --no-restore `
     --output $setupPublishDirectory `
     "-p:MsiPath=$msiPath" `
-    "-p:Version=$PackageVersion"
+    "-p:Version=$PackageVersion" `
+    "-p:BuildTimestamp=$buildTimestamp"
 if ($LASTEXITCODE -ne 0) { throw "Setup EXE publish failed with exit code $LASTEXITCODE." }
 
 $publishedSetupExe = Join-Path $setupPublishDirectory 'YASK-CIEM-Setup.exe'

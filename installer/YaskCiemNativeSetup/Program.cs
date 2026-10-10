@@ -18,8 +18,10 @@ internal static class Program
     {
         var extractedMsiPath = Path.Combine(Path.GetTempPath(), $"YASK-CIEM-{Guid.NewGuid():N}.msi");
         var logPath = Path.Combine(Path.GetTempPath(), "YASK-CIEM-Setup.log");
+        var title = $"YASK-CIEM Setup {BuildLabel()}";
         try
         {
+            if (MessageBoxW(IntPtr.Zero, $"Install YASK-CIEM?\n\n{BuildLabel()}", title, 0x21) != 1) return 2;
             await using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream(MsiResourceName)
                 ?? throw new InvalidOperationException("The embedded YASK-CIEM MSI is missing."))
             await using (var output = File.Create(extractedMsiPath))
@@ -47,7 +49,7 @@ internal static class Program
 
             if (installer.ExitCode is 0 or 3010)
             {
-                var launch = MessageBoxW(IntPtr.Zero, "YASK-CIEM was installed successfully.\n\nLaunch it now?", "YASK-CIEM Setup", 0x24) == 6;
+                var launch = MessageBoxW(IntPtr.Zero, $"YASK-CIEM was installed successfully.\n\n{BuildLabel()}\n\nLaunch it now?", title, 0x24) == 6;
                 if (launch)
                 {
                     var appPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "YASK-CIEM", "CloudEntitle.Desktop.exe");
@@ -56,7 +58,7 @@ internal static class Program
                 return 0;
             }
 
-            MessageBoxW(IntPtr.Zero, $"YASK-CIEM installation failed (Windows Installer code {installer.ExitCode}).\n\nDetails: {logPath}", "YASK-CIEM Setup", 0x10);
+            MessageBoxW(IntPtr.Zero, $"YASK-CIEM installation failed (Windows Installer code {installer.ExitCode}).\n\n{BuildLabel()}\nDetails: {logPath}", title, 0x10);
             return installer.ExitCode;
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
@@ -66,7 +68,7 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            MessageBoxW(IntPtr.Zero, $"YASK-CIEM Setup failed: {exception.Message}", "YASK-CIEM Setup", 0x10);
+            MessageBoxW(IntPtr.Zero, $"YASK-CIEM Setup failed: {exception.Message}", title, 0x10);
             return 1;
         }
         finally
@@ -83,6 +85,13 @@ internal static class Program
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+    private static string BuildLabel()
+    {
+        var info = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? string.Empty;
+        var parts = info.Split('+', 2);
+        return parts.Length == 2 ? $"Version {parts[0]} (built {parts[1].Replace('T', ' ')})" : $"Version {parts[0]}";
+    }
 
     private static string? FindInstalledProduct()
     {
