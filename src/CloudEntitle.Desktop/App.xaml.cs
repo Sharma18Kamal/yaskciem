@@ -58,11 +58,15 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<IReportService, SqliteReportService>();
 		services.AddSingleton<ILiveScanHistoryStore, LocalLiveScanHistoryStore>();
+		services.AddSingleton<ILocalDataBackupService, LocalDataBackupService>();
 		services.AddSingleton<IMonitoringScheduleStore, LocalMonitoringScheduleStore>();
 		services.AddSingleton<ContinuousMonitoringService>();
 		services.AddSingleton<ITrialService, TrialService>();
 		services.AddSingleton<ICloudCommandRunner>(_ => new LoggingCloudCommandRunner(new ProcessCloudCommandRunner()));
-		services.AddSingleton<IPostureNotificationChannel>(_ => new WebhookPostureNotificationChannel());
+		services.AddSingleton<IPostureWebhookCredentialStore, WindowsPostureWebhookCredentialStore>();
+		services.AddSingleton<IPostureNotificationChannel>(provider => new WebhookPostureNotificationChannel(
+			new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) },
+			provider.GetRequiredService<IPostureWebhookCredentialStore>().ReadUrl));
 		services.AddSingleton<IJiraConnectionSettingsStore, LocalJiraConnectionSettingsStore>();
 		services.AddSingleton<ITicketingCredentialStore, WindowsTicketingCredentialStore>();
 		services.AddSingleton<ITicketingRequestStore, LocalTicketingRequestStore>();

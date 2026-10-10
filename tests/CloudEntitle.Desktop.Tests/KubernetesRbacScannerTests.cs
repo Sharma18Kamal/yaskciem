@@ -67,6 +67,40 @@ public sealed class KubernetesRbacScannerTests
     }
 
     [Fact]
+    public async Task ClusterDiscovery_ShouldBeReadOnlyAndScanOnlySelectedContexts()
+    {
+        var runner = new FakeKubectlRunner(includeAllProviders: true);
+        var scanner = new KubernetesRbacScanner(runner);
+
+        var discovered = await scanner.DiscoverClustersAsync();
+
+        Assert.Equal(3, discovered.Count);
+        Assert.Empty(runner.ScannedContexts);
+        var selectedCluster = Assert.Single(discovered, cluster => cluster.CloudProvider == CloudProviderType.Gcp);
+        var selectedKey = LiveScanAccountRecord.CreateSelectionKey(
+            selectedCluster.CloudProvider.ToString(), selectedCluster.ExternalAccountId!, selectedCluster.Description ?? string.Empty);
+
+        var result = await scanner.ScanKubernetesRbacAsync(default, null, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { selectedKey });
+
+        var scanned = Assert.Single(result.Clusters);
+        Assert.Equal(selectedCluster.Name, scanned.Cluster.Name);
+        Assert.Equal(new[] { selectedCluster.Name }, runner.ScannedContexts.Distinct().ToArray());
+    }
+
+    [Fact]
+    public async Task LiveAccountDiscovery_ShouldIncludeKubernetesContextsWithoutCloudCliSignIn()
+    {
+        var scanner = new KubernetesRbacScanner(new FakeKubectlRunner());
+        var liveScan = new LiveCloudScanService(Array.Empty<ICloudProvider>(), kubernetesRbacProvider: scanner);
+
+        var accounts = await liveScan.DiscoverAccountsAsync();
+
+        var cluster = Assert.Single(accounts);
+        Assert.Equal("Kubernetes RBAC", cluster.PermissionSet);
+        Assert.Equal("Aws", cluster.Provider);
+    }
+
+    [Fact]
     public async Task LiveScan_ShouldIncludeKubernetesClusterAndAccessPaths()
     {
         var scanner = new KubernetesRbacScanner(new FakeKubectlRunner());
@@ -94,11 +128,14 @@ public sealed class KubernetesRbacScannerTests
     private sealed class FakeKubectlRunner : ICloudCommandRunner
     {
         private readonly bool _includeAllProviders;
+        public List<string> ScannedContexts { get; } = new();
 
         public FakeKubectlRunner(bool includeAllProviders = false) => _includeAllProviders = includeAllProviders;
 
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
+            if (command == "kubectl" && arguments.Count > 1 && arguments[0] == "--context")
+                ScannedContexts.Add(arguments[1]);
             if (command == "aws")
             {
                 if (arguments.Contains("get-caller-identity")) return Task.FromResult(new CloudCommandResult(0, "{\"Account\":\"123456789012\"}", string.Empty));

@@ -85,7 +85,7 @@ You can drag the header to move the window.
 
 ## Part 3 - Connecting a cloud
 
-You connect with your existing CLI identity. **Connect one provider at a time.**
+Connect Azure, AWS, and Google Cloud independently with their existing CLI identities. You may keep multiple providers connected; only one interactive sign-in flow runs at a time. Each provider retains its own account scope and scan coverage.
 
 ### 3.1 Step by step
 
@@ -96,9 +96,9 @@ You connect with your existing CLI identity. **Connect one provider at a time.**
    - Google Cloud: `gcloud auth login`
 3. Finish the sign-in in the browser.
 4. Return to the app. If the status does not change, click **Refresh sign-in status**.
-5. The left card shows, for example, "Azure connected".
+5. The provider card shows its connection status. Repeat for another provider if needed.
 
-To sign out, use **Disconnect** on the provider card, or **Disconnect Cloud** in the header (also cancels a pending sign-in).
+To sign out of one provider, use **Disconnect** on that provider card. **Disconnect Cloud** opens Cloud Accounts; use the provider-specific Disconnect action. A pending sign-in can be canceled separately.
 
 ### 3.2 Permissions needed
 
@@ -132,12 +132,12 @@ For Azure PIM data, a tenant administrator must grant admin consent for `RoleAss
 ### 4.2 Step by step
 
 1. Connect a cloud (Part 3).
-2. Optional: click **Discover accounts**, open the account list, tick the accounts to scan (**Select all** / **Select none**). If you do not pick, all accounts are scanned.
-3. Click **Scan Now**. "Cloud scan in progress" appears with a moving bar.
-4. Wait for completion. A summary line shows accounts, identities, resources and effective-access assignments, and how many sources need attention.
+2. Optional: click **Discover accounts**, open the account list, tick the cloud accounts and Kubernetes contexts to scan (**Select all** / **Select none**). If you do not pick, all discovered scopes are scanned.
+3. Click **Scan Now**. The status reports the current provider, account and data source as discovery proceeds.
+4. Wait for completion. A summary line shows accounts, identities, resources and effective-access assignments, and how many sources need attention. Failed or unavailable sources remain visible in **Source coverage**.
 5. Review the cards below and open the other pages.
 
-Typical duration is about a minute for a small tenant and longer for large tenants. Entra lookups are capped (directory discovery stops after 4 minutes and results are marked partial).
+The scan includes all connected providers and selected accounts/contexts for each. Kubernetes context discovery reads local kubeconfig; RBAC calls run only for selected contexts. Typical duration is about a minute for a small tenant and longer for large tenants. Entra lookups are capped (directory discovery stops after 4 minutes and results are marked partial). **Stop Scan** cancels the current scan; the last completed scan remains available.
 
 ### 4.3 Dashboard cards
 
@@ -295,17 +295,29 @@ Shared features need the central service URL (`YASK_CIEM_API_BASE_URL`, HTTPS) t
 | Application | Shows version and the data location |
 | **Demo mode** | **Load Demo Data** fills the app with synthetic Azure, AWS and GCP data (no cloud access). **Reset Demo Data** clears it |
 | **Continuous monitoring** | Tick **Enable scheduled scans**, choose an interval (5 minutes to 7 days), click **Save schedule**. Scans run while the app is open |
+| **Posture alerts** | Save an organization-approved HTTPS webhook endpoint. It is protected in Windows Credential Manager; eligible high-impact posture changes are delivered after a scan |
 | Cloud connections | Use Connect Cloud in the header |
 | **Ticketing connection** | Choose the system (native: Jira, Jira Service Management, ServiceNow; others use a signed webhook). Enter HTTPS site URL, project key or service desk ID, issue/request type, optional signed webhook URL, API user and token. **Save URL**, **Save credential** (stored in Windows Credential Manager) and then the request button |
 
 ---
 
-## Part 9 - Feedback
+## Part 9 - Local backup and restore
+
+Open **Settings > Local Data Backup**:
+
+1. **Create backup** saves a `.yaskbackup` archive containing the SQLite database and supported local workflow records, including scan history, access reviews and remediation plans.
+2. Protect the archive as sensitive identity and access data. Ticketing credentials, webhook endpoints, CLI tokens, logs and generated reports are excluded.
+3. **Restore backup** replaces the current local database and supported workflow records. Review the confirmation carefully; ticketing and webhook credentials are not changed.
+4. Close and restart YASK-CIEM after a successful restore so screens reload the restored database.
+
+---
+
+## Part 10 - Feedback
 Open **Feedback**, fill in **Your feedback** and **Suggestions** (both required), then **Submit Feedback**. It is stored locally.
 
 ---
 
-## Part 10 - Where data is stored
+## Part 11 - Where data is stored
 
 | Item | Location |
 |---|---|
@@ -313,15 +325,16 @@ Open **Feedback**, fill in **Your feedback** and **Suggestions** (both required)
 | Database | `%LOCALAPPDATA%\CloudEntitle\Data\cloudentitle.db` |
 | Application logs | `%LOCALAPPDATA%\CloudEntitle\Logs\application-<date>.log` |
 | Installer log | `%TEMP%\YASK-CIEM-Setup.log` |
+| Posture alert endpoint | Windows Credential Manager for the current Windows user |
 
 The application log lists every cloud CLI command with its duration, which helps diagnose slow scans.
 
 ---
 
-## Part 11 - Recommended workflow
+## Part 12 - Recommended workflow
 
 1. Install and start the app.
-2. Connect one cloud and run **Scan Now**.
+2. Connect one or more clouds and run **Scan Now**.
 3. Check the Dashboard cards, especially Source coverage.
 4. Open **Risk Findings**; handle Critical items first.
 5. Use **Effective Access** and **Access Paths** to understand each finding.
@@ -332,12 +345,12 @@ The application log lists every cloud CLI command with its duration, which helps
 
 ---
 
-## Part 12 - Troubleshooting
+## Part 13 - Troubleshooting
 
 | Symptom | Likely cause and action |
 |---|---|
 | "No active CLI sign-in" | Run `az login` (or the AWS/GCP command) and click Refresh sign-in status |
-| Scan stays in progress | Large tenant. Wait, or **Stop Scan**; check the log for the slow CLI command |
+| Scan stays in progress | Follow the current provider/account/source in the dashboard. Check **Source coverage** and the application log for a slow CLI command; use **Stop Scan** if needed |
 | Dashboard shows zeros | No scan yet, or the scan found no data; read Scan History messages |
 | PIM data unavailable | Tenant admin must grant Graph consent; permanent role assignments are still shown |
 | Reviewer list is empty | Scan first; users must be active and hold a qualifying role |
@@ -347,11 +360,11 @@ The application log lists every cloud CLI command with its duration, which helps
 
 ---
 
-## Part 13 - Review questions
+## Part 14 - Review questions
 
 1. Why is a YASK-CIEM scan safe to run in production?
 2. What is the difference between an entitlement and effective access?
-3. Which providers can you connect at the same time?
+3. Which providers can be connected at the same time, and how many sign-in flows run at once?
 4. What does blast radius tell you?
 5. Which decisions in an access review require a comment?
 6. Name three conditions a person must meet to be offered as a reviewer.
@@ -361,7 +374,7 @@ The application log lists every cloud CLI command with its duration, which helps
 **Answers**
 1. All access is read-only through your existing CLI identity; no write operations exist.
 2. An entitlement is one grant; effective access is the combined result after inheritance and groups.
-3. One at a time.
+3. Azure, AWS and Google Cloud may all remain connected; only one interactive sign-in flow runs at a time.
 4. How much could be affected if the identity or path were abused.
 5. Everything except Certified; ExceptionGranted also needs an expiry date.
 6. Active cloud user, available (not disabled), holds Global Administrator, Security Administrator or System Analyst (or equivalent).

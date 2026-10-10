@@ -72,4 +72,33 @@ public sealed class DialogService : IDialogService
 
         return dialog.ShowDialog() == true ? Path.ChangeExtension(dialog.FileName, ".zip") : null;
     }
+
+    public string? ChooseLocalBackupSavePath()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Back up YASK-CIEM local data",
+            Filter = "YASK-CIEM backup (*.yaskbackup)|*.yaskbackup",
+            DefaultExt = ".yaskbackup",
+            AddExtension = true,
+            OverwritePrompt = true,
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            FileName = $"yask-ciem-backup-{DateTime.Now:yyyyMMdd-HHmmss}.yaskbackup"
+        };
+
+        return dialog.ShowDialog() == true ? Path.ChangeExtension(dialog.FileName, ".yaskbackup") : null;
+    }
+
+    public string? ChooseLocalBackupOpenPath()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Restore YASK-CIEM local data",
+            Filter = "YASK-CIEM backup (*.yaskbackup)|*.yaskbackup",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
 }

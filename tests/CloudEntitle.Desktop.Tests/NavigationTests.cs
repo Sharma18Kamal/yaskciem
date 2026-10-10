@@ -179,7 +179,7 @@ public sealed class NavigationTests
     }
 
     [Fact]
-    public async Task CloudAccountsViewModel_ShouldDisableOtherProvidersAfterSignIn()
+    public async Task CloudAccountsViewModel_ShouldAllowMultipleProviderSignIns()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
@@ -190,9 +190,15 @@ public sealed class NavigationTests
 
         Assert.Equal(new[] { CloudProviderType.Azure }, launcher.LaunchedProviders);
         Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure).IsConnected);
-        Assert.False(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).CanConnect);
-        Assert.False(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Gcp).CanConnect);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).CanConnect);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Gcp).CanConnect);
         Assert.Contains("YASK-CIEM does not receive or store", viewModel.ConnectionGuidance);
+
+        await viewModel.ConnectAsync(CloudProviderType.Gcp);
+
+        Assert.Equal(new[] { CloudProviderType.Azure, CloudProviderType.Gcp }, launcher.LaunchedProviders);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure).IsConnected);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Gcp).IsConnected);
     }
 
     [Fact]
@@ -400,7 +406,7 @@ public sealed class NavigationTests
     }
 
     [Fact]
-    public async Task LiveCloudScan_ShouldRefuseToMixMultipleConnectedProviders()
+    public async Task LiveCloudScan_ShouldScanMultipleConnectedProvidersSeparately()
     {
         var connectionState = new CloudConnectionState();
         connectionState.Update(new[] { CloudProviderType.Azure, CloudProviderType.Gcp });
@@ -412,8 +418,9 @@ public sealed class NavigationTests
 
         var result = await scanner.ScanAsync();
 
-        Assert.Equal(0, result.AccountCount);
-        Assert.Contains(result.ProviderMessages, message => message.Contains("Multiple cloud CLIs are signed in", StringComparison.Ordinal));
+        Assert.Equal(2, result.AccountCount);
+        Assert.Equal(new[] { "Azure", "Gcp" }, result.AccountRecords.Select(account => account.Provider).OrderBy(provider => provider, StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { CloudProviderType.Azure, CloudProviderType.Gcp }, result.IdentityRecords.Select(identity => identity.CloudProvider).Distinct().OrderBy(provider => provider).ToArray());
     }
 
     [Fact]
@@ -801,11 +808,15 @@ public sealed class NavigationTests
         public string? ReportPath { get; set; }
         public string? PolicyDraftPath { get; set; }
         public string? ComplianceBundlePath { get; set; }
+        public string? LocalBackupSavePath { get; set; }
+        public string? LocalBackupOpenPath { get; set; }
         public void ShowInformation(string message, string title = "YASK-CIEM") => InformationMessages.Add(message);
         public void ShowError(string message, string title = "YASK-CIEM") { }
         public string? ChooseReportPath() => ReportPath;
         public string? ChoosePolicyDraftPath() => PolicyDraftPath;
         public string? ChooseComplianceBundlePath() => ComplianceBundlePath;
+        public string? ChooseLocalBackupSavePath() => LocalBackupSavePath;
+        public string? ChooseLocalBackupOpenPath() => LocalBackupOpenPath;
         public bool Confirm(string message, string title = "YASK-CIEM")
         {
             Confirmations.Add(message);

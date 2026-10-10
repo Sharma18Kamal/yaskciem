@@ -18,7 +18,27 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
         _trustVerifier = new CloudWorkloadTrustVerifier(commandRunner);
     }
 
-    public async Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default, CloudProviderType? providerFilter = null)
+    public async Task<IReadOnlyList<CloudAccount>> DiscoverClustersAsync(CancellationToken cancellationToken = default)
+    {
+        var configResult = await RunKubectlAsync(new[] { "config", "view", "--output=json" }, cancellationToken);
+        if (!configResult.IsSuccess) return Array.Empty<CloudAccount>();
+
+        using var config = JsonDocument.Parse(configResult.StandardOutput);
+        var root = config.RootElement;
+        if (!root.TryGetProperty("contexts", out var contexts) || contexts.ValueKind != JsonValueKind.Array)
+            return Array.Empty<CloudAccount>();
+
+        return contexts.EnumerateArray()
+            .Select(contextEntry => CreateClusterAccount(root, contextEntry))
+            .Where(cluster => cluster is not null)
+            .Cast<CloudAccount>()
+            .ToArray();
+    }
+
+    public Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default, CloudProviderType? providerFilter = null)
+        => ScanKubernetesRbacAsync(cancellationToken, providerFilter, null);
+
+    public async Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken, CloudProviderType? providerFilter, IReadOnlySet<string>? selectedClusterKeys)
     {
         var messages = new List<string>();
         var coverage = new List<ScanCoverageRecord>();
@@ -52,17 +72,10 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
             var execCommand = string.IsNullOrWhiteSpace(userName) ? null : FindNamedEntry(root, "users", userName, "user", "exec", "command");
             var cloudProvider = DetectCloudProvider(contextName, server, execCommand);
             if (providerFilter.HasValue && cloudProvider != providerFilter.Value) continue;
-            var cluster = new CloudAccount
-            {
-                Id = Guid.NewGuid(),
-                Name = contextName,
-                CloudProvider = cloudProvider,
-                ExternalAccountId = clusterName,
-                AccountType = AccountType.Cluster,
-                ConnectionStatus = ConnectionStatus.Connected,
-                IsReadOnly = true,
-                Description = $"Kubernetes context {contextName}; API server {server ?? "unknown"}"
-            };
+            var cluster = CreateClusterAccount(root, contextEntry)!;
+            var selectionKey = LiveScanAccountRecord.CreateSelectionKey(
+                cluster.CloudProvider.ToString(), cluster.ExternalAccountId ?? string.Empty, cluster.Description ?? string.Empty);
+            if (selectedClusterKeys is not null && !selectedClusterKeys.Contains(selectionKey)) continue;
 
             try
             {
@@ -258,6 +271,27 @@ public sealed class KubernetesRbacScanner : IKubernetesRbacProvider
         }
 
         return new KubernetesRbacScanResult(clusters, messages) { Coverage = coverage };
+    }
+
+    private static CloudAccount? CreateClusterAccount(JsonElement root, JsonElement contextEntry)
+    {
+        var contextName = GetString(contextEntry, "name");
+        if (string.IsNullOrWhiteSpace(contextName) || !contextEntry.TryGetProperty("context", out var context)) return null;
+        var clusterName = GetString(context, "cluster") ?? contextName;
+        var userName = GetString(context, "user");
+        var server = FindNamedEntry(root, "clusters", clusterName, "cluster", "server");
+        var execCommand = string.IsNullOrWhiteSpace(userName) ? null : FindNamedEntry(root, "users", userName, "user", "exec", "command");
+        return new CloudAccount
+        {
+            Id = Guid.NewGuid(),
+            Name = contextName,
+            CloudProvider = DetectCloudProvider(contextName, server, execCommand),
+            ExternalAccountId = clusterName,
+            AccountType = AccountType.Cluster,
+            ConnectionStatus = ConnectionStatus.Connected,
+            IsReadOnly = true,
+            Description = $"Kubernetes context {contextName}; API server {server ?? "unknown"}"
+        };
     }
 
     private async Task<IReadOnlyList<KubernetesWorkloadTrace>> BuildWorkloadTracesAsync(

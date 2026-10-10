@@ -75,6 +75,19 @@ public sealed class PostureHistoryTests
     }
 
     [Fact]
+    public async Task LiveScan_ShouldReportStartedAndCompletedDataSources()
+    {
+        var progress = new RecordingProgress<LiveScanProgress>();
+        var scanner = new LiveCloudScanService(new[] { new MutableAccessProvider() });
+
+        await scanner.ScanAsync(null, progress);
+
+        Assert.Contains(progress.Values, update => update.DataSource == "Cloud accounts" && update.State == LiveScanProgressState.Started);
+        Assert.Contains(progress.Values, update => update.DataSource == "Cloud accounts" && update.State == LiveScanProgressState.Completed && update.RecordCount == 1);
+        Assert.Contains(progress.Values, update => update.DataSource == "Effective access" && update.State == LiveScanProgressState.Completed);
+    }
+
+    [Fact]
     public async Task ConcurrentManualAndScheduledScans_ShouldRunSerially()
     {
         var provider = new BlockingDiscoveryProvider();
@@ -249,6 +262,12 @@ public sealed class PostureHistoryTests
             Assert.Single(alerts.EnumerateArray());
             return new HttpResponseMessage(HttpStatusCode.OK);
         }
+    }
+
+    private sealed class RecordingProgress<T> : IProgress<T>
+    {
+        public List<T> Values { get; } = new();
+        public void Report(T value) => Values.Add(value);
     }
 
     private sealed class MutableAccessProvider : ICloudProvider, ICloudEffectiveAccessProvider

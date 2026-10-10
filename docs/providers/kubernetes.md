@@ -12,6 +12,7 @@ The desktop scan reads contexts already present in the local kubeconfig through 
 - Traces scanned Pods and Deployments through their ServiceAccount and resolved Kubernetes role bindings to the annotated cloud identity. Azure Workload Identity label state is shown where present.
 - Verifies EKS OIDC role trust (issuer, subject, audience), GKE `roles/iam.workloadIdentityUser` bindings, and AKS federated credentials (issuer, subject, audience) using the existing provider CLI credentials. The result is `Verified`, `Mismatch`, or an explicit `Denied`/`Unavailable`/`Unsupported` status; it never infers trust from annotations alone.
 - Includes discovered cluster rows and RBAC results in the live scan and scan history.
+- Lists kubeconfig contexts in the scan account picker without querying cluster resources. Only selected contexts receive RBAC scan commands; selecting a connected cloud account does not implicitly scan every Kubernetes context.
 
 ## Coverage Boundaries
 

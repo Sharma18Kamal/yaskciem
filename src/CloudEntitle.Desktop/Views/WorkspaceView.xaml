@@ -113,7 +113,8 @@
                             </TextBlock>
                             <StackPanel>
                                 <TextBlock Text="Cloud scan in progress" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/>
-                                <TextBlock Text="{Binding ScanWaitingMessage}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding ScanElapsedText}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,3,0,0"/>
                             </StackPanel>
                         </StackPanel>
                         <ProgressBar Height="6" IsIndeterminate="True" Background="{StaticResource LineBrush}" Foreground="{StaticResource AccentBrush}" Margin="0,10,0,0" ToolTip="Scan in progress"/>
@@ -471,6 +472,17 @@
                 </Border>
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
+                        <TextBlock Text="LOCAL DATA BACKUP" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="Back up or restore the local database, scan history, and workflow records. API credentials and webhook endpoints are excluded." Foreground="{StaticResource MutedBrush}" Margin="0,12,0,8" TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Create backup" Command="{Binding CreateLocalBackupCommand}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="Restore backup" Command="{Binding RestoreLocalBackupCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding LocalDataBackupStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
                         <TextBlock Text="DEMO MODE" Style="{StaticResource CardLabel}"/>
                         <TextBlock Text="{Binding DemoModeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,12,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="Synthetic Azure, AWS, and GCP data is stored through the normal SQLite pipeline. No cloud APIs or credentials are used." Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" TextWrapping="Wrap"/>
@@ -488,6 +500,18 @@
                         <ComboBox ItemsSource="{Binding ScanIntervals}" DisplayMemberPath="Label" SelectedValuePath="Minutes" SelectedValue="{Binding SelectedScanIntervalMinutes, Mode=TwoWay}"/>
                         <Button Content="Save schedule" Command="{Binding SaveMonitoringScheduleCommand}" Style="{StaticResource PrimaryButton}" Margin="0,10,0,0"/>
                         <TextBlock Text="{Binding MonitoringService.Status}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="POSTURE ALERTS" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="Send new high-impact posture changes to an HTTPS webhook. The endpoint is stored in Windows Credential Manager." Foreground="{StaticResource MutedBrush}" Margin="0,12,0,8" TextWrapping="Wrap"/>
+                        <PasswordBox x:Name="PostureWebhookUrlBox" MaxLength="2048" ToolTip="Secret-bearing HTTPS webhook URL; never written to the settings file."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="Save alert endpoint" Tag="PostureWebhookUrlBox" Click="SavePostureWebhookCredential_Click" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="Remove endpoint" Command="{Binding RemovePostureWebhookCredentialCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding PostureWebhookStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
                 <Border Style="{StaticResource SectionCard}">
@@ -512,11 +536,11 @@
                         <TextBlock Text="API username / email" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
                         <TextBox Text="{Binding TicketingUserName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Username or email required by the selected provider's API."/>
                         <TextBlock Text="API token / secret" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
-                        <PasswordBox MaxLength="2048" ToolTip="Saved only to Windows Credential Manager for this provider."/>
+                        <PasswordBox x:Name="TicketingCredentialBox" MaxLength="2048" ToolTip="Saved only to Windows Credential Manager for this provider."/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                             <Button Content="Save URL" Command="{Binding SaveTicketingConnectionCommand}" Style="{StaticResource PrimaryButton}"/>
                             <Button Content="{Binding TicketingRequestButtonText}" Command="{Binding OpenTicketingRequestCommand}" IsEnabled="{Binding CanOpenTicketingRequest}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                            <Button Content="Save credential" Click="SaveTicketingCredentials_Click" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <Button Content="Save credential" Tag="TicketingCredentialBox" Click="SaveTicketingCredentials_Click" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
                         </StackPanel>
                         <TextBlock Text="{Binding TicketingConnectionStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding TicketingCredentialStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>

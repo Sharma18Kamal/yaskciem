@@ -151,7 +151,7 @@ public sealed class WebhookPostureNotificationChannel : IPostureNotificationChan
     private readonly HttpClient _httpClient;
     private readonly Func<string?> _getWebhookUrl;
 
-    public WebhookPostureNotificationChannel() : this(SharedClient, () => Environment.GetEnvironmentVariable("YASK_CIEM_ALERT_WEBHOOK_URL")) { }
+    public WebhookPostureNotificationChannel() : this(SharedClient, ReadConfiguredWebhookUrl) { }
 
     public WebhookPostureNotificationChannel(HttpClient httpClient, Func<string?> getWebhookUrl)
     {
@@ -164,7 +164,15 @@ public sealed class WebhookPostureNotificationChannel : IPostureNotificationChan
         var eligible = alerts.Where(alert => alert.AlertEligible).ToArray();
         if (eligible.Length == 0) return new PostureNotificationResult(false, 0, "No new high-impact posture alerts.");
 
-        var webhookUrl = _getWebhookUrl();
+        string? webhookUrl;
+        try
+        {
+            webhookUrl = _getWebhookUrl();
+        }
+        catch (Exception exception)
+        {
+            return new PostureNotificationResult(true, 0, $"Webhook configuration could not be read ({exception.GetType().Name}).");
+        }
         if (string.IsNullOrWhiteSpace(webhookUrl)) return new PostureNotificationResult(false, 0, "Webhook not configured (YASK_CIEM_ALERT_WEBHOOK_URL); alert delivery skipped.");
         if (!Uri.TryCreate(webhookUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
             return new PostureNotificationResult(true, 0, "Webhook URL must be an absolute HTTPS URL. The configured URL was not logged.");
@@ -201,5 +209,11 @@ public sealed class WebhookPostureNotificationChannel : IPostureNotificationChan
         {
             return new PostureNotificationResult(true, 0, $"Webhook delivery failed ({exception.GetType().Name}); the URL was not logged.");
         }
+    }
+
+    private static string? ReadConfiguredWebhookUrl()
+    {
+        var credentialUrl = new WindowsPostureWebhookCredentialStore().ReadUrl();
+        return credentialUrl ?? Environment.GetEnvironmentVariable("YASK_CIEM_ALERT_WEBHOOK_URL");
     }
 }

@@ -99,7 +99,11 @@ public sealed record CloudOrganizationScanResult(IReadOnlyList<CloudAccount> Acc
 
 public interface IKubernetesRbacProvider
 {
+    Task<IReadOnlyList<CloudAccount>> DiscoverClustersAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<CloudAccount>>(Array.Empty<CloudAccount>());
     Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken = default, CloudProviderType? providerFilter = null);
+    Task<KubernetesRbacScanResult> ScanKubernetesRbacAsync(CancellationToken cancellationToken, CloudProviderType? providerFilter, IReadOnlySet<string>? selectedClusterKeys)
+        => ScanKubernetesRbacAsync(cancellationToken, providerFilter);
 }
 
 public sealed record KubernetesRbacScanResult(IReadOnlyList<KubernetesClusterScan> Clusters, IReadOnlyList<string> ProviderMessages)

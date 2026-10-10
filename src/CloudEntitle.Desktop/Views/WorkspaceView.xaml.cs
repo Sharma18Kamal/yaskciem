@@ -17,10 +17,20 @@ public partial class WorkspaceView : UserControl
     private async void SaveTicketingCredentials_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || DataContext is not SettingsViewModel settings) return;
-        var passwordBox = FindVisualChild<PasswordBox>(this);
+        var passwordBox = FindVisualChild<PasswordBox>(this, button.Tag as string);
         if (passwordBox is null) return;
 
         await settings.SaveTicketingCredentialsAsync(passwordBox.Password);
+        passwordBox.Clear();
+    }
+
+    private async void SavePostureWebhookCredential_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || DataContext is not SettingsViewModel settings) return;
+        var passwordBox = FindVisualChild<PasswordBox>(this, button.Tag as string);
+        if (passwordBox is null) return;
+
+        await settings.SavePostureWebhookCredentialAsync(passwordBox.Password);
         passwordBox.Clear();
     }
 
@@ -32,14 +42,14 @@ public partial class WorkspaceView : UserControl
         catch (System.ComponentModel.Win32Exception) { }
     }
 
-    private static T? FindVisualChild<T>(DependencyObject? parent) where T : DependencyObject
+    private static T? FindVisualChild<T>(DependencyObject? parent, string? name = null) where T : DependencyObject
     {
         if (parent is null) return null;
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
         {
             var child = VisualTreeHelper.GetChild(parent, index);
-            if (child is T match) return match;
-            var descendant = FindVisualChild<T>(child);
+            if (child is T match && (string.IsNullOrEmpty(name) || child is FrameworkElement element && element.Name == name)) return match;
+            var descendant = FindVisualChild<T>(child, name);
             if (descendant is not null) return descendant;
         }
         return null;

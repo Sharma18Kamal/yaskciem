@@ -117,11 +117,15 @@ Close and reopen the application after setting up or changing CLI authentication
 
 ## Continuous monitoring
 
-Scheduled scans are disabled by default. In **Settings > Continuous monitoring**, enable the schedule and choose 30 minutes, 1 hour, 6 hours, or 24 hours. Scans run only while YASK-CIEM is open and use the same read-only CLI sessions as manual scans. Each scheduled run is serialized with manual scans, compared with the previous comparable scan, saved to scan history, and evaluated for posture-change alerts.
+Scheduled scans are disabled by default. In **Settings > Continuous monitoring**, enable the schedule and choose an interval from 5 minutes to 7 days. Scans run only while YASK-CIEM is open and use the same read-only CLI sessions as manual scans. Each scheduled run is serialized with manual scans, compares all connected providers with their previous comparable scans, saves results to scan history, and evaluates posture-change alerts.
 
-To deliver eligible high-impact posture alerts, set `YASK_CIEM_ALERT_WEBHOOK_URL` to an organization-approved HTTPS webhook before starting the application. The URL is not stored in the schedule file or included in delivery error messages. If the webhook is unavailable, eligible alerts remain pending and are retried on a later scan.
+To deliver eligible high-impact posture alerts, open **Settings > Posture Alerts** and save an organization-approved HTTPS webhook endpoint. YASK-CIEM stores it in Windows Credential Manager for the current user; it is not written to the schedule or settings file or included in delivery error messages. Existing deployments can continue to use `YASK_CIEM_ALERT_WEBHOOK_URL` as a fallback. If the webhook is unavailable, eligible alerts remain pending and are retried on a later scan.
 
 The schedule is stored locally at `%LocalAppData%\YASK-CIEM\monitoring-schedule.json`. Disabling the schedule stops future scans; it does not delete scan history or pending alert records.
+
+## Local backup and restore
+
+Use **Settings > Local Data Backup** to create or restore a `.yaskbackup` archive. The archive contains the SQLite database and supported local workflow records and includes hashes for integrity checks. Ticketing and posture-webhook credentials, CLI tokens, logs, and generated reports are excluded. Treat the archive as sensitive access data. Restore replaces current local records and requires an application restart to reload them.
 
 ## Application data
 

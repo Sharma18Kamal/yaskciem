@@ -146,6 +146,28 @@ public sealed class JiraConnectionSettingsStoreTests
     }
 
     [Fact]
+    public async Task SettingsViewModel_ShouldStoreOnlyAbsoluteHttpsPostureWebhookUrls()
+    {
+        var credentials = new MemoryPostureWebhookCredentialStore();
+        var viewModel = new SettingsViewModel(
+            new EmptyDemoDataService(),
+            jiraSettingsStore: new MemoryJiraSettingsStore(string.Empty),
+            postureWebhookCredentialStore: credentials);
+
+        await viewModel.SavePostureWebhookCredentialAsync("http://hooks.example.com/secret");
+        Assert.Null(credentials.Url);
+        Assert.Contains("HTTPS", viewModel.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        await viewModel.SavePostureWebhookCredentialAsync("https://user:secret@hooks.example.com/secret");
+        Assert.Null(credentials.Url);
+        Assert.Contains("username or password", viewModel.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        await viewModel.SavePostureWebhookCredentialAsync("https://hooks.example.com/secret?token=value");
+        Assert.Equal("https://hooks.example.com/secret?token=value", credentials.Url);
+        Assert.DoesNotContain("secret", viewModel.PostureWebhookStatus, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task SettingsViewModel_ShouldSwitchBetweenJiraAndServiceNowRequestForms()
     {
         var store = new MemoryJiraSettingsStore(new JiraConnectionSettings("https://acme.atlassian.net", "https://acme.service-now.com", TicketingProvider.Jira));
@@ -201,6 +223,14 @@ public sealed class JiraConnectionSettingsStoreTests
         Assert.Equal("https://bmc.example.com/helix", store.Settings.GetBaseUrl(TicketingProvider.BmcHelixItsm));
         Assert.Equal("https://acme.zendesk.com", store.Settings.GetBaseUrl(TicketingProvider.Zendesk));
         Assert.Equal(TicketingProvider.Zendesk, store.Settings.SelectedProvider);
+    }
+
+    private sealed class MemoryPostureWebhookCredentialStore : IPostureWebhookCredentialStore
+    {
+        public string? Url { get; private set; }
+        public string? ReadUrl() => Url;
+        public void SaveUrl(string url) => Url = url;
+        public void Delete() => Url = null;
     }
 
     private sealed class MemoryJiraSettingsStore(string baseUrl) : IJiraConnectionSettingsStore

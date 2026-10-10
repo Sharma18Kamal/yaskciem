@@ -51,6 +51,19 @@ public sealed class ContinuousMonitoringServiceTests
         Assert.False((await store.LoadAsync()).Enabled);
     }
 
+    [Theory]
+    [InlineData(5)]
+    [InlineData(10080)]
+    public async Task BoundaryIntervals_ShouldBeAccepted(int intervalMinutes)
+    {
+        using var service = new ContinuousMonitoringService(new FakeLiveScanService(), new MemoryScheduleStore());
+        await service.InitializeAsync();
+
+        await service.SetScheduleAsync(new MonitoringSchedule(true, intervalMinutes));
+
+        Assert.Equal(intervalMinutes, service.Schedule.IntervalMinutes);
+    }
+
     private sealed class MemoryScheduleStore : IMonitoringScheduleStore
     {
         public MonitoringSchedule Schedule { get; private set; } = new();

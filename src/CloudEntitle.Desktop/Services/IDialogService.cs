@@ -8,4 +8,6 @@ public interface IDialogService
     string? ChooseReportPath();
     string? ChoosePolicyDraftPath();
     string? ChooseComplianceBundlePath();
+    string? ChooseLocalBackupSavePath();
+    string? ChooseLocalBackupOpenPath();
 }

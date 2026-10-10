@@ -426,6 +426,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private string _accountSelectionMessage = "Discover accounts to choose the scope for this scan.";
     private CancellationTokenSource? _scanCancellation;
     private bool _isScanning;
+    private DateTime? _scanStartedAtUtc;
     private int _scanWaitingMessageIndex;
     private IReadOnlyList<ComplianceAssessmentTrendPoint> _complianceHistory = Array.Empty<ComplianceAssessmentTrendPoint>();
     private string _complianceHistoryStatus = string.Empty;
@@ -451,6 +452,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         {
             _scanWaitingMessageIndex = (_scanWaitingMessageIndex + 1) % ScanWaitingMessages.Length;
             OnPropertyChanged(nameof(ScanWaitingMessage));
+            OnPropertyChanged(nameof(ScanElapsedText));
         };
         ScanCommand = new AsyncRelayCommand(RunScanAsync);
         DiscoverAccountsCommand = new AsyncRelayCommand(DiscoverAccountsAsync);
@@ -529,17 +531,24 @@ public sealed class DashboardViewModel : WorkspaceViewModel
             StopScanCommand.Refresh();
             if (value)
             {
+                _scanStartedAtUtc = DateTime.UtcNow;
                 _scanWaitingMessageIndex = 0;
                 OnPropertyChanged(nameof(ScanWaitingMessage));
+                OnPropertyChanged(nameof(ScanElapsedText));
                 _scanWaitingTimer.Start();
             }
             else
             {
                 _scanWaitingTimer.Stop();
+                _scanStartedAtUtc = null;
+                OnPropertyChanged(nameof(ScanElapsedText));
             }
         }
     }
     public string ScanWaitingMessage => ScanWaitingMessages[_scanWaitingMessageIndex];
+    public string ScanElapsedText => _scanStartedAtUtc is null
+        ? string.Empty
+        : $"Elapsed {DateTime.UtcNow - _scanStartedAtUtc.Value:mm\\:ss}";
     public string ScanStatusMessage { get => _scanStatusMessage; private set => SetProperty(ref _scanStatusMessage, value); }
     public int CloudAccounts => _analyticsSnapshot.CloudAccounts + (_liveScan?.AccountCount ?? 0);
     public int Identities => _analyticsSnapshot.Identities + (_liveScan?.IdentityCount ?? 0);
@@ -816,7 +825,8 @@ public sealed class DashboardViewModel : WorkspaceViewModel
                 if (selected.Length < _availableAccounts.Count)
                     selectedAccountKeys = selected.ToHashSet(StringComparer.OrdinalIgnoreCase);
             }
-            _liveScan = await Task.Run(() => _liveCloudScanService.ScanAsync(selectedAccountKeys, cancellation.Token), cancellation.Token);
+            var progress = new Progress<LiveScanProgress>(update => ScanStatusMessage = update.Message);
+            _liveScan = await Task.Run(() => _liveCloudScanService.ScanAsync(selectedAccountKeys, progress, cancellation.Token), cancellation.Token);
             ScanStatusMessage = FormatScanSummary(_liveScan);
             await RefreshAsync();
         }
@@ -1014,16 +1024,9 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
                 OnPropertyChanged(nameof(ConnectionGuidance));
                 return;
             }
-            if (Providers.Any(option => option.Provider != provider && option.IsConnected))
-            {
-                ConnectionGuidance = "Disconnect the active provider before signing in to another cloud.";
-                OnPropertyChanged(nameof(ConnectionGuidance));
-                return;
-            }
-
             UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
             _authenticationLauncher.LaunchAuthentication(provider);
-            ConnectionGuidance = $"Complete {provider} sign-in in the terminal. Other providers stay disabled until sign-in is verified.";
+            ConnectionGuidance = $"Complete {provider} sign-in in the terminal. Other cloud connections remain available.";
             ErrorMessage = null;
             OnPropertyChanged(nameof(ConnectionGuidance));
 
@@ -1033,7 +1036,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
                 if (await _authenticationLauncher.IsConnectedAsync(provider, cancellation.Token))
                 {
                     await RefreshConnectionsAsync();
-                    ConnectionGuidance = $"{provider} is connected. Go to Dashboard and select Scan Now to fetch resources, assignments, and findings. Disconnect it before selecting another provider. YASK-CIEM does not receive or store cloud credentials.";
+                    ConnectionGuidance = $"{provider} is connected. Go to Dashboard and select Scan Now to fetch resources, assignments, and findings. YASK-CIEM does not receive or store cloud credentials.";
                     OnPropertyChanged(nameof(ConnectionGuidance));
                     return;
                 }
@@ -1119,8 +1122,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         foreach (var option in Providers)
         {
             var isConnected = connectedProviders.Contains(option.Provider);
-            var anotherProviderConnected = connectedProviders.Any(provider => provider != option.Provider);
-            option.UpdateState(isConnected, !isConnected && !anotherProviderConnected && (_pendingProvider is null || _pendingProvider == option.Provider), _pendingProvider == option.Provider);
+            option.UpdateState(isConnected, !isConnected && _pendingProvider is null, _pendingProvider == option.Provider);
         }
 
         _cloudConnectionState.Update(connectedProviders, _pendingProvider);
@@ -2195,6 +2197,9 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     private readonly ContinuousMonitoringService? _monitoringService;
     private readonly IJiraConnectionSettingsStore _jiraSettingsStore;
     private readonly ITicketingCredentialStore _ticketingCredentialStore;
+    private readonly IPostureWebhookCredentialStore _postureWebhookCredentialStore;
+    private readonly ILocalDataBackupService? _localDataBackupService;
+    private readonly IDialogService? _dialogService;
     private readonly Dictionary<TicketingProvider, string> _ticketingProviderUrls = new();
     private readonly Dictionary<TicketingProvider, TicketingProviderConfiguration> _ticketingProviderConfigurations = new();
     private string _demoModeState = "Demo Mode is off";
@@ -2204,16 +2209,33 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     private string _ticketingWebhookUrl = string.Empty;
     private string _ticketingUserName = string.Empty;
     private string _ticketingConnectionStatus = "Ticketing is not configured.";
+    private string _postureWebhookStatus = "Posture alert webhook is not configured.";
+    private string _localDataBackupStatus = string.Empty;
     private string _ticketingCredentialStatus = "Credentials are not configured.";
     private TicketingProvider _selectedTicketingProvider = TicketingProvider.Jira;
     private bool _scheduledScansEnabled;
     private int _selectedScanIntervalMinutes = 1440;
-    public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null, IJiraConnectionSettingsStore? jiraSettingsStore = null, ITicketingCredentialStore? ticketingCredentialStore = null)
+    public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null, IJiraConnectionSettingsStore? jiraSettingsStore = null, ITicketingCredentialStore? ticketingCredentialStore = null, IPostureWebhookCredentialStore? postureWebhookCredentialStore = null, ILocalDataBackupService? localDataBackupService = null, IDialogService? dialogService = null)
     {
         _demoData = demoData;
         _monitoringService = monitoringService;
         _jiraSettingsStore = jiraSettingsStore ?? new LocalJiraConnectionSettingsStore();
         _ticketingCredentialStore = ticketingCredentialStore ?? new WindowsTicketingCredentialStore();
+        _postureWebhookCredentialStore = postureWebhookCredentialStore ?? new WindowsPostureWebhookCredentialStore();
+        _localDataBackupService = localDataBackupService;
+        _dialogService = dialogService;
+        try
+        {
+            _postureWebhookStatus = !string.IsNullOrWhiteSpace(_postureWebhookCredentialStore.ReadUrl())
+                ? "Posture alert endpoint is stored in Windows Credential Manager."
+                : string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("YASK_CIEM_ALERT_WEBHOOK_URL"))
+                    ? "Posture alert webhook is not configured."
+                    : "Posture alert endpoint is configured through the user environment.";
+        }
+        catch
+        {
+            _postureWebhookStatus = "Posture alert endpoint status is unavailable.";
+        }
         _scheduledScansEnabled = monitoringService?.Schedule.Enabled ?? false;
         _selectedScanIntervalMinutes = monitoringService?.Schedule.IntervalMinutes ?? 1440;
         try
@@ -2241,6 +2263,9 @@ public sealed class SettingsViewModel : WorkspaceViewModel
         SaveMonitoringScheduleCommand = new AsyncRelayCommand(SaveMonitoringScheduleAsync);
         SaveTicketingConnectionCommand = new AsyncRelayCommand(SaveTicketingConnectionAsync);
         OpenTicketingRequestCommand = new AsyncRelayCommand(OpenTicketingRequestAsync);
+        RemovePostureWebhookCredentialCommand = new RelayCommand(RemovePostureWebhookCredential);
+        CreateLocalBackupCommand = new AsyncRelayCommand(CreateLocalBackupAsync);
+        RestoreLocalBackupCommand = new AsyncRelayCommand(RestoreLocalBackupAsync);
         _demoData.DataChanged += (_, _) => { DemoModeState = _demoData.IsDemoMode ? "DEMO MODE active: synthetic data only" : "Demo Mode is off"; };
     }
     public override string Title => "Settings";
@@ -2296,6 +2321,8 @@ public sealed class SettingsViewModel : WorkspaceViewModel
         }
     }
     public string TicketingConnectionStatus { get => _ticketingConnectionStatus; private set => SetProperty(ref _ticketingConnectionStatus, value); }
+    public string PostureWebhookStatus { get => _postureWebhookStatus; private set => SetProperty(ref _postureWebhookStatus, value); }
+    public string LocalDataBackupStatus { get => _localDataBackupStatus; private set => SetProperty(ref _localDataBackupStatus, value); }
     public string TicketingProjectKey { get => _ticketingProjectKey; set => SetProperty(ref _ticketingProjectKey, value); }
     public string TicketingRequestType { get => _ticketingRequestType; set => SetProperty(ref _ticketingRequestType, value); }
     public string TicketingWebhookUrl { get => _ticketingWebhookUrl; set => SetProperty(ref _ticketingWebhookUrl, value); }
@@ -2317,10 +2344,15 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     public int SelectedScanIntervalMinutes { get => _selectedScanIntervalMinutes; set => SetProperty(ref _selectedScanIntervalMinutes, value); }
     public IReadOnlyList<MonitoringIntervalOption> ScanIntervals { get; } = new[]
     {
+        new MonitoringIntervalOption(5, "5 minutes"),
+        new MonitoringIntervalOption(15, "15 minutes"),
         new MonitoringIntervalOption(30, "30 minutes"),
         new MonitoringIntervalOption(60, "1 hour"),
+        new MonitoringIntervalOption(180, "3 hours"),
         new MonitoringIntervalOption(360, "6 hours"),
-        new MonitoringIntervalOption(1440, "24 hours")
+        new MonitoringIntervalOption(720, "12 hours"),
+        new MonitoringIntervalOption(1440, "24 hours"),
+        new MonitoringIntervalOption(10080, "7 days")
     };
     public ContinuousMonitoringService? MonitoringService => _monitoringService;
     public AsyncRelayCommand LoadDemoDataCommand { get; }
@@ -2328,6 +2360,9 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     public AsyncRelayCommand SaveMonitoringScheduleCommand { get; }
     public AsyncRelayCommand SaveTicketingConnectionCommand { get; }
     public AsyncRelayCommand OpenTicketingRequestCommand { get; }
+    public RelayCommand RemovePostureWebhookCredentialCommand { get; }
+    public AsyncRelayCommand CreateLocalBackupCommand { get; }
+    public AsyncRelayCommand RestoreLocalBackupCommand { get; }
     public AsyncRelayCommand SaveJiraConnectionCommand => SaveTicketingConnectionCommand;
     public AsyncRelayCommand OpenJiraCommand => OpenTicketingRequestCommand;
     private async Task SaveMonitoringScheduleAsync()
@@ -2404,6 +2439,89 @@ public sealed class SettingsViewModel : WorkspaceViewModel
             ErrorMessage = $"Unable to save ticketing credential: {exception.Message}";
         }
         return Task.CompletedTask;
+    }
+
+    public Task SavePostureWebhookCredentialAsync(string webhookUrl)
+    {
+        if (!Uri.TryCreate(webhookUrl, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps
+            || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            ErrorMessage = "Posture alert endpoint must be an absolute HTTPS URL without embedded username or password.";
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            _postureWebhookCredentialStore.SaveUrl(uri.AbsoluteUri);
+            PostureWebhookStatus = "Posture alert endpoint is stored in Windows Credential Manager.";
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to save posture alert endpoint ({exception.GetType().Name}).";
+        }
+        return Task.CompletedTask;
+    }
+
+    private void RemovePostureWebhookCredential()
+    {
+        try
+        {
+            _postureWebhookCredentialStore.Delete();
+            PostureWebhookStatus = string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("YASK_CIEM_ALERT_WEBHOOK_URL"))
+                ? "Posture alert webhook is not configured."
+                : "Posture alert endpoint remains configured through the user environment.";
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to remove posture alert endpoint ({exception.GetType().Name}).";
+        }
+    }
+
+    private async Task CreateLocalBackupAsync()
+    {
+        if (_localDataBackupService is null || _dialogService is null)
+        {
+            ErrorMessage = "Local backup is unavailable.";
+            return;
+        }
+        var path = _dialogService.ChooseLocalBackupSavePath();
+        if (string.IsNullOrWhiteSpace(path)) return;
+        try
+        {
+            var result = await _localDataBackupService.CreateBackupAsync(path);
+            LocalDataBackupStatus = $"Backup created with {result.FilesIncluded} local data file(s). Ticketing and webhook secrets are excluded.";
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to create local backup: {exception.Message}";
+        }
+    }
+
+    private async Task RestoreLocalBackupAsync()
+    {
+        if (_localDataBackupService is null || _dialogService is null)
+        {
+            ErrorMessage = "Local restore is unavailable.";
+            return;
+        }
+        var path = _dialogService.ChooseLocalBackupOpenPath();
+        if (string.IsNullOrWhiteSpace(path)) return;
+        if (!_dialogService.Confirm("Restore replaces the current local scan database and workflow records with the selected backup. Ticketing and webhook secrets are not changed. YASK-CIEM must be restarted after restore. Continue?", "Restore local data")) return;
+        try
+        {
+            var result = await _localDataBackupService.RestoreBackupAsync(path);
+            LocalDataBackupStatus = $"Restored {result.FilesIncluded} local data file(s). Close and restart YASK-CIEM to reload the restored data.";
+            _dialogService.ShowInformation(LocalDataBackupStatus, "Restore complete");
+            ErrorMessage = null;
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to restore local backup: {exception.Message}";
+        }
     }
 
     private void LoadSelectedProviderConfiguration()

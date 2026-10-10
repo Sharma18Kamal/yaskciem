@@ -108,7 +108,9 @@ public sealed class WorkspaceViewBindingTests
         var scanPanel = progress.Ancestors(presentation + "Border").First();
         Assert.Equal("1", (string?)scanPanel.Attribute("Grid.Column"));
         Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
-            ((string?)textBlock.Attribute("Text"))?.Contains("ScanWaitingMessage", StringComparison.Ordinal) == true);
+            ((string?)textBlock.Attribute("Text"))?.Contains("ScanStatusMessage", StringComparison.Ordinal) == true);
+        Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
+            ((string?)textBlock.Attribute("Text"))?.Contains("ScanElapsedText", StringComparison.Ordinal) == true);
         Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
             ((string?)textBlock.Attribute("Text"))?.Contains("\u2601", StringComparison.Ordinal) == true);
         var hourglass = Assert.Single(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
