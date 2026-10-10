@@ -321,6 +321,7 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
             "eligible PIM assignments",
             "https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilityScheduleInstances?$expand=principal,roleDefinition&$top=999",
             "Eligible (PIM)");
+        await LoadDirectoryRoleAssignmentsAsync();
         }
         catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
         {
@@ -329,6 +330,48 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
 
         messages.Add($"Azure Entra: discovered {principals.Count} directory identities and {accessAssignments.Count} PIM role schedule(s).");
         return new EntraDirectoryScanResult(principals, accessAssignments, messages);
+
+        async Task LoadDirectoryRoleAssignmentsAsync()
+        {
+            try
+            {
+                var definitions = await GetGraphCollectionAsync("https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?$select=id,displayName", cancellationToken);
+                var roleNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var definition in definitions)
+                {
+                    var id = ReadString(definition, "id");
+                    if (id is not null) roleNames[id] = ReadString(definition, "displayName") ?? id;
+                }
+
+                var known = accessAssignments.Where(item => item.AssignmentType.StartsWith("Active", StringComparison.OrdinalIgnoreCase))
+                    .Select(item => $"{item.Principal}|{item.Role}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var assignment in await GetGraphCollectionAsync("https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$expand=principal", cancellationToken))
+                {
+                    // Users are keyed by UPN so they match identities created from Azure RBAC, which are named by UPN.
+                    var principalElement = assignment.TryGetProperty("principal", out var expandedPrincipal) ? expandedPrincipal : default;
+                    var principal = ReadString(principalElement, "userPrincipalName") ?? ReadExpandedName(assignment, "principal") ?? ReadString(assignment, "principalId") ?? "Unknown principal";
+                    var roleId = ReadString(assignment, "roleDefinitionId") ?? string.Empty;
+                    var role = roleNames.GetValueOrDefault(roleId, roleId);
+                    if (!known.Add($"{principal}|{role}")) continue;
+                    accessAssignments.Add(new CloudEffectiveAccessAssignment(
+                        principal, role, ReadString(assignment, "directoryScopeId") ?? "/", "Entra directory role assignment",
+                        role.Contains("Administrator", StringComparison.OrdinalIgnoreCase), "Active (Directory role)"));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var denied = exception.ToString().Contains("PermissionScopeNotGranted", StringComparison.OrdinalIgnoreCase)
+                    || exception.ToString().Contains("Forbidden", StringComparison.OrdinalIgnoreCase)
+                    || exception.ToString().Contains("Authorization_RequestDenied", StringComparison.OrdinalIgnoreCase);
+                messages.Add(denied
+                    ? "Azure Entra directory role assignments unavailable: Microsoft Graph denied the read permission 'RoleManagement.Read.Directory'. Grant admin consent to the Microsoft Azure CLI application and refresh the sign-in."
+                    : $"Azure Entra directory role assignments unavailable: {ExtractCliErrorDetail(exception.Message)}");
+            }
+        }
 
         async Task LoadServicePrincipalsAsync()
         {

@@ -108,6 +108,7 @@ public class AzureProviderTests
         Assert.Contains("api://AzureADTokenExchange", federatedApp.FederationTrusts[0].Audiences);
         Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Active (PIM)" && assignment.Role == "Global Administrator");
         Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Eligible (PIM)" && assignment.Role == "Security Administrator");
+        Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Active (Directory role)" && assignment.Role == "Global Administrator" && assignment.Principal == "admin@example.com");
     }
 
     [Fact]
@@ -169,6 +170,22 @@ public class AzureProviderTests
 
     private sealed class FakeCommandRunner(bool denyPim = false, bool denyActivityLog = false, bool multipleSubscriptions = false) : ICloudCommandRunner
     {
+        private static string BatchResponse(IReadOnlyList<string> arguments)
+        {
+            var body = arguments[arguments.ToList().IndexOf("--body") + 1];
+            using var request = System.Text.Json.JsonDocument.Parse(body);
+            var responses = request.RootElement.GetProperty("requests").EnumerateArray().Select(item =>
+            {
+                var url = item.GetProperty("url").GetString() ?? string.Empty;
+                object value = url.Contains("federatedIdentityCredentials", StringComparison.Ordinal)
+                    ? new[] { new { issuer = "https://token.actions.githubusercontent.com", subject = "repo:org/project:environment:prod", audiences = new[] { "api://AzureADTokenExchange" } } }
+                    : Array.Empty<object>();
+                if (url.Contains("/owners?", StringComparison.Ordinal)) value = new[] { new { id = "owner-1" } };
+                return new { id = item.GetProperty("id").GetString(), status = 200, body = new { value } };
+            });
+            return System.Text.Json.JsonSerializer.Serialize(new { responses });
+        }
+
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
             if (arguments[0] == "resource" && arguments.Contains("list"))
@@ -200,7 +217,13 @@ public class AzureProviderTests
                 {
                     return Task.FromResult(new CloudCommandResult(1, string.Empty, "ERROR: Forbidden({\"error\":{\"code\":\"UnknownError\",\"message\":\"PermissionScopeNotGranted: missing RoleAssignmentSchedule.Read.Directory and RoleEligibilitySchedule.Read.Directory\"}})"));
                 }
-                var graphOutput = url.Contains("/users?", StringComparison.Ordinal)
+                var graphOutput = url.Contains("$batch", StringComparison.Ordinal)
+                    ? BatchResponse(arguments)
+                    : url.Contains("roleManagement/directory/roleDefinitions", StringComparison.Ordinal)
+                    ? "{\"value\":[{\"id\":\"role-ga\",\"displayName\":\"Global Administrator\"}]}"
+                    : url.Contains("roleManagement/directory/roleAssignments", StringComparison.Ordinal)
+                    ? "{\"value\":[{\"principalId\":\"user-2\",\"roleDefinitionId\":\"role-ga\",\"directoryScopeId\":\"/\",\"principal\":{\"displayName\":\"Permanent Admin\",\"userPrincipalName\":\"admin@example.com\"}}]}"
+                    : url.Contains("/users?", StringComparison.Ordinal)
                     ? "{\"value\":[{\"id\":\"user-1\",\"displayName\":\"Entra User\",\"userPrincipalName\":\"entra@example.com\",\"accountEnabled\":true}]}"
                     : url.Contains("/groups?", StringComparison.Ordinal)
                         ? "{\"value\":[{\"id\":\"group-1\",\"displayName\":\"Security Group\",\"securityEnabled\":true}]}"
