@@ -3,27 +3,30 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:CloudEntitle.Desktop.ViewModels">
     <UserControl.Resources>
+        <Style TargetType="{x:Type DataGrid}">
+            <Setter Property="ToolTip" Value="Click sortable column headers to reorder rows. Select a row where selection is enabled."/>
+        </Style>
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
             <StackPanel>
             <Grid Margin="0,0,0,16">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Button Grid.Column="0" Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" ToolTip="Scan the connected cloud provider using read-only CLI access"/>
+                <Button Grid.Column="0" Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" ToolTip="Scan all connected providers and selected accounts or Kubernetes contexts using read-only access."/>
                 <Button Grid.Column="1" Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" MinWidth="100" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
                 <Button Grid.Column="2" Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Choose a folder and save findings as JSON or CSV"/>
-                <Button Grid.Column="3" Content="Discover accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="List accounts available through the currently connected cloud provider"/>
+                <Button Grid.Column="3" Content="Discover accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Refresh connected-provider accounts and local Kubernetes contexts for scan selection."/>
                 <TextBlock Grid.Column="4" Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxWidth="180" MaxHeight="48" ToolTip="Cloud CLI connection status"/>
                 <ComboBox Grid.Column="5" ItemsSource="{Binding ComplianceFrameworks}" SelectedItem="{Binding SelectedComplianceFramework, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="145" Margin="8,0,0,0" ToolTip="Compliance framework for the exported evidence bundle"/>
                 <Button Grid.Column="6" Content="Export evidence bundle" Command="{Binding ExportComplianceBundleCommand}" IsEnabled="{Binding CanExportComplianceBundle}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Export organization-scoped controls, evidence, gaps, and assessment metadata"/>
                 <TextBlock Grid.Column="7" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
             </Grid>
-            <Expander Header="Standards and assessment history" IsExpanded="False" Margin="0,0,0,14">
+            <Expander Header="Standards and assessment history" IsExpanded="False" Margin="0,0,0,14" ToolTip="Choose compliance frameworks, record time-limited control exceptions, and review saved assessments.">
                 <StackPanel>
                     <TextBlock Text="Standards included in the assessment crosswalk" Style="{StaticResource CardLabel}" Margin="0,8,0,4"/>
                     <ItemsControl ItemsSource="{Binding ComplianceStandardOptions}">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="0,4,18,4"/>
+                                <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="0,4,18,4" ToolTip="Include this framework in the next compliance assessment and evidence export."/>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -38,8 +41,8 @@
                     <TextBox Text="{Binding ExceptionRationale, UpdateSourceTrigger=PropertyChanged}" ToolTip="Exception rationale" Margin="0,6,0,0"/>
                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                         <TextBox Text="{Binding ExceptionEvidenceReference, UpdateSourceTrigger=PropertyChanged}" ToolTip="Approval evidence reference (optional)" Width="280"/>
-                        <Button Content="Add exception" Command="{Binding AddComplianceExceptionCommand}" IsEnabled="{Binding CanAddComplianceException}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                        <Button Content="Remove selected" Command="{Binding RemoveComplianceExceptionCommand}" IsEnabled="{Binding CanRemoveComplianceException}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                        <Button Content="Add exception" Command="{Binding AddComplianceExceptionCommand}" IsEnabled="{Binding CanAddComplianceException}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Record an approved control exception with an owner, rationale, evidence reference, and future expiry date."/>
+                        <Button Content="Remove selected" Command="{Binding RemoveComplianceExceptionCommand}" IsEnabled="{Binding CanRemoveComplianceException}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Remove the selected local control exception."/>
                     </StackPanel>
                     <DataGrid ItemsSource="{Binding ComplianceExceptionDrafts}" SelectedItem="{Binding SelectedComplianceException, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="150" Margin="0,6,0,0">
                         <DataGrid.Columns>
@@ -52,7 +55,7 @@
                     </DataGrid>
                     <TextBlock Text="Exports are signed evidence snapshots, not a compliance certification or auditor attestation." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                        <Button Content="Load assessment history" Command="{Binding LoadComplianceHistoryCommand}" Style="{StaticResource QuietButton}"/>
+                        <Button Content="Load assessment history" Command="{Binding LoadComplianceHistoryCommand}" Style="{StaticResource QuietButton}" ToolTip="Load saved assessment results for the selected framework."/>
                         <TextBlock Text="{Binding ComplianceHistoryStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                     <ItemsControl ItemsSource="{Binding ComplianceHistory}" Margin="0,6,0,0">
@@ -121,11 +124,11 @@
                     </StackPanel>
                 </Border>
             </Grid>
-            <Expander Header="{Binding AccountSelectionMessage}" IsExpanded="False" Margin="0,0,0,14">
+            <Expander Header="{Binding AccountSelectionMessage}" IsExpanded="False" Margin="0,0,0,14" ToolTip="Choose cloud accounts and Kubernetes contexts included in the next scan.">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
-                        <Button Content="Select all" Command="{Binding SelectAllAccountsCommand}" Style="{StaticResource QuietButton}"/>
-                        <Button Content="Select none" Command="{Binding SelectNoAccountsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                        <Button Content="Select all" Command="{Binding SelectAllAccountsCommand}" Style="{StaticResource QuietButton}" ToolTip="Include every discovered cloud account and Kubernetes context in the next scan."/>
+                        <Button Content="Select none" Command="{Binding SelectNoAccountsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Clear all account and context selections."/>
                     </StackPanel>
                     <DataGrid ItemsSource="{Binding AvailableAccounts}" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="False" MaxHeight="240" MinHeight="80" CanUserSortColumns="True">
                         <DataGrid.Columns>
@@ -172,12 +175,12 @@
                 <Border Style="{StaticResource SectionCard}" Padding="24">
                     <StackPanel>
                         <TextBlock Text="YOUR FEEDBACK *" Style="{StaticResource CardLabel}"/>
-                        <TextBox Text="{Binding FeedbackText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="150" MaxLength="5000" Background="{StaticResource PanelBrush}" Foreground="{StaticResource PrimaryBrush}" BorderBrush="{StaticResource LineBrush}" Padding="12" Margin="0,8,0,20"/>
+                        <TextBox Text="{Binding FeedbackText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="150" MaxLength="5000" Background="{StaticResource PanelBrush}" Foreground="{StaticResource PrimaryBrush}" BorderBrush="{StaticResource LineBrush}" Padding="12" Margin="0,8,0,20" ToolTip="Required. Describe your experience; do not include passwords, access keys, or other secrets."/>
                         <TextBlock Text="SUGGESTIONS *" Style="{StaticResource CardLabel}"/>
-                        <TextBox Text="{Binding SuggestionsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="150" MaxLength="5000" Background="{StaticResource PanelBrush}" Foreground="{StaticResource PrimaryBrush}" BorderBrush="{StaticResource LineBrush}" Padding="12" Margin="0,8,0,16"/>
+                        <TextBox Text="{Binding SuggestionsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="150" MaxLength="5000" Background="{StaticResource PanelBrush}" Foreground="{StaticResource PrimaryBrush}" BorderBrush="{StaticResource LineBrush}" Padding="12" Margin="0,8,0,16" ToolTip="Required. Suggest improvements; submissions are stored locally and do not request contact details."/>
                         <TextBlock Text="No username, email address, or phone number is requested. Submissions are stored locally on this device." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,16"/>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="Submit Feedback" Command="{Binding SubmitCommand}" IsEnabled="{Binding CanSubmit}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="Submit Feedback" Command="{Binding SubmitCommand}" IsEnabled="{Binding CanSubmit}" Style="{StaticResource PrimaryButton}" ToolTip="Save this feedback and suggestion locally on this device."/>
                             <TextBlock Text="{Binding SubmissionMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                         <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,12,0,0" TextWrapping="Wrap"/>
@@ -275,19 +278,19 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Margin="0,0,8,0">
                                 <TextBlock Text="Principal" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                                <ComboBox ItemsSource="{Binding SimulatorPrincipals}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorPrincipalId, Mode=TwoWay}"/>
+                                <ComboBox ItemsSource="{Binding SimulatorPrincipals}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorPrincipalId, Mode=TwoWay}" ToolTip="Choose the principal whose scanned grants will be evaluated."/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Margin="4,0,4,0">
                                 <TextBlock Text="Resource" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                                <ComboBox ItemsSource="{Binding SimulatorResources}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorResourceId, Mode=TwoWay}"/>
+                                <ComboBox ItemsSource="{Binding SimulatorResources}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorResourceId, Mode=TwoWay}" ToolTip="Choose the scanned resource to evaluate access against."/>
                             </StackPanel>
                             <StackPanel Grid.Column="2" Margin="8,0,0,0">
                                 <TextBlock Text="Permission" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                                <ComboBox ItemsSource="{Binding SimulatorPermissions}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorPermissionId, Mode=TwoWay}"/>
+                                <ComboBox ItemsSource="{Binding SimulatorPermissions}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SimulatorPermissionId, Mode=TwoWay}" ToolTip="Choose the permission to evaluate using the current scan snapshot."/>
                             </StackPanel>
                         </Grid>
                         <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Evaluate" Command="{Binding SimulatePermissionCommand}" IsEnabled="{Binding CanSimulatePermission}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Content="Evaluate" Command="{Binding SimulatePermissionCommand}" IsEnabled="{Binding CanSimulatePermission}" Style="{StaticResource PrimaryButton}" ToolTip="Evaluate the selected principal, resource, and permission against stored scan evidence only; no cloud call is made."/>
                             <TextBlock Text="{Binding SimulationStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                         <Grid Margin="0,12,0,0">
@@ -417,7 +420,7 @@
                 <TextBlock Text="CONNECT A CLOUD PROVIDER" Style="{StaticResource CardLabel}"/>
                 <TextBlock Text="Sign-in opens in the provider's CLI. Connecting authenticates only; go to Dashboard and select Scan Now to fetch cloud data. Use organization-approved read-only identities; credentials stay with the CLI. Azure Entra/PIM enrichment needs tenant-approved Microsoft Graph read consent. Disconnect signs out of the shared CLI session and may affect other tools." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                    <Button Content="Refresh sign-in status" Command="{Binding RefreshConnectionsCommand}" Style="{StaticResource QuietButton}"/>
+                    <Button Content="Refresh sign-in status" Command="{Binding RefreshConnectionsCommand}" Style="{StaticResource QuietButton}" ToolTip="Recheck authentication status in every configured provider CLI."/>
                     <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
                 <ItemsControl ItemsSource="{Binding Providers}">
@@ -465,7 +468,7 @@
                     <StackPanel>
                         <TextBlock Text="APPLICATION" Style="{StaticResource CardLabel}"/>
                         <TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/>
-                        <TextBlock Text="0.1.0" Foreground="{StaticResource PrimaryBrush}" Margin="0,3,0,0"/>
+                        <TextBlock Text="{Binding ApplicationVersion}" Foreground="{StaticResource PrimaryBrush}" Margin="0,3,0,0" ToolTip="Version of the installed YASK-CIEM desktop application."/>
                         <TextBlock Text="Data location" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0"/>
                         <TextBlock Text="{Binding DataLocation}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/>
                     </StackPanel>
@@ -475,8 +478,8 @@
                         <TextBlock Text="LOCAL DATA BACKUP" Style="{StaticResource CardLabel}"/>
                         <TextBlock Text="Back up or restore the local database, scan history, and workflow records. API credentials and webhook endpoints are excluded." Foreground="{StaticResource MutedBrush}" Margin="0,12,0,8" TextWrapping="Wrap"/>
                         <StackPanel Orientation="Horizontal">
-                            <Button Content="Create backup" Command="{Binding CreateLocalBackupCommand}" Style="{StaticResource PrimaryButton}"/>
-                            <Button Content="Restore backup" Command="{Binding RestoreLocalBackupCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <Button Content="Create backup" Command="{Binding CreateLocalBackupCommand}" Style="{StaticResource PrimaryButton}" ToolTip="Create a checksummed archive of supported local data. CLI, ticketing, and webhook credentials are excluded."/>
+                            <Button Content="Restore backup" Command="{Binding RestoreLocalBackupCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Replace current local records from a validated backup; confirmation is required and the app must be restarted."/>
                         </StackPanel>
                         <TextBlock Text="{Binding LocalDataBackupStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
@@ -487,18 +490,18 @@
                         <TextBlock Text="{Binding DemoModeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,12,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="Synthetic Azure, AWS, and GCP data is stored through the normal SQLite pipeline. No cloud APIs or credentials are used." Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" TextWrapping="Wrap"/>
                         <StackPanel Orientation="Horizontal">
-                            <Button Content="Load Demo Data" Command="{Binding LoadDemoDataCommand}" Style="{StaticResource PrimaryButton}"/>
-                            <Button Content="Reset Demo Data" Command="{Binding ResetDemoDataCommand}" Style="{StaticResource QuietButton}" Margin="10,0,0,0"/>
+                            <Button Content="Load Demo Data" Command="{Binding LoadDemoDataCommand}" Style="{StaticResource PrimaryButton}" ToolTip="Load synthetic Azure, AWS, and GCP records without contacting cloud services."/>
+                            <Button Content="Reset Demo Data" Command="{Binding ResetDemoDataCommand}" Style="{StaticResource QuietButton}" Margin="10,0,0,0" ToolTip="Clear demo records and return to the normal workspace data."/>
                         </StackPanel>
                     </StackPanel>
                 </Border>
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="CONTINUOUS MONITORING" Style="{StaticResource CardLabel}"/>
-                        <CheckBox Content="Enable scheduled scans" IsChecked="{Binding ScheduledScansEnabled, Mode=TwoWay}" Margin="0,12,0,8"/>
+                        <CheckBox Content="Enable scheduled scans" IsChecked="{Binding ScheduledScansEnabled, Mode=TwoWay}" Margin="0,12,0,8" ToolTip="Run serialized read-only scans at the selected interval while YASK-CIEM remains open."/>
                         <TextBlock Text="Scan interval" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,4"/>
-                        <ComboBox ItemsSource="{Binding ScanIntervals}" DisplayMemberPath="Label" SelectedValuePath="Minutes" SelectedValue="{Binding SelectedScanIntervalMinutes, Mode=TwoWay}"/>
-                        <Button Content="Save schedule" Command="{Binding SaveMonitoringScheduleCommand}" Style="{StaticResource PrimaryButton}" Margin="0,10,0,0"/>
+                        <ComboBox ItemsSource="{Binding ScanIntervals}" DisplayMemberPath="Label" SelectedValuePath="Minutes" SelectedValue="{Binding SelectedScanIntervalMinutes, Mode=TwoWay}" ToolTip="Choose how often scans run, from 5 minutes to 7 days."/>
+                        <Button Content="Save schedule" Command="{Binding SaveMonitoringScheduleCommand}" Style="{StaticResource PrimaryButton}" Margin="0,10,0,0" ToolTip="Save the scan schedule on this device. Scheduled scans run only while the app is open."/>
                         <TextBlock Text="{Binding MonitoringService.Status}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
@@ -508,8 +511,8 @@
                         <TextBlock Text="Send new high-impact posture changes to an HTTPS webhook. The endpoint is stored in Windows Credential Manager." Foreground="{StaticResource MutedBrush}" Margin="0,12,0,8" TextWrapping="Wrap"/>
                         <PasswordBox x:Name="PostureWebhookUrlBox" MaxLength="2048" ToolTip="Secret-bearing HTTPS webhook URL; never written to the settings file."/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="Save alert endpoint" Tag="PostureWebhookUrlBox" Click="SavePostureWebhookCredential_Click" Style="{StaticResource PrimaryButton}"/>
-                            <Button Content="Remove endpoint" Command="{Binding RemovePostureWebhookCredentialCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <Button Content="Save alert endpoint" Tag="PostureWebhookUrlBox" Click="SavePostureWebhookCredential_Click" Style="{StaticResource PrimaryButton}" ToolTip="Validate and store the HTTPS alert endpoint in Windows Credential Manager for this user."/>
+                            <Button Content="Remove endpoint" Command="{Binding RemovePostureWebhookCredentialCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Remove the stored posture-alert endpoint. An environment-configured fallback may remain active."/>
                         </StackPanel>
                         <TextBlock Text="{Binding PostureWebhookStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
@@ -524,7 +527,7 @@
                     <StackPanel>
                         <TextBlock Text="TICKETING CONNECTION" Style="{StaticResource CardLabel}"/>
                         <TextBlock Text="Ticketing system" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
-                        <ComboBox ItemsSource="{Binding TicketingProviders}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedTicketingProviderOption, Mode=TwoWay}"/>
+                        <ComboBox ItemsSource="{Binding TicketingProviders}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedTicketingProviderOption, Mode=TwoWay}" ToolTip="Choose the ticketing system used for recommendation requests."/>
                         <TextBlock Text="Site URL" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
                         <TextBox Text="{Binding TicketingSiteUrl, UpdateSourceTrigger=PropertyChanged}" ToolTip="HTTPS site URL for the selected ticketing tool. Do not include credentials, query parameters, or fragments."/>
                         <TextBlock Text="Project key / service desk ID" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
@@ -538,9 +541,9 @@
                         <TextBlock Text="API token / secret" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
                         <PasswordBox x:Name="TicketingCredentialBox" MaxLength="2048" ToolTip="Saved only to Windows Credential Manager for this provider."/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="Save URL" Command="{Binding SaveTicketingConnectionCommand}" Style="{StaticResource PrimaryButton}"/>
-                            <Button Content="{Binding TicketingRequestButtonText}" Command="{Binding OpenTicketingRequestCommand}" IsEnabled="{Binding CanOpenTicketingRequest}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                            <Button Content="Save credential" Tag="TicketingCredentialBox" Click="SaveTicketingCredentials_Click" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <Button Content="Save URL" Command="{Binding SaveTicketingConnectionCommand}" Style="{StaticResource PrimaryButton}" ToolTip="Validate and save the selected ticketing provider's non-secret connection settings."/>
+                            <Button Content="{Binding TicketingRequestButtonText}" Command="{Binding OpenTicketingRequestCommand}" IsEnabled="{Binding CanOpenTicketingRequest}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Open the selected ticketing provider's request form."/>
+                            <Button Content="Save credential" Tag="TicketingCredentialBox" Click="SaveTicketingCredentials_Click" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Store the API credential in Windows Credential Manager for this provider."/>
                         </StackPanel>
                         <TextBlock Text="{Binding TicketingConnectionStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding TicketingCredentialStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
@@ -594,12 +597,12 @@
                                 <TextBlock Text="EVIDENCE" Style="{StaticResource CardLabel}" Margin="0,12,0,0"/>
                                 <TextBlock Text="{Binding SelectedRecommendation.Evidence}" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                    <Button Content="Export Review Draft" Command="{Binding ExportDraftCommand}" IsEnabled="{Binding CanExportDraft}" Style="{StaticResource PrimaryButton}"/>
+                                    <Button Content="Export Review Draft" Command="{Binding ExportDraftCommand}" IsEnabled="{Binding CanExportDraft}" Style="{StaticResource PrimaryButton}" ToolTip="Export the selected recommendation as a non-executable JSON review draft."/>
                                     <TextBlock Text="{Binding ExportStatusMessage}" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                     <Button Content="Raise ticket" Command="{Binding RaiseTicketCommand}" IsEnabled="{Binding CanRaiseTicket}" Style="{StaticResource QuietButton}" ToolTip="Create one ticket for this selected recommendation; an existing link is reused."/>
-                                    <Button Content="Refresh ticket status" Command="{Binding RefreshTicketStatusCommand}" IsEnabled="{Binding CanRefreshTicketStatus}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <Button Content="Refresh ticket status" Command="{Binding RefreshTicketStatusCommand}" IsEnabled="{Binding CanRefreshTicketStatus}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Fetch and save the latest status for the linked ticket."/>
                                     <TextBlock Text="{Binding TicketingStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <TextBlock Margin="0,6,0,0" TextWrapping="Wrap">
@@ -647,7 +650,7 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="2.1*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="{Binding SignedInAs}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
                             <TextBox Grid.Column="1" Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Approval or rejection rationale" Margin="4,0,8,0"/>
-                            <Button Grid.Column="2" Content="Create plan" Command="{Binding CreatePlanCommand}" IsEnabled="{Binding CanCreatePlan}" Style="{StaticResource PrimaryButton}"/>
+                            <Button Grid.Column="2" Content="Create plan" Command="{Binding CreatePlanCommand}" IsEnabled="{Binding CanCreatePlan}" Style="{StaticResource PrimaryButton}" ToolTip="Create a review-only remediation plan from the selected recommendation; no cloud changes are made."/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -668,11 +671,11 @@
                         <TextBlock Text="{Binding SelectedPlan.SafetyNotice}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding PreviewFingerprint}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="{Binding ApprovalButtonText}" Command="{Binding ApprovePlanCommand}" IsEnabled="{Binding CanApprovePlan}" Style="{StaticResource PrimaryButton}"/>
-                            <Button Content="Reject" Command="{Binding RejectPlanCommand}" IsEnabled="{Binding CanRejectPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                            <Button Content="Run dry run" Command="{Binding RunDryRunCommand}" IsEnabled="{Binding CanRunDryRun}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                            <Button Content="Verify" Command="{Binding VerifyPlanCommand}" IsEnabled="{Binding CanVerifyPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                            <Button Content="Prepare rollback" Command="{Binding PrepareRollbackCommand}" IsEnabled="{Binding CanPrepareRollback}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <Button Content="{Binding ApprovalButtonText}" Command="{Binding ApprovePlanCommand}" IsEnabled="{Binding CanApprovePlan}" Style="{StaticResource PrimaryButton}" ToolTip="Approve the selected plan after reviewing its evidence and proposed changes. This does not apply cloud changes."/>
+                            <Button Content="Reject" Command="{Binding RejectPlanCommand}" IsEnabled="{Binding CanRejectPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Reject the selected remediation plan and record the review decision."/>
+                            <Button Content="Run dry run" Command="{Binding RunDryRunCommand}" IsEnabled="{Binding CanRunDryRun}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Simulate the proposed change against stored evidence; provider policies are not changed."/>
+                            <Button Content="Verify" Command="{Binding VerifyPlanCommand}" IsEnabled="{Binding CanVerifyPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Check verification status. Live verification is unavailable until a provider confirms a change."/>
+                            <Button Content="Prepare rollback" Command="{Binding PrepareRollbackCommand}" IsEnabled="{Binding CanPrepareRollback}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Create a separate non-executable rollback draft for review; no rollback is applied."/>
                         </StackPanel>
                         <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SuccessBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding SimulationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
@@ -714,8 +717,8 @@
                                 <TextBlock Text="{Binding SignedInAs}" Foreground="{StaticResource PrimaryBrush}" Margin="0,6,0,8" TextWrapping="Wrap"/>
                                 <TextBox Text="{Binding SignInTenantId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Entra tenant ID for the selected organization"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                    <Button Content="Sign in" Command="{Binding SignInCommand}" IsEnabled="{Binding CanSignIn}" Style="{StaticResource PrimaryButton}"/>
-                                    <Button Content="Sign out" Command="{Binding SignOutCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <Button Content="Sign in" Command="{Binding SignInCommand}" IsEnabled="{Binding CanSignIn}" Style="{StaticResource PrimaryButton}" ToolTip="Authenticate to the selected Microsoft Entra tenant for organization features."/>
+                                    <Button Content="Sign out" Command="{Binding SignOutCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="End the current organization sign-in session."/>
                                 </StackPanel>
                                 <Button Content="Sync central audit events" Command="{Binding SyncCentralAuditCommand}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Upload local audit events for the selected organization to its Entra tenant's central audit log."/>
                                 <TextBlock Text="{Binding CentralAuditSyncStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
@@ -727,7 +730,7 @@
                                 <TextBox Text="{Binding OrganizationName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Organization name" Margin="0,8,0,0"/>
                                 <TextBox Text="{Binding TenantKey, UpdateSourceTrigger=PropertyChanged}" ToolTip="Unique organization key" Margin="0,8,0,0"/>
                                 <TextBox Text="{Binding OrganizationTenantId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Microsoft Entra tenant ID; must match the signed-in tenant" Margin="0,8,0,0"/>
-                                <Button Content="Create and become admin" Command="{Binding CreateOrganizationCommand}" IsEnabled="{Binding CanCreateOrganization}" Style="{StaticResource PrimaryButton}" Margin="0,8,0,0"/>
+                                <Button Content="Create and become admin" Command="{Binding CreateOrganizationCommand}" IsEnabled="{Binding CanCreateOrganization}" Style="{StaticResource PrimaryButton}" Margin="0,8,0,0" ToolTip="Create a local organization workspace and assign yourself its administrator role."/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -770,7 +773,7 @@
                                 <Grid Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <ComboBox Grid.Column="0" ItemsSource="{Binding AvailableAccounts}" SelectedItem="{Binding SelectedAccount, Mode=TwoWay}" DisplayMemberPath="AccountName" ToolTip="Accounts from the latest live scan"/>
-                                    <Button Grid.Column="1" Content="Bind account" Command="{Binding BindAccountCommand}" IsEnabled="{Binding CanBindAccount}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <Button Grid.Column="1" Content="Bind account" Command="{Binding BindAccountCommand}" IsEnabled="{Binding CanBindAccount}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Associate the selected scanned cloud account with this organization."/>
                                 </Grid>
                                 <DataGrid ItemsSource="{Binding Bindings}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="80" MaxHeight="180" Margin="0,8,0,0">
                                     <DataGrid.Columns>
@@ -787,8 +790,8 @@
                                 <Grid Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" Text="{Binding NewMemberEmail, UpdateSourceTrigger=PropertyChanged}" ToolTip="Invite by Entra sign-in email" Margin="0,0,8,0"/>
-                                    <ComboBox Grid.Column="1" ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding NewMemberRoleOption, Mode=TwoWay}" DisplayMemberPath="Name" Margin="4,0"/>
-                                    <Button Grid.Column="2" Content="Add member" Command="{Binding AddMemberCommand}" IsEnabled="{Binding CanAddMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <ComboBox Grid.Column="1" ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding NewMemberRoleOption, Mode=TwoWay}" DisplayMemberPath="Name" Margin="4,0" ToolTip="Choose the organization role to assign to the invited Entra user."/>
+                                    <Button Grid.Column="2" Content="Add member" Command="{Binding AddMemberCommand}" IsEnabled="{Binding CanAddMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Add the Entra user to the selected organization with the chosen role."/>
                                 </Grid>
                                 <DataGrid ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="80" MaxHeight="180" SelectionMode="Single" Margin="0,8,0,0">
                                     <DataGrid.Columns>
@@ -798,9 +801,9 @@
                                     </DataGrid.Columns>
                                 </DataGrid>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                    <ComboBox ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding SelectedMemberRoleOption, Mode=TwoWay}" DisplayMemberPath="Name" IsEnabled="{Binding CanChangeMemberRole}" MinWidth="180"/>
-                                    <Button Content="Update role" Command="{Binding UpdateMemberRoleCommand}" IsEnabled="{Binding CanChangeMemberRole}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                                    <Button Content="Toggle active" Command="{Binding ToggleMemberActiveCommand}" IsEnabled="{Binding CanToggleMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <ComboBox ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding SelectedMemberRoleOption, Mode=TwoWay}" DisplayMemberPath="Name" IsEnabled="{Binding CanChangeMemberRole}" MinWidth="180" ToolTip="Choose a new role for the selected organization member."/>
+                                    <Button Content="Update role" Command="{Binding UpdateMemberRoleCommand}" IsEnabled="{Binding CanChangeMemberRole}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Save the selected role for this member."/>
+                                    <Button Content="Toggle active" Command="{Binding ToggleMemberActiveCommand}" IsEnabled="{Binding CanToggleMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Enable or suspend the selected member's organization access."/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -818,19 +821,19 @@
                                     <StackPanel Grid.Column="1">
                                         <TextBox Text="{Binding CustomRoleName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Custom role name"/>
                                         <WrapPanel Margin="0,6,0,0">
-                                            <CheckBox Content="View inventory" IsChecked="{Binding CustomRoleViewInventory}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
-                                            <CheckBox Content="Run scans" IsChecked="{Binding CustomRoleRunScan}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
-                                            <CheckBox Content="View findings" IsChecked="{Binding CustomRoleViewFindings}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
-                                            <CheckBox Content="Manage members" IsChecked="{Binding CustomRoleManageMembers}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
-                                            <CheckBox Content="Manage connections" IsChecked="{Binding CustomRoleManageConnections}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
-                                            <CheckBox Content="Manage policies" IsChecked="{Binding CustomRoleManagePolicies}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
-                                            <CheckBox Content="Manage remediation" IsChecked="{Binding CustomRoleManageRemediations}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
-                                            <CheckBox Content="Export reports" IsChecked="{Binding CustomRoleExportReports}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="View inventory" IsChecked="{Binding CustomRoleViewInventory}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4" ToolTip="Allow viewing scanned cloud accounts, identities, resources, and entitlements."/>
+                                            <CheckBox Content="Run scans" IsChecked="{Binding CustomRoleRunScan}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4" ToolTip="Allow starting read-only cloud scans for bound accounts."/>
+                                            <CheckBox Content="View findings" IsChecked="{Binding CustomRoleViewFindings}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4" ToolTip="Allow viewing risk findings and recommendations."/>
+                                            <CheckBox Content="Manage members" IsChecked="{Binding CustomRoleManageMembers}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4" ToolTip="Allow inviting members and changing organization roles or active status."/>
+                                            <CheckBox Content="Manage connections" IsChecked="{Binding CustomRoleManageConnections}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4" ToolTip="Allow managing organization cloud-account bindings."/>
+                                            <CheckBox Content="Manage policies" IsChecked="{Binding CustomRoleManagePolicies}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4" ToolTip="Allow managing organization policy and exception settings."/>
+                                            <CheckBox Content="Manage remediation" IsChecked="{Binding CustomRoleManageRemediations}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4" ToolTip="Allow creating and reviewing non-executable remediation plans."/>
+                                            <CheckBox Content="Export reports" IsChecked="{Binding CustomRoleExportReports}" IsEnabled="{Binding CanManageMembers}" Margin="0,0,12,4" ToolTip="Allow exporting reports and organization evidence bundles."/>
                                         </WrapPanel>
                                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                            <Button Content="New role" Command="{Binding NewCustomRoleCommand}" IsEnabled="{Binding CanManageMembers}" Style="{StaticResource QuietButton}"/>
-                                            <Button Content="Save role" Command="{Binding SaveCustomRoleCommand}" IsEnabled="{Binding CanSaveCustomRole}" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0"/>
-                                            <Button Content="Delete role" Command="{Binding DeleteCustomRoleCommand}" IsEnabled="{Binding CanDeleteCustomRole}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                            <Button Content="New role" Command="{Binding NewCustomRoleCommand}" IsEnabled="{Binding CanManageMembers}" Style="{StaticResource QuietButton}" ToolTip="Start a new custom organization role definition."/>
+                                            <Button Content="Save role" Command="{Binding SaveCustomRoleCommand}" IsEnabled="{Binding CanSaveCustomRole}" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" ToolTip="Save the custom role name and selected permissions."/>
+                                            <Button Content="Delete role" Command="{Binding DeleteCustomRoleCommand}" IsEnabled="{Binding CanDeleteCustomRole}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Delete the selected custom role if it is not assigned to a member."/>
                                         </StackPanel>
                                     </StackPanel>
                                 </Grid>
@@ -876,8 +879,8 @@
                             <TextBox Grid.Column="4" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" ToolTip="Your audit actor name" Margin="8,0,0,0"/>
                         </Grid>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="Create from Current Scan" Command="{Binding CreateCampaignCommand}" IsEnabled="{Binding CanCreateCampaign}" Style="{StaticResource PrimaryButton}"/>
-                            <Button Content="Refresh" Command="{Binding RefreshCampaignsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                            <Button Content="Create from Current Scan" Command="{Binding CreateCampaignCommand}" IsEnabled="{Binding CanCreateCampaign}" Style="{StaticResource PrimaryButton}" ToolTip="Create review items from the latest scan using the selected template and reviewer settings."/>
+                            <Button Content="Refresh" Command="{Binding RefreshCampaignsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Reload campaigns and reevaluate reminders, deadlines, and expired exceptions."/>
                             <TextBlock Text="{Binding ReviewerEligibilityMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding ReminderMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
@@ -930,13 +933,13 @@
                                     <ComboBox Grid.Column="0" ItemsSource="{Binding EligibleReviewers}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding AssignedReviewerName, Mode=TwoWay}" ToolTip="Assigned reviewer; only active cloud users with Global Administrator, Security Administrator, or System Analyst access are listed" Margin="0,0,6,0"/>
                                     <DatePicker Grid.Column="1" SelectedDate="{Binding ItemDueAt, Mode=TwoWay}" ToolTip="Review deadline" Margin="3,0"/>
                                     <TextBox Grid.Column="2" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" ToolTip="Actor recording this action" Margin="3,0"/>
-                                    <ComboBox Grid.Column="3" ItemsSource="{Binding Decisions}" SelectedItem="{Binding SelectedDecision, Mode=TwoWay}" Margin="6,0,0,0"/>
+                                    <ComboBox Grid.Column="3" ItemsSource="{Binding Decisions}" SelectedItem="{Binding SelectedDecision, Mode=TwoWay}" Margin="6,0,0,0" ToolTip="Choose the review decision for the selected access item."/>
                                 </Grid>
                                 <TextBox Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Decision rationale; required for exception, rejection, or investigation" Margin="0,8,0,0"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                     <DatePicker SelectedDate="{Binding ExceptionExpiresAt, Mode=TwoWay}" ToolTip="Exception expiration date; required for exception decision"/>
-                                    <Button Content="Assign reviewer" Command="{Binding AssignReviewerCommand}" IsEnabled="{Binding CanAssignReviewer}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                                    <Button Content="Record decision" Command="{Binding RecordDecisionCommand}" IsEnabled="{Binding CanRecordDecision}" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0"/>
+                                    <Button Content="Assign reviewer" Command="{Binding AssignReviewerCommand}" IsEnabled="{Binding CanAssignReviewer}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Assign the eligible reviewer and deadline to the selected item."/>
+                                    <Button Content="Record decision" Command="{Binding RecordDecisionCommand}" IsEnabled="{Binding CanRecordDecision}" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" ToolTip="Record the decision and create an evidence-hashed attestation. Non-certified decisions need a comment."/>
                                 </StackPanel>
                                 <TextBlock Text="AUDIT HISTORY" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                                 <ItemsControl ItemsSource="{Binding SelectedAuditTrail}">

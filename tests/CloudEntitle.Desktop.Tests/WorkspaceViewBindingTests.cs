@@ -124,4 +124,42 @@ public sealed class WorkspaceViewBindingTests
         Assert.Equal("Forever", (string?)scanningTrigger.Descendants(presentation + "Storyboard").Single().Attribute("RepeatBehavior"));
         Assert.Single(scanningTrigger.Descendants(presentation + "StopStoryboard"));
     }
+
+    [Fact]
+    public void InteractiveWorkspaceOptions_ShouldAllHaveTooltips()
+    {
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var optionTypes = new HashSet<XName>
+        {
+            presentation + "Button",
+            presentation + "CheckBox",
+            presentation + "ComboBox",
+            presentation + "DataGrid",
+            presentation + "DatePicker",
+            presentation + "Expander",
+            presentation + "PasswordBox",
+            presentation + "TextBox"
+        };
+        var dataGridTooltipStyleExists = document.Descendants(presentation + "Style")
+            .Any(style => (string?)style.Attribute("TargetType") == "{x:Type DataGrid}"
+                && style.Elements(presentation + "Setter").Any(setter => (string?)setter.Attribute("Property") == "ToolTip"));
+
+        var missing = document.Descendants()
+            .Where(element => optionTypes.Contains(element.Name)
+                && string.IsNullOrWhiteSpace((string?)element.Attribute("ToolTip"))
+                && !(element.Name == presentation + "DataGrid" && dataGridTooltipStyleExists))
+            .Select(element => $"{element.Name.LocalName}: {string.Join(" ", new[] { "Content", "Text", "Header", "ItemsSource", "Name" }.Select(name => (string?)element.Attribute(name)).Where(value => !string.IsNullOrWhiteSpace(value)))}")
+            .ToArray();
+
+        Assert.True(missing.Length == 0, string.Join(Environment.NewLine, missing));
+
+        var mainWindow = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "MainWindow.xaml"));
+        var buttonsWithoutTooltips = mainWindow.Descendants(presentation + "Button")
+            .Where(button => string.IsNullOrWhiteSpace((string?)button.Attribute("ToolTip")))
+            .Select(button => (string?)button.Attribute("Content") ?? (string?)button.Attribute("Command") ?? "Button")
+            .ToArray();
+        Assert.True(buttonsWithoutTooltips.Length == 0, string.Join(Environment.NewLine, buttonsWithoutTooltips));
+    }
 }

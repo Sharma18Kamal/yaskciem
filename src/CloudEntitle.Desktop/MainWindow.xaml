@@ -51,7 +51,7 @@
                         <StackPanel>
                             <TextBlock Text="SECURITY WORKSPACE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold"/>
                             <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource PrimaryBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                            <TextBlock Text="Connect one provider at a time. Scans do not modify cloud resources." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                            <TextBlock Text="Connect multiple cloud providers. Scans are read-only and do not modify cloud resources." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
                         </StackPanel>
                     </Border>
                     <ItemsControl ItemsSource="{Binding NavigationItems}">

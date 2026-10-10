@@ -72,7 +72,7 @@ public sealed class NavigationTests
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Access Reviews");
         Assert.Equal("YASK-CIEM", viewModel.ApplicationName);
         Assert.Equal("Cloud Accounts", viewModel.CloudAccountsNavigationItem.Title);
-        Assert.Equal("0.1.0", viewModel.ApplicationVersion);
+        Assert.Equal("1.0.0", viewModel.ApplicationVersion);
     }
 
     [Fact]

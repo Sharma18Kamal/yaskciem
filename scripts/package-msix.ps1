@@ -76,12 +76,30 @@ $manifest = $manifest.Replace('Publisher="CN=YASK-CIEM"', ('Publisher="' + $Publ
 $manifest = $manifest.Replace('Version="1.0.0.0"', ('Version="' + $PackageVersion + '"'))
 Set-Content $manifestPath $manifest -Encoding UTF8
 
-# Placeholder assets are required by AppX metadata; replace them with branded PNGs before release signing.
 $assetDirectory = Join-Path $packageRoot 'Assets'
 New-Item $assetDirectory -ItemType Directory -Force | Out-Null
-foreach ($asset in 'StoreLogo.png', 'Square150x150Logo.png', 'Square44x44Logo.png') {
+$sourceAssetDirectory = Join-Path $repositoryRoot 'installer\Assets'
+$assetSizes = @{
+    'StoreLogo.png' = 50
+    'Square150x150Logo.png' = 150
+    'Square44x44Logo.png' = 44
+}
+foreach ($asset in $assetSizes.Keys) {
+    $sourceAssetPath = Join-Path $sourceAssetDirectory $asset
+    if (-not (Test-Path $sourceAssetPath)) {
+        throw "Required branded MSIX asset is missing: $sourceAssetPath. Run scripts/generate-appx-assets.ps1 first."
+    }
     $assetPath = Join-Path $assetDirectory $asset
-    [IO.File]::WriteAllBytes($assetPath, [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='))
+    Copy-Item -LiteralPath $sourceAssetPath -Destination $assetPath -Force
+    $image = [System.Drawing.Image]::FromFile($assetPath)
+    try {
+        if ($image.Width -ne $assetSizes[$asset] -or $image.Height -ne $assetSizes[$asset]) {
+            throw "MSIX asset must be $($assetSizes[$asset])x$($assetSizes[$asset]): $assetPath"
+        }
+    }
+    finally {
+        $image.Dispose()
+    }
 }
 
 $makeAppx = Find-MakeAppx
