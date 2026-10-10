@@ -1,16 +1,23 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace YaskCiemNativeSetup;
 
 internal static class Program
 {
     private const string MsiResourceName = "YaskCiemNativeSetup.Payload.msi";
+    private const string UpgradeCode = "{D0B7D2CC-5BD5-4A29-9E79-2E5EA68F6B4C}";
+
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+    private static extern uint MsiEnumRelatedProducts(string upgradeCode, int reserved, int index, StringBuilder productCode);
 
     private static async Task<int> Main()
     {
         var extractedMsiPath = Path.Combine(Path.GetTempPath(), $"YASK-CIEM-{Guid.NewGuid():N}.msi");
+        var logPath = Path.Combine(Path.GetTempPath(), "YASK-CIEM-Setup.log");
         try
         {
             await using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream(MsiResourceName)
@@ -20,17 +27,36 @@ internal static class Program
                 await resource.CopyToAsync(output);
             }
 
+            // Re-running the same MSI over an installed copy opens maintenance mode instead of reinstalling, so remove it first.
+            var command = new StringBuilder();
+            var installed = FindInstalledProduct();
+            if (installed is not null) command.Append($"msiexec /x {installed} /qn /norestart & ");
+            command.Append($"msiexec /i \"{extractedMsiPath}\" /qb /norestart /l*v \"{logPath}\"");
+
             var startInfo = new ProcessStartInfo
             {
-                FileName = "msiexec.exe",
-                Arguments = $"/i \"{extractedMsiPath}\"",
+                FileName = "cmd.exe",
+                Arguments = $"/d /s /c \"{command}\"",
                 UseShellExecute = true,
                 Verb = "runas",
-                WindowStyle = ProcessWindowStyle.Normal
+                WindowStyle = ProcessWindowStyle.Hidden
             };
             using var installer = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Windows Installer could not be started.");
             await installer.WaitForExitAsync();
+
+            if (installer.ExitCode is 0 or 3010)
+            {
+                var launch = MessageBoxW(IntPtr.Zero, "YASK-CIEM was installed successfully.\n\nLaunch it now?", "YASK-CIEM Setup", 0x24) == 6;
+                if (launch)
+                {
+                    var appPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "YASK-CIEM", "CloudEntitle.Desktop.exe");
+                    if (File.Exists(appPath)) Process.Start(new ProcessStartInfo(appPath) { UseShellExecute = true });
+                }
+                return 0;
+            }
+
+            MessageBoxW(IntPtr.Zero, $"YASK-CIEM installation failed (Windows Installer code {installer.ExitCode}).\n\nDetails: {logPath}", "YASK-CIEM Setup", 0x10);
             return installer.ExitCode;
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
@@ -40,7 +66,7 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"YASK-CIEM Setup failed: {exception.Message}");
+            MessageBoxW(IntPtr.Zero, $"YASK-CIEM Setup failed: {exception.Message}", "YASK-CIEM Setup", 0x10);
             return 1;
         }
         finally
@@ -53,5 +79,14 @@ internal static class Program
             {
             }
         }
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+    private static string? FindInstalledProduct()
+    {
+        var productCode = new StringBuilder(39);
+        return MsiEnumRelatedProducts(UpgradeCode, 0, 0, productCode) == 0 ? productCode.ToString() : null;
     }
 }

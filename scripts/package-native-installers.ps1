@@ -69,7 +69,7 @@ if ($LASTEXITCODE -ne 0) { throw "Setup project restore failed with exit code $L
 & dotnet publish $setupProject `
     --configuration Release `
     --runtime win-x64 `
-    --self-contained false `
+    --self-contained true `
     --no-restore `
     --output $setupPublishDirectory `
     "-p:MsiPath=$msiPath" `
