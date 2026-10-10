@@ -9,8 +9,17 @@ using CloudEntitle.IdentityGovernance.Services;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
+public sealed record ReviewerOption(string Value, string Display);
+
 public sealed class AccessReviewViewModel : WorkspaceViewModel
 {
+    private static readonly string[] QualifyingRoles =
+    {
+        "Global Administrator", "Security Administrator", "System Analyst", "Security Analyst",
+        "AdministratorAccess", "SecurityAudit",
+        "roles/owner", "roles/iam.securityAdmin", "roles/iam.securityReviewer"
+    };
+
     private static readonly IReadOnlyList<AccessReviewTemplate> BuiltInTemplates = new[]
     {
         new AccessReviewTemplate("all-access", "All effective access", "Review every currently granted or conditional entitlement.", 30),
@@ -37,7 +46,8 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     private string _campaignName = "Quarterly cloud access review";
     private string _campaignDurationDays = BuiltInTemplates[0].DurationDays.ToString();
     private AccessReviewTemplate _selectedTemplate = BuiltInTemplates[0];
-    private string _assignedReviewerName = Environment.UserName;
+    private string _assignedReviewerName = string.Empty;
+    private IReadOnlyList<ReviewerOption> _eligibleReviewers = Array.Empty<ReviewerOption>();
     private string _reviewerName = string.Empty;
     private string _actionActor = Environment.UserName;
     private string _reviewComment = string.Empty;
@@ -74,6 +84,10 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     public IReadOnlyList<AccessReviewAuditEntry> SelectedAuditTrail => SelectedItem?.AuditTrail ?? Array.Empty<AccessReviewAuditEntry>();
     public IReadOnlyList<ReviewDecision> Decisions => AvailableDecisions;
     public IReadOnlyList<AccessReviewTemplate> Templates => BuiltInTemplates;
+    public IReadOnlyList<ReviewerOption> EligibleReviewers => _eligibleReviewers;
+    public string ReviewerEligibilityMessage => _eligibleReviewers.Count == 0
+        ? "No eligible reviewers. Reviewers must be active Azure, AWS, or GCP users with Global Administrator, Security Administrator, or System Analyst access. Run a scan first."
+        : $"{_eligibleReviewers.Count} eligible reviewer(s): active cloud users with Global Administrator, Security Administrator, or System Analyst access.";
     public bool HasCampaigns => FilteredCampaigns.Count > 0;
     public bool HasReviewItems => ReviewItems.Count > 0;
     public IReadOnlyList<AccessReviewAttestation> SelectedAttestations => SelectedItem?.Attestations ?? Array.Empty<AccessReviewAttestation>();
@@ -131,7 +145,7 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     public DateTime? ExceptionExpiresAt { get => _exceptionExpiresAt; set { if (SetProperty(ref _exceptionExpiresAt, value)) OnPropertyChanged(nameof(CanRecordDecision)); } }
     public ReviewDecision SelectedDecision { get => _selectedDecision; set { if (SetProperty(ref _selectedDecision, value)) OnPropertyChanged(nameof(CanRecordDecision)); } }
     public bool CanCreateCampaign => !IsLoading && SelectedTemplate is not null && !string.IsNullOrWhiteSpace(CampaignName) && int.TryParse(CampaignDurationDays, out var days) && days is > 0 and <= 365;
-    public bool CanAssignReviewer => SelectedCampaign is not null && SelectedItem is not null && !string.IsNullOrWhiteSpace(AssignedReviewerName) && !string.IsNullOrWhiteSpace(ActionActor) && ItemDueAt?.Date >= DateTime.Today;
+    public bool CanAssignReviewer => SelectedCampaign is not null && SelectedItem is not null && IsEligibleReviewer(AssignedReviewerName) && !string.IsNullOrWhiteSpace(ActionActor) && ItemDueAt?.Date >= DateTime.Today;
     public bool CanRecordDecision => SelectedCampaign is not null && SelectedItem is not null && !string.IsNullOrWhiteSpace(ReviewerName) && !string.IsNullOrWhiteSpace(ActionActor)
         && (SelectedDecision != ReviewDecision.ExceptionGranted || ExceptionExpiresAt?.Date >= DateTime.Today)
         && (SelectedDecision == ReviewDecision.Certified || !string.IsNullOrWhiteSpace(ReviewComment));
@@ -147,6 +161,10 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
         ErrorMessage = null;
         try
         {
+            _eligibleReviewers = await BuildEligibleReviewersAsync();
+            OnPropertyChanged(nameof(EligibleReviewers));
+            OnPropertyChanged(nameof(ReviewerEligibilityMessage));
+            OnPropertyChanged(nameof(CanAssignReviewer));
             var campaigns = await _store.GetAsync();
             var reviewed = new List<AccessReviewCampaign>(campaigns.Count);
             var remindersDue = 0;
@@ -202,9 +220,9 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
             foreach (var item in campaign.Items)
             {
                 var ownerReviewer = item.OwnerSnapshot;
-                var reviewer = string.IsNullOrWhiteSpace(ownerReviewer) ? AssignedReviewerName : ownerReviewer;
-                if (!string.IsNullOrWhiteSpace(reviewer))
-                    campaign = _governance.AssignReviewer(campaign, item.Id, reviewer, campaign.DueAt, ActionActor, DateTime.UtcNow);
+                var reviewer = IsEligibleReviewer(ownerReviewer) ? ownerReviewer : AssignedReviewerName;
+                if (IsEligibleReviewer(reviewer))
+                    campaign = _governance.AssignReviewer(campaign, item.Id, reviewer!, campaign.DueAt, ActionActor, DateTime.UtcNow);
             }
             await _store.SaveAsync(campaign);
             CampaignName = $"{CampaignName.Trim()} follow-up";
@@ -305,6 +323,54 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
                 return new AccessReviewCandidate(principalId, accessId, null, provider, summary, evidence, owner,
                     principal?.IdentityType ?? IdentityType.Unknown, item.IsPrivileged || principal?.IsPrivileged == true, principal?.IsExternal == true);
             }).ToArray();
+    }
+
+    private bool IsEligibleReviewer(string? reviewer)
+        => !string.IsNullOrWhiteSpace(reviewer)
+            && _eligibleReviewers.Any(option => option.Value.Equals(reviewer.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsQualifyingRole(string? role)
+        => !string.IsNullOrWhiteSpace(role)
+            && QualifyingRoles.Any(name => role.Contains(name, StringComparison.OrdinalIgnoreCase));
+
+    private async Task<IReadOnlyList<ReviewerOption>> BuildEligibleReviewersAsync()
+    {
+        var grants = new Dictionary<string, (string Name, string Provider, SortedSet<string> Roles)>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(CloudPrincipal? principal, string provider, string? role)
+        {
+            if (principal is null || principal.IdentityType != IdentityType.User || !principal.IsActive || !IsQualifyingRole(role)) return;
+            var value = string.IsNullOrWhiteSpace(principal.Email) ? principal.Name : principal.Email!;
+            if (string.IsNullOrWhiteSpace(value)) return;
+            if (!grants.TryGetValue(value, out var entry)) grants[value] = entry = (principal.Name, provider, new SortedSet<string>(StringComparer.OrdinalIgnoreCase));
+            entry.Roles.Add(role!);
+        }
+
+        if (_demoData.IsDemoMode)
+        {
+            var snapshot = await _demoData.GetSnapshotAsync();
+            var roles = snapshot.Roles.ToDictionary(item => item.Id);
+            var principals = snapshot.Principals.ToDictionary(item => item.Id);
+            foreach (var access in snapshot.EffectiveAccess.Where(item => item.Decision is AccessDecision.Allow or AccessDecision.Conditional && item.Provider != CloudProvider.Kubernetes))
+                Add(principals.GetValueOrDefault(access.PrincipalId), access.Provider.ToString(), roles.GetValueOrDefault(access.RoleId ?? Guid.Empty)?.Name);
+        }
+        else if (_liveScan?.CurrentResult is { } scan)
+        {
+            foreach (var record in scan.EffectiveAccessRecords)
+            {
+                var provider = record.Provider;
+                if (!(provider.Equals("Azure", StringComparison.OrdinalIgnoreCase) || provider.Equals("Aws", StringComparison.OrdinalIgnoreCase) || provider.Equals("Gcp", StringComparison.OrdinalIgnoreCase))) continue;
+                if (record.AssignmentType.Contains("Role usage", StringComparison.OrdinalIgnoreCase) || record.AssignmentType.Contains("Eligible", StringComparison.OrdinalIgnoreCase)) continue;
+                var principal = scan.IdentityRecords.FirstOrDefault(identity => identity.Name.Equals(record.Principal, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(identity.PrincipalId, record.Principal, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(identity.Email, record.Principal, StringComparison.OrdinalIgnoreCase));
+                Add(principal, provider, record.Role);
+            }
+        }
+
+        return grants.OrderBy(item => item.Value.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new ReviewerOption(item.Key, $"{item.Value.Name} ({item.Value.Provider}) - {string.Join(", ", item.Value.Roles)}"))
+            .ToArray();
     }
 
     private bool MatchesTemplate(AccessReviewCandidate candidate)

@@ -24,6 +24,7 @@ public sealed class AccessReviewViewModelTests
         try
         {
             await viewModel.RefreshAsync();
+            Assert.Equal(new[] { "owner@example.invalid", "reviewer@example.invalid" }, viewModel.EligibleReviewers.Select(option => option.Value).OrderBy(value => value).ToArray());
             viewModel.CampaignName = "Quarterly production access";
             viewModel.SelectedTemplate = viewModel.Templates.Single(item => item.Id == "privileged-workloads");
             viewModel.AssignedReviewerName = "fallback-reviewer@example.invalid";
@@ -42,6 +43,12 @@ public sealed class AccessReviewViewModelTests
 
             viewModel.SelectedCampaign = campaign;
             viewModel.SelectedItem = item;
+            viewModel.ItemDueAt = DateTime.Today.AddDays(2);
+            foreach (var unavailable in new[] { "disabled@example.invalid", "reader@example.invalid" })
+            {
+                viewModel.AssignedReviewerName = unavailable;
+                Assert.False(viewModel.CanAssignReviewer);
+            }
             viewModel.AssignedReviewerName = "reviewer@example.invalid";
             viewModel.ItemDueAt = DateTime.Today.AddDays(2);
             await viewModel.AssignReviewerAsync();
@@ -90,8 +97,17 @@ public sealed class AccessReviewViewModelTests
                     Name = "admin@example.invalid", PrincipalId = "admin@example.invalid", Email = "admin@example.invalid",
                     IdentityType = IdentityType.ServiceAccount, IsPrivileged = true, IsActive = true,
                     OwnerIds = new List<string> { "owner@example.invalid" }, OwnerInventoryComplete = true
-                }
+                },
+                User(accountId, "owner@example.invalid", isActive: true),
+                User(accountId, "reviewer@example.invalid", isActive: true),
+                User(accountId, "disabled@example.invalid", isActive: false),
+                User(accountId, "reader@example.invalid", isActive: true)
             });
+        private static CloudPrincipal User(Guid accountId, string name, bool isActive) => new()
+        {
+            Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Azure, Name = name, PrincipalId = name, Email = name,
+            IdentityType = IdentityType.User, IsActive = isActive
+        };
         public Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<CloudRole>>(Array.Empty<CloudRole>());
         public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default)
@@ -99,7 +115,11 @@ public sealed class AccessReviewViewModelTests
         public Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<CloudEffectiveAccessAssignment>>(new[]
             {
-                new CloudEffectiveAccessAssignment("admin@example.invalid", "Owner", "/subscriptions/sub-production", "Azure RBAC", true)
+                new CloudEffectiveAccessAssignment("admin@example.invalid", "Owner", "/subscriptions/sub-production", "Azure RBAC", true),
+                new CloudEffectiveAccessAssignment("owner@example.invalid", "Global Administrator", "/", "Entra Active (PIM)", true, "Active (PIM)"),
+                new CloudEffectiveAccessAssignment("reviewer@example.invalid", "Security Administrator", "/", "Entra Active (PIM)", true, "Active (PIM)"),
+                new CloudEffectiveAccessAssignment("disabled@example.invalid", "Global Administrator", "/", "Entra Active (PIM)", true, "Active (PIM)"),
+                new CloudEffectiveAccessAssignment("reader@example.invalid", "Reader", "/subscriptions/sub-production", "Azure RBAC", false)
             });
     }
 
