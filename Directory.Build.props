@@ -5,9 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Version>1.0.0.55</Version>
-    <AssemblyVersion>1.0.0.55</AssemblyVersion>
-    <FileVersion>1.0.0.55</FileVersion>
+    <Version>1.0.0.56</Version>
+    <AssemblyVersion>1.0.0.56</AssemblyVersion>
+    <FileVersion>1.0.0.56</FileVersion>
     <Company>YASK</Company>
     <Authors>YASK</Authors>
     <Product>YASK-CIEM</Product>

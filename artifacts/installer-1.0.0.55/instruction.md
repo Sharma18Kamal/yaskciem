@@ -53,4 +53,3 @@ YASK-CIEM reuses the CLI sessions and performs read-only discovery. It does not 
 - Native MSI: uninstall **YASK-CIEM** from **Windows Settings > Apps > Installed apps**.
 
 Uninstalling the app does not automatically delete local application data. Remove YASK-CIEM data only if you intentionally want to delete scan history, reports, and local workflow records.
-
