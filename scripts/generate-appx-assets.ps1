@@ -15,7 +15,8 @@ $assets = @(
     @{ Name = 'Square150x150Logo.png'; Size = 150 },
     @{ Name = 'YASK-CIEM-Store-Logo-300.png'; Size = 300 },
     @{ Name = 'YASK-CIEM-Logo-512.png'; Size = 512 },
-    @{ Name = 'YASK-CIEM-Store-Logo-1080.png'; Size = 1080 }
+    @{ Name = 'YASK-CIEM-Store-Logo-1080.png'; Size = 1080 },
+    @{ Name = 'YASK-CIEM-Store-Logo-2160.png'; Size = 2160 }
 )
 
 foreach ($asset in $assets) {
