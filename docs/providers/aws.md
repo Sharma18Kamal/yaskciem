@@ -6,6 +6,10 @@ The AWS adapter lives in `CloudEntitle.Cloud.Aws` and maps AWS IAM and account m
 
 The connector enumerates AWS CLI profiles, including IAM Identity Center SSO profiles, and verifies each with STS. Every working profile/account pair is scanned separately, even when multiple permission sets target the same AWS account. Access keys, secret keys, session tokens, and private keys are never stored or logged.
 
+Configure an IAM-user profile with `aws configure --profile audit`, or configure and authenticate an Identity Center profile with `aws configure sso --profile audit` and `aws sso login --profile audit`. Use the actual profile name in place of `audit`. Verify it with `aws sts get-caller-identity --profile audit`, then select **Connect** in YASK-CIEM. AWS Connect verifies existing credentials and does not automatically start an SSO setup wizard. A `SecurityAudit` policy grants permissions but does not authenticate the CLI.
+
+Connection checks have a 15-second cancellation deadline. AWS identity checks disable CLI paging, use five-second connection/read timeouts, and probe default and named profiles concurrently. The first successful identity cancels slower probes. Connecting one provider does not wait for other providers' CLI checks.
+
 AWS **Disconnect**, including inactivity disconnection, applies only to the current YASK-CIEM app session. It excludes AWS from subsequent account discovery and scans, and refreshing sign-in status does not reconnect it. **Connect** resumes use of existing valid CLI credentials without reopening SSO configuration. Restarting the app checks existing CLI credentials again. Disconnection does not cancel an already-running scan; use **Stop Scan** for that.
 
 YASK-CIEM does not remove CLI profiles, sign out shared AWS SSO sessions, or deactivate IAM access keys when disconnecting AWS. `aws sso logout` does not invalidate IAM-user access keys. To revoke an IAM key, deactivate it separately in AWS IAM after checking which other tools depend on it.

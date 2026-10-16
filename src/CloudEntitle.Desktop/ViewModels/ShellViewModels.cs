@@ -963,7 +963,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         Providers =
         [
             new(CloudProviderType.Azure, "Azure", "Azure CLI", "az login", "Sign in with az. Entra/PIM needs tenant-approved Microsoft Graph read permissions.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Azure)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Azure))),
-            new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure sso", "Set up an AWS IAM Identity Center profile.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
+            new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure", "Uses configured IAM-user or IAM Identity Center CLI profiles.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
             new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
         ];
         RefreshConnectionsCommand = new AsyncRelayCommand(() => RefreshConnectionsAsync());
@@ -1033,14 +1033,24 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         {
             _cloudConnectionState.AllowConnection(provider);
             UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
-            await RefreshConnectionsAsync(cancellation.Token);
-            if (Providers.Any(option => option.Provider == provider && option.IsConnected))
+            var connectedProviders = Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet();
+            if (await _authenticationLauncher.IsConnectedAsync(provider, cancellation.Token))
             {
+                connectedProviders.Add(provider);
+                UpdateProviderStates(connectedProviders);
                 ConnectionGuidance = $"{provider} is connected. Go to Dashboard and select Scan Now to fetch cloud data.";
                 OnPropertyChanged(nameof(ConnectionGuidance));
                 return;
             }
-            UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
+            connectedProviders.Remove(provider);
+            UpdateProviderStates(connectedProviders);
+            if (provider == CloudProviderType.Aws)
+            {
+                ErrorMessage = "AWS CLI credentials could not be verified. Configure an IAM-user profile with 'aws configure --profile PROFILE', or renew SSO with 'aws sso login --profile PROFILE'. Verify with 'aws sts get-caller-identity --profile PROFILE', then select Connect again.";
+                ConnectionGuidance = "AWS is not connected. Check CLI credentials and network access; SecurityAudit permissions alone do not authenticate the CLI.";
+                OnPropertyChanged(nameof(ConnectionGuidance));
+                return;
+            }
             _authenticationLauncher.LaunchAuthentication(provider);
             ConnectionGuidance = $"Complete {provider} sign-in in the terminal. Other cloud connections remain available.";
             ErrorMessage = null;
@@ -1051,7 +1061,9 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (await _authenticationLauncher.IsConnectedAsync(provider, cancellation.Token))
                 {
-                    await RefreshConnectionsAsync();
+                    connectedProviders = Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet();
+                    connectedProviders.Add(provider);
+                    UpdateProviderStates(connectedProviders);
                     ConnectionGuidance = $"{provider} is connected. Go to Dashboard and select Scan Now to fetch resources, assignments, and findings. YASK-CIEM does not receive or store cloud credentials.";
                     OnPropertyChanged(nameof(ConnectionGuidance));
                     return;
@@ -1082,7 +1094,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
                 _pendingConnectCancellation = null;
                 _pendingConnectCompletion = null;
                 cancellation.Dispose();
-                await RefreshConnectionsAsync();
+                UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
                 completion.TrySetResult();
             }
         }

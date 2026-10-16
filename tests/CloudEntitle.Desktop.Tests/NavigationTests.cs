@@ -222,20 +222,42 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task CloudAccountsViewModel_ShouldConnectAwsWithoutWaitingForAnotherProviderCli()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher { BlockedProvider = CloudProviderType.Gcp };
+        launcher.LaunchedProviders.Add(CloudProviderType.Aws);
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
+
+        try
+        {
+            await viewModel.ConnectAsync(CloudProviderType.Aws).WaitAsync(TimeSpan.FromSeconds(2));
+
+            var aws = viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws);
+            Assert.True(aws.IsConnected);
+            Assert.False(aws.IsConnecting);
+            Assert.Equal(1, launcher.LaunchedProviders.Count(provider => provider == CloudProviderType.Aws));
+        }
+        finally
+        {
+            launcher.ConnectionCheckRelease.TrySetResult(false);
+        }
+    }
+
+    [Fact]
     public async Task CloudAccountsViewModel_ShouldRecoverWhenProviderCliIsMissing()
     {
         var launcher = new RecordingCloudAuthenticationLauncher
         {
-            LaunchFailure = new FileNotFoundException("AWS CLI was not found. Install it and reopen YASK-CIEM.")
+            LaunchFailure = new FileNotFoundException("Google Cloud CLI was not found. Install it and reopen YASK-CIEM.")
         };
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
 
-        await viewModel.ConnectAsync(CloudProviderType.Aws);
+        await viewModel.ConnectAsync(CloudProviderType.Gcp);
 
-        var awsProvider = viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws);
-        Assert.False(awsProvider.IsConnecting);
-        Assert.True(awsProvider.CanConnect);
-        Assert.Contains("AWS CLI was not found", viewModel.ErrorMessage);
+        var gcpProvider = viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Gcp);
+        Assert.False(gcpProvider.IsConnecting);
+        Assert.True(gcpProvider.CanConnect);
+        Assert.Contains("Google Cloud CLI was not found", viewModel.ErrorMessage);
     }
 
     [Fact]
@@ -245,8 +267,8 @@ public sealed class NavigationTests
         var connectionState = new CloudConnectionState();
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, cloudConnectionState: connectionState);
 
-        var connectTask = viewModel.ConnectAsync(CloudProviderType.Aws);
-        Assert.Equal(CloudProviderType.Aws, connectionState.PendingProvider);
+        var connectTask = viewModel.ConnectAsync(CloudProviderType.Azure);
+        Assert.Equal(CloudProviderType.Azure, connectionState.PendingProvider);
         Assert.Equal("Cancel Sign-in", new MainWindowViewModel(new TestNavigationService(viewModel), connectionState).DisconnectCloudButtonLabel);
 
         Assert.True(await viewModel.CancelPendingConnectionAsync());
@@ -256,6 +278,22 @@ public sealed class NavigationTests
         Assert.Empty(launcher.DisconnectedProviders);
         Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).CanConnect);
         Assert.Contains("Sign-in wait canceled", viewModel.ConnectionGuidance);
+    }
+
+    [Fact]
+    public async Task CloudAccountsViewModel_ShouldExplainInvalidAwsCredentialsWithoutStartingSsoSetup()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher { NeverConnect = true };
+        var state = new CloudConnectionState();
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, cloudConnectionState: state);
+
+        await viewModel.ConnectAsync(CloudProviderType.Aws);
+
+        Assert.Empty(launcher.LaunchedProviders);
+        Assert.Null(state.PendingProvider);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).CanConnect);
+        Assert.Contains("aws configure --profile", viewModel.ErrorMessage);
+        Assert.Contains("SecurityAudit", viewModel.ConnectionGuidance);
     }
 
     [Fact]
@@ -860,6 +898,8 @@ public sealed class NavigationTests
         public List<CloudProviderType> DisconnectedProviders { get; } = new();
         public Exception? LaunchFailure { get; set; }
         public bool NeverConnect { get; set; }
+        public CloudProviderType? BlockedProvider { get; set; }
+        public TaskCompletionSource<bool> ConnectionCheckRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void LaunchAuthentication(CloudProviderType provider)
         {
             if (LaunchFailure is not null) throw LaunchFailure;
@@ -867,7 +907,9 @@ public sealed class NavigationTests
         }
         public void LaunchDisconnection(CloudProviderType provider) => DisconnectedProviders.Add(provider);
         public Task<bool> IsConnectedAsync(CloudProviderType provider, CancellationToken cancellationToken = default)
-            => Task.FromResult(!NeverConnect && LaunchedProviders.Contains(provider) && !DisconnectedProviders.Contains(provider));
+            => provider == BlockedProvider
+                ? ConnectionCheckRelease.Task.WaitAsync(cancellationToken)
+                : Task.FromResult(!NeverConnect && LaunchedProviders.Contains(provider) && !DisconnectedProviders.Contains(provider));
         public Task DisconnectAsync(CloudProviderType provider, CancellationToken cancellationToken = default)
         {
             DisconnectedProviders.Add(provider);

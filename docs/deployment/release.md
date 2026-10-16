@@ -1,5 +1,19 @@
 # Release checklist
 
+## Local build 1.0.0.59
+
+- Adds the bold text `Developed By: SHARMA Kamal K` above the Dashboard toolbar, with wrapping for narrower layouts.
+- Workspace UI regression tests: 8 passed. The full Release test command passed; 5 PostgreSQL integration tests were skipped because no test database was configured.
+- Self-contained Windows x64 MSIX and Setup EXE were built with matching 1.0.0.59 versions and verified development-certificate signatures. These are trusted-test artifacts; installation and clean-machine upgrade acceptance were not performed.
+
+## Local build 1.0.0.58
+
+- Connecting a provider checks only that provider rather than waiting for unrelated cloud CLIs. Cancellation clears pending UI state without another all-provider refresh.
+- CLI connection checks have a 15-second cancellation deadline. AWS default and named-profile identity checks run concurrently with paging disabled and five-second connect/read timeouts; a successful profile cancels slower probes.
+- AWS Connect verifies existing IAM-user or SSO credentials without automatically starting SSO configuration. Invalid credentials return actionable guidance rather than a repeated sign-in wait.
+- Focused connection/navigation tests: 52 passed. The full Release test command completed successfully. PostgreSQL integration tests still require `YASK_CIEM_TEST_POSTGRES`.
+- Self-contained Windows x64 MSIX and Setup EXE were built with matching 1.0.0.58 versions and valid local development-certificate signatures. Installation and live-cloud acceptance were not performed; these remain trusted-test artifacts.
+
 ## Local build 1.0.0.57
 
 - AWS connection detection checks named CLI profiles when default credentials are unavailable.

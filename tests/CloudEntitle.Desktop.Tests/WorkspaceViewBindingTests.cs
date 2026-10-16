@@ -23,6 +23,24 @@ public sealed class WorkspaceViewBindingTests
     }
 
     [Fact]
+    public void Dashboard_ShouldShowBoldDeveloperCreditAboveToolbar()
+    {
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var dashboard = Assert.Single(document.Descendants(presentation + "DataTemplate"), template =>
+            (string?)template.Attribute("DataType") == "{x:Type vm:DashboardViewModel}");
+        var panel = dashboard.Element(presentation + "StackPanel")!;
+        var credit = panel.Elements().First();
+
+        Assert.Equal(presentation + "TextBlock", credit.Name);
+        Assert.Equal("Developed By: SHARMA Kamal K", (string?)credit.Attribute("Text"));
+        Assert.Equal("Bold", (string?)credit.Attribute("FontWeight"));
+        Assert.Equal("Wrap", (string?)credit.Attribute("TextWrapping"));
+        Assert.Equal(presentation + "Grid", panel.Elements().Skip(1).First().Name);
+    }
+
+    [Fact]
     public void DashboardToolbar_ShouldExposeSharedCloudConnectionStatus()
     {
         var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));

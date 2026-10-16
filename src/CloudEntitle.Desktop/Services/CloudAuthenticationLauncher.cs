@@ -17,10 +17,12 @@ public interface ICloudAuthenticationLauncher
 public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
 {
     private readonly ICloudCommandRunner? _commandRunner;
+    private readonly TimeSpan _connectionCheckTimeout;
 
-    public CloudAuthenticationLauncher(ICloudCommandRunner? commandRunner = null)
+    public CloudAuthenticationLauncher(ICloudCommandRunner? commandRunner = null, TimeSpan? connectionCheckTimeout = null)
     {
         _commandRunner = commandRunner;
+        _connectionCheckTimeout = connectionCheckTimeout ?? TimeSpan.FromSeconds(15);
     }
 
     public void LaunchAuthentication(CloudProviderType provider)
@@ -71,6 +73,20 @@ public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
 
     public async Task<bool> IsConnectedAsync(CloudProviderType provider, CancellationToken cancellationToken = default)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_connectionCheckTimeout);
+        try
+        {
+            return await CheckConnectionAsync(provider, timeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeout.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> CheckConnectionAsync(CloudProviderType provider, CancellationToken cancellationToken)
+    {
         if (_commandRunner is null)
         {
             return false;
@@ -84,39 +100,51 @@ public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
             _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported cloud provider.")
         };
 
-        var result = await _commandRunner.RunAsync(command, arguments, cancellationToken);
-        if (provider == CloudProviderType.Aws && !result.IsSuccess)
+        if (provider == CloudProviderType.Aws)
         {
             var profiles = await _commandRunner.RunAsync("aws", new[] { "configure", "list-profiles" }, cancellationToken);
-            if (!profiles.IsSuccess)
+            var profileNames = profiles.IsSuccess
+                ? profiles.StandardOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).ToArray()
+                : Array.Empty<string>();
+            var identityArguments = arguments.Concat(new[] { "--no-cli-pager", "--cli-connect-timeout", "5", "--cli-read-timeout", "5" }).ToArray();
+            using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var checks = new List<Task<CloudCommandResult>>
             {
+                _commandRunner.RunAsync(command, identityArguments, probeCancellation.Token)
+            };
+            checks.AddRange(profileNames.Select(profile => _commandRunner.RunAsync("aws", new[] { "--profile", profile }.Concat(identityArguments).ToArray(), probeCancellation.Token)));
+            try
+            {
+                while (checks.Count > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var completed = await Task.WhenAny(checks);
+                    checks.Remove(completed);
+                    if ((await completed).IsSuccess)
+                    {
+                        return true;
+                    }
+                }
+
                 return false;
             }
-
-            foreach (var profile in profiles.StandardOutput
-                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Distinct(StringComparer.Ordinal))
+            finally
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var profileArguments = new[] { "--profile", profile }.Concat(arguments).ToArray();
-                var identity = await _commandRunner.RunAsync("aws", profileArguments, cancellationToken);
-                if (identity.IsSuccess)
+                probeCancellation.Cancel();
+                try
                 {
-                    return true;
+                    await Task.WhenAll(checks);
+                }
+                catch (OperationCanceledException) when (probeCancellation.IsCancellationRequested)
+                {
                 }
             }
-
-            return false;
         }
 
+        var result = await _commandRunner.RunAsync(command, arguments, cancellationToken);
         if (!result.IsSuccess)
         {
             return false;
-        }
-
-        if (provider == CloudProviderType.Aws)
-        {
-            return true;
         }
 
         try
