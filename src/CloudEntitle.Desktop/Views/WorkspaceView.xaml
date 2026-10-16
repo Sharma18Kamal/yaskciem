@@ -8,7 +8,6 @@
         </Style>
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
             <StackPanel>
-            <TextBlock Text="Developed By: SHARMA Kamal K" FontWeight="Bold" FontSize="16" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,0,0,16"/>
             <Grid Margin="0,0,0,16">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Button Grid.Column="0" Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" ToolTip="Scan all connected providers and selected accounts or Kubernetes contexts using read-only access."/>

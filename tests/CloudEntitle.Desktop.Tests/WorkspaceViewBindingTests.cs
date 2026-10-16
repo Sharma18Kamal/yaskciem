@@ -23,21 +23,42 @@ public sealed class WorkspaceViewBindingTests
     }
 
     [Fact]
-    public void Dashboard_ShouldShowBoldDeveloperCreditAboveToolbar()
+    public void ApplicationHeader_ShouldShowBoldDeveloperCreditBesideProductName()
     {
         var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "MainWindow.xaml"));
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
-        var dashboard = Assert.Single(document.Descendants(presentation + "DataTemplate"), template =>
-            (string?)template.Attribute("DataType") == "{x:Type vm:DashboardViewModel}");
-        var panel = dashboard.Element(presentation + "StackPanel")!;
-        var credit = panel.Elements().First();
+        var credit = Assert.Single(document.Descendants(presentation + "TextBlock"), textBlock =>
+            (string?)textBlock.Attribute("Text") == "Developed By: Sharma Kamal K");
 
-        Assert.Equal(presentation + "TextBlock", credit.Name);
-        Assert.Equal("Developed By: SHARMA Kamal K", (string?)credit.Attribute("Text"));
         Assert.Equal("Bold", (string?)credit.Attribute("FontWeight"));
         Assert.Equal("Wrap", (string?)credit.Attribute("TextWrapping"));
-        Assert.Equal(presentation + "Grid", panel.Elements().Skip(1).First().Name);
+        Assert.Equal("2", (string?)credit.Attribute("Grid.Column"));
+        var brand = Assert.Single(credit.Parent!.Elements(presentation + "StackPanel"));
+        Assert.Equal("1", (string?)brand.Attribute("Grid.Column"));
+        Assert.Contains(brand.Descendants(presentation + "TextBlock"), textBlock => (string?)textBlock.Attribute("Text") == "YASK-CIEM");
+        var header = credit.Ancestors(presentation + "Border").First();
+        Assert.Equal("0", (string?)header.Attribute("Grid.Row"));
+        Assert.Contains(header.Descendants(presentation + "StackPanel"), panel => (string?)panel.Attribute("Grid.Row") == "1");
+    }
+
+    [Fact]
+    public void SecurityWorkspace_ShouldAppearOnRightOfDashboardHeadingInsteadOfSidebar()
+    {
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "MainWindow.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var label = Assert.Single(document.Descendants(presentation + "TextBlock"), textBlock =>
+            (string?)textBlock.Attribute("Text") == "SECURITY WORKSPACE");
+        var panel = label.Ancestors(presentation + "Border").First();
+
+        Assert.Equal("1", (string?)panel.Attribute("Grid.Column"));
+        Assert.Equal("Right", (string?)panel.Attribute("HorizontalAlignment"));
+        Assert.Empty(panel.Ancestors(presentation + "DockPanel"));
+        Assert.Contains(panel.Descendants(presentation + "TextBlock"), textBlock => (string?)textBlock.Attribute("Text") == "{Binding CloudConnectionStatus}");
+        Assert.Contains(panel.Descendants(presentation + "DataTrigger"), trigger =>
+            (string?)trigger.Attribute("Binding") == "{Binding CurrentNavigationItem.Title}"
+            && (string?)trigger.Attribute("Value") == "Dashboard");
     }
 
     [Fact]
