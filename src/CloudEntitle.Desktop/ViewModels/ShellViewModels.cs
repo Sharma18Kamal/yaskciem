@@ -967,6 +967,10 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
         ];
         RefreshConnectionsCommand = new AsyncRelayCommand(() => RefreshConnectionsAsync());
+        foreach (var option in Providers.Where(option => !_cloudConnectionState.ConnectedProviders.Contains(option.Provider)))
+        {
+            _cloudConnectionState.DisconnectProvider(option.Provider);
+        }
         if (_liveCloudScanService is not null)
         {
             _liveCloudScanService.ScanCompleted += (_, _) => OnPropertyChanged(nameof(DiscoveredAccounts));
@@ -1031,6 +1035,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         _pendingConnectCompletion = completion;
         try
         {
+            ErrorMessage = null;
             _cloudConnectionState.AllowConnection(provider);
             UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
             var connectedProviders = Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet();
@@ -1116,7 +1121,10 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             if (provider == CloudProviderType.Aws)
                 _cloudConnectionState.DisconnectProvider(provider);
             else
+            {
                 await _authenticationLauncher.DisconnectAsync(provider);
+                _cloudConnectionState.DisconnectProvider(provider);
+            }
             await RefreshConnectionsAsync();
             ConnectionGuidance = provider == CloudProviderType.Aws
                 ? "AWS is disconnected from YASK-CIEM for this app session. CLI credentials are unchanged; select Connect to use them again."

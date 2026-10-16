@@ -85,7 +85,7 @@ You can drag the header to move the window.
 
 ## Part 3 - Connecting a cloud
 
-Connect Azure, AWS, and Google Cloud independently with their existing CLI identities. You may keep multiple providers connected; only one interactive sign-in flow runs at a time. Each provider retains its own account scope and scan coverage.
+Connect Azure, AWS, and Google Cloud independently with their existing CLI identities. Select **Connect** for each provider you intend to use in the current app session; cached CLI sign-ins do not automatically enable other providers. You may keep multiple explicitly selected providers connected; only one interactive sign-in flow runs at a time. Each provider retains its own account scope and scan coverage.
 
 ### 3.1 Step by step
 
@@ -96,12 +96,12 @@ Connect Azure, AWS, and Google Cloud independently with their existing CLI ident
    - AWS IAM Identity Center: `aws configure sso --profile audit`, then `aws sso login --profile audit`.
    - Google Cloud: `gcloud auth login`
 3. Finish any browser sign-in and all CLI configuration prompts. Use your actual AWS profile name instead of `audit`.
-4. Return to the app. If the status does not change, click **Refresh sign-in status**.
+4. Return to the app. Select **Connect** for AWS after configuring its CLI credentials. **Refresh sign-in status** rechecks selected providers without connecting others.
 5. The provider card shows its connection status. Repeat for another provider if needed.
 
 To sign out of one provider, use **Disconnect** on that provider card. **Disconnect Cloud** opens Cloud Accounts; use the provider-specific Disconnect action. A pending sign-in can be canceled separately.
 
-For AWS, **Disconnect** stops AWS use in the current app session without deleting or revoking CLI credentials. Subsequent discovery and scans exclude AWS until **Connect** is selected; **Refresh sign-in status** does not reconnect it. Restarting the app checks CLI credentials again. Use **Stop Scan** separately if a scan is already running.
+For AWS, **Disconnect** stops AWS use in the current app session without deleting or revoking CLI credentials. Subsequent discovery and scans exclude AWS until **Connect** is selected; **Refresh sign-in status** does not reconnect it. Select **Connect** again in a new app session. Use **Stop Scan** separately if a scan is already running.
 
 ### 3.2 Permissions needed
 

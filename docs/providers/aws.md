@@ -10,7 +10,9 @@ Configure an IAM-user profile with `aws configure --profile audit`, or configure
 
 Connection checks have a 15-second cancellation deadline. AWS identity checks disable CLI paging, use five-second connection/read timeouts, and probe default and named profiles concurrently. The first successful identity cancels slower probes. Connecting one provider does not wait for other providers' CLI checks.
 
-AWS **Disconnect**, including inactivity disconnection, applies only to the current YASK-CIEM app session. It excludes AWS from subsequent account discovery and scans, and refreshing sign-in status does not reconnect it. **Connect** resumes use of existing valid CLI credentials without reopening SSO configuration. Restarting the app checks existing CLI credentials again. Disconnection does not cancel an already-running scan; use **Stop Scan** for that.
+Cloud providers require explicit selection in YASK-CIEM. Existing CLI credentials alone do not enable an unselected provider; choose its **Connect** button in each new app session. Connecting GCP does not enable Azure or AWS. **Refresh sign-in status** verifies selected providers only.
+
+AWS **Disconnect**, including inactivity disconnection, applies only to the current YASK-CIEM app session. It excludes AWS from subsequent account discovery and scans, and refreshing sign-in status does not reconnect it. **Connect** resumes use of existing valid CLI credentials without reopening SSO configuration. Disconnection does not cancel an already-running scan; use **Stop Scan** for that.
 
 YASK-CIEM does not remove CLI profiles, sign out shared AWS SSO sessions, or deactivate IAM access keys when disconnecting AWS. `aws sso logout` does not invalidate IAM-user access keys. To revoke an IAM key, deactivate it separately in AWS IAM after checking which other tools depend on it.
 

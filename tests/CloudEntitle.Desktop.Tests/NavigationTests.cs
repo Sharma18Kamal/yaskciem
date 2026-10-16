@@ -222,6 +222,40 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task CloudAccountsViewModel_ShouldNotConnectCachedAzureCredentialsWhenGcpIsSelected()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        launcher.LaunchedProviders.Add(CloudProviderType.Azure);
+        launcher.LaunchedProviders.Add(CloudProviderType.Gcp);
+        var state = new CloudConnectionState();
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, cloudConnectionState: state);
+
+        Assert.Empty(state.ConnectedProviders);
+        await viewModel.ConnectAsync(CloudProviderType.Gcp);
+        viewModel.RefreshConnectionsCommand.Execute(null);
+
+        Assert.Equal(new[] { CloudProviderType.Gcp }, state.ConnectedProviders);
+        Assert.False(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure).IsConnected);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure).CanConnect);
+        Assert.True(await launcher.IsConnectedAsync(CloudProviderType.Azure));
+        Assert.Empty(launcher.DisconnectedProviders);
+    }
+
+    [Fact]
+    public async Task CloudAccountsViewModel_ShouldClearAwsErrorWhenGcpConnectionSucceeds()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        launcher.LaunchedProviders.Add(CloudProviderType.Gcp);
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
+        await viewModel.ConnectAsync(CloudProviderType.Aws);
+        Assert.NotNull(viewModel.ErrorMessage);
+
+        await viewModel.ConnectAsync(CloudProviderType.Gcp);
+
+        Assert.Null(viewModel.ErrorMessage);
+    }
+
+    [Fact]
     public async Task CloudAccountsViewModel_ShouldConnectAwsWithoutWaitingForAnotherProviderCli()
     {
         var launcher = new RecordingCloudAuthenticationLauncher { BlockedProvider = CloudProviderType.Gcp };
@@ -334,6 +368,8 @@ public sealed class NavigationTests
         var connectionState = new CloudConnectionState();
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, new RecordingDialogService(true), connectionState);
 
+        await viewModel.ConnectAsync(CloudProviderType.Azure);
+        await viewModel.ConnectAsync(CloudProviderType.Aws);
         await viewModel.DisconnectProviderAsync(CloudProviderType.Aws);
         viewModel.RefreshConnectionsCommand.Execute(null);
 
@@ -372,6 +408,7 @@ public sealed class NavigationTests
         launcher.LaunchedProviders.Add(CloudProviderType.Azure);
         var dialogs = new RecordingDialogService(confirmationResult: true);
         var connectionState = new CloudConnectionState();
+        connectionState.Update(new[] { CloudProviderType.Azure });
         var cloudAccounts = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, dialogs, connectionState);
         var navigation = new TestNavigationService(cloudAccounts);
         var viewModel = new MainWindowViewModel(navigation, connectionState);

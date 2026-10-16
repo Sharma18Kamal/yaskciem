@@ -1,5 +1,12 @@
 # Release checklist
 
+## Local build 1.0.0.60
+
+- Providers require explicit Connect selection in each app session. Existing Azure CLI credentials no longer become an active app connection when GCP is selected; refresh verifies selected providers only. Already-selected shared connection state is preserved.
+- Starting a connection attempt clears the previous provider's error, so a successful GCP connection does not retain an AWS credential error.
+- Provider navigation regression tests: 37 passed. The full Release test command passed with 5 PostgreSQL integration tests skipped because no test database was configured.
+- Self-contained Windows x64 MSIX and Setup EXE were built with matching 1.0.0.60 versions and valid local development-certificate signatures. Installation and live-cloud acceptance were not performed. Invalid AWS credentials still require correction outside the app; cloud credentials and policies were not modified.
+
 ## Local build 1.0.0.59
 
 - Adds the bold text `Developed By: SHARMA Kamal K` above the Dashboard toolbar, with wrapping for narrower layouts.
