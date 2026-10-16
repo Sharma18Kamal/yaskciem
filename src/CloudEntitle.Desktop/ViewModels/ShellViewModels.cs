@@ -51,6 +51,7 @@ public sealed class ComplianceStandardSelection : ObservableObject
 
 public sealed class CloudConnectionState : ObservableObject
 {
+    private readonly HashSet<CloudProviderType> _disconnectedProviders = new();
     private string _status = "Checking cloud sign-ins";
     private bool _hasConnections;
     private IReadOnlySet<CloudProviderType> _connectedProviders = new HashSet<CloudProviderType>();
@@ -61,9 +62,19 @@ public sealed class CloudConnectionState : ObservableObject
     public IReadOnlySet<CloudProviderType> ConnectedProviders { get => _connectedProviders; private set => SetProperty(ref _connectedProviders, value); }
     public CloudProviderType? PendingProvider { get => _pendingProvider; private set => SetProperty(ref _pendingProvider, value); }
 
+    public bool IsExplicitlyDisconnected(CloudProviderType provider) => _disconnectedProviders.Contains(provider);
+
+    public void DisconnectProvider(CloudProviderType provider)
+    {
+        _disconnectedProviders.Add(provider);
+        Update(ConnectedProviders, PendingProvider);
+    }
+
+    public void AllowConnection(CloudProviderType provider) => _disconnectedProviders.Remove(provider);
+
     public void Update(IEnumerable<CloudProviderType> connectedProviders, CloudProviderType? pendingProvider = null)
     {
-        var connected = connectedProviders.ToHashSet();
+        var connected = connectedProviders.Where(provider => !_disconnectedProviders.Contains(provider)).ToHashSet();
         ConnectedProviders = connected;
         PendingProvider = pendingProvider;
         HasConnections = connected.Count > 0 || pendingProvider.HasValue;
@@ -275,7 +286,7 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             var disconnected = await cloudAccounts.DisconnectActiveCloudAsync();
-            StatusMessage = disconnected ? "Cloud CLI session disconnected" : cloudAccounts.ConnectionGuidance;
+            StatusMessage = disconnected ? "Cloud provider disconnected" : cloudAccounts.ConnectionGuidance;
         }
     }
 
@@ -289,6 +300,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var connectedProviders = new List<CloudProviderType>();
         foreach (var provider in Enum.GetValues<CloudProviderType>())
         {
+            if (_cloudConnectionState.IsExplicitlyDisconnected(provider)) continue;
             try
             {
                 if (await _authenticationLauncher.IsConnectedAsync(provider))
@@ -313,7 +325,10 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             try
             {
-                await _authenticationLauncher.DisconnectAsync(provider);
+                if (provider == CloudProviderType.Aws)
+                    _cloudConnectionState.DisconnectProvider(provider);
+                else
+                    await _authenticationLauncher.DisconnectAsync(provider);
                 remainingProviders.Remove(provider);
             }
             catch (Exception exception)
@@ -325,7 +340,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         _cloudConnectionState.Update(remainingProviders);
-        StatusMessage = "Cloud sessions disconnected after 5 minutes of inactivity";
+        StatusMessage = "Cloud sessions disconnected after 5 minutes of inactivity. AWS CLI credentials were not removed.";
     }
 
     public void Navigate(NavigationItem item)
@@ -1016,11 +1031,12 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         _pendingConnectCompletion = completion;
         try
         {
+            _cloudConnectionState.AllowConnection(provider);
             UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
             await RefreshConnectionsAsync(cancellation.Token);
             if (Providers.Any(option => option.Provider == provider && option.IsConnected))
             {
-                ConnectionGuidance = $"{provider} is already connected. Disconnect it before selecting another provider.";
+                ConnectionGuidance = $"{provider} is connected. Go to Dashboard and select Scan Now to fetch cloud data.";
                 OnPropertyChanged(nameof(ConnectionGuidance));
                 return;
             }
@@ -1075,7 +1091,9 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
     public async Task DisconnectProviderAsync(CloudProviderType provider)
     {
         var providerOption = Providers.Single(item => item.Provider == provider);
-        var confirmation = $"Sign out of {providerOption.Name} in its shared CLI session/cache? This can affect other tools using those credentials.";
+        var confirmation = provider == CloudProviderType.Aws
+            ? "Disconnect AWS from YASK-CIEM for this app session? New scans will exclude AWS until you select Connect. AWS CLI credentials and IAM access keys will not be removed or revoked."
+            : $"Sign out of {providerOption.Name} in its shared CLI session/cache? This can affect other tools using those credentials.";
         if (_dialogService?.Confirm(confirmation, $"Disconnect {providerOption.Name}") != true)
         {
             return;
@@ -1083,9 +1101,14 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
 
         try
         {
-            await _authenticationLauncher.DisconnectAsync(provider);
+            if (provider == CloudProviderType.Aws)
+                _cloudConnectionState.DisconnectProvider(provider);
+            else
+                await _authenticationLauncher.DisconnectAsync(provider);
             await RefreshConnectionsAsync();
-            ConnectionGuidance = $"{providerOption.Name} is disconnected. You can now connect to another provider.";
+            ConnectionGuidance = provider == CloudProviderType.Aws
+                ? "AWS is disconnected from YASK-CIEM for this app session. CLI credentials are unchanged; select Connect to use them again."
+                : $"{providerOption.Name} is disconnected. You can now connect to another provider.";
             ErrorMessage = null;
         }
         catch (Exception exception)
@@ -1102,6 +1125,8 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         {
             try
             {
+                if (_cloudConnectionState.IsExplicitlyDisconnected(option.Provider))
+                    return (option.Provider, IsConnected: false);
                 return (option.Provider, IsConnected: await _authenticationLauncher.IsConnectedAsync(option.Provider, cancellationToken));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1119,13 +1144,14 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
 
     private void UpdateProviderStates(IReadOnlySet<CloudProviderType> connectedProviders)
     {
+        var activeProviders = connectedProviders.Where(provider => !_cloudConnectionState.IsExplicitlyDisconnected(provider)).ToHashSet();
         foreach (var option in Providers)
         {
-            var isConnected = connectedProviders.Contains(option.Provider);
+            var isConnected = activeProviders.Contains(option.Provider);
             option.UpdateState(isConnected, !isConnected && _pendingProvider is null, _pendingProvider == option.Provider);
         }
 
-        _cloudConnectionState.Update(connectedProviders, _pendingProvider);
+        _cloudConnectionState.Update(activeProviders, _pendingProvider);
     }
 }
 

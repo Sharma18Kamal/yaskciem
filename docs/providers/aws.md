@@ -6,6 +6,10 @@ The AWS adapter lives in `CloudEntitle.Cloud.Aws` and maps AWS IAM and account m
 
 The connector enumerates AWS CLI profiles, including IAM Identity Center SSO profiles, and verifies each with STS. Every working profile/account pair is scanned separately, even when multiple permission sets target the same AWS account. Access keys, secret keys, session tokens, and private keys are never stored or logged.
 
+AWS **Disconnect**, including inactivity disconnection, applies only to the current YASK-CIEM app session. It excludes AWS from subsequent account discovery and scans, and refreshing sign-in status does not reconnect it. **Connect** resumes use of existing valid CLI credentials without reopening SSO configuration. Restarting the app checks existing CLI credentials again. Disconnection does not cancel an already-running scan; use **Stop Scan** for that.
+
+YASK-CIEM does not remove CLI profiles, sign out shared AWS SSO sessions, or deactivate IAM access keys when disconnecting AWS. `aws sso logout` does not invalidate IAM-user access keys. To revoke an IAM key, deactivate it separately in AWS IAM after checking which other tools depend on it.
+
 ## Required Permissions
 
 Use read-only IAM permissions appropriate to each configured account/profile. Discovery uses STS caller identity, IAM users/groups/roles/policies/account authorization details, plus `access-analyzer:ListAnalyzers` and `access-analyzer:ListFindings` for already-configured analyzers. `cloudtrail:LookupEvents` enables recent IAM change timestamps. `organizations:ListAccounts` can add the organization roster to Cloud Accounts, but does not grant member-account access or trigger role assumption; only accounts with a configured, working profile are scanned. Permission-set names are inferred from assumed-role ARNs. No analyzer is created or modified.

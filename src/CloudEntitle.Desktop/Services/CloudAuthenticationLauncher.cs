@@ -85,6 +85,30 @@ public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
         };
 
         var result = await _commandRunner.RunAsync(command, arguments, cancellationToken);
+        if (provider == CloudProviderType.Aws && !result.IsSuccess)
+        {
+            var profiles = await _commandRunner.RunAsync("aws", new[] { "configure", "list-profiles" }, cancellationToken);
+            if (!profiles.IsSuccess)
+            {
+                return false;
+            }
+
+            foreach (var profile in profiles.StandardOutput
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.Ordinal))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var profileArguments = new[] { "--profile", profile }.Concat(arguments).ToArray();
+                var identity = await _commandRunner.RunAsync("aws", profileArguments, cancellationToken);
+                if (identity.IsSuccess)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         if (!result.IsSuccess)
         {
             return false;

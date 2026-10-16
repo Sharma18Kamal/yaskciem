@@ -179,6 +179,26 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void CloudConnectionState_ShouldKeepExplicitlyDisconnectedProviderOutUntilReconnect()
+    {
+        var state = new CloudConnectionState();
+        state.Update(new[] { CloudProviderType.Azure, CloudProviderType.Aws });
+
+        state.DisconnectProvider(CloudProviderType.Aws);
+        state.Update(new[] { CloudProviderType.Azure, CloudProviderType.Aws });
+
+        Assert.DoesNotContain(CloudProviderType.Aws, state.ConnectedProviders);
+        Assert.Contains(CloudProviderType.Azure, state.ConnectedProviders);
+        Assert.True(state.IsExplicitlyDisconnected(CloudProviderType.Aws));
+
+        state.AllowConnection(CloudProviderType.Aws);
+        state.Update(new[] { CloudProviderType.Azure, CloudProviderType.Aws });
+
+        Assert.Contains(CloudProviderType.Aws, state.ConnectedProviders);
+        Assert.False(state.IsExplicitlyDisconnected(CloudProviderType.Aws));
+    }
+
+    [Fact]
     public async Task CloudAccountsViewModel_ShouldAllowMultipleProviderSignIns()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
@@ -264,7 +284,34 @@ public sealed class NavigationTests
         await viewModel.DisconnectProviderAsync(CloudProviderType.Aws);
 
         Assert.Empty(launcher.DisconnectedProviders);
-        Assert.Contains(dialogs.Confirmations, message => message.Contains("shared CLI session/cache"));
+        Assert.Contains(dialogs.Confirmations, message => message.Contains("IAM access keys will not be removed or revoked"));
+    }
+
+    [Fact]
+    public async Task CloudAccountsViewModel_ShouldDisconnectAwsWithoutRemovingCliCredentialsAndReconnectExplicitly()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        launcher.LaunchedProviders.Add(CloudProviderType.Aws);
+        launcher.LaunchedProviders.Add(CloudProviderType.Azure);
+        var connectionState = new CloudConnectionState();
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, new RecordingDialogService(true), connectionState);
+
+        await viewModel.DisconnectProviderAsync(CloudProviderType.Aws);
+        viewModel.RefreshConnectionsCommand.Execute(null);
+
+        Assert.Empty(launcher.DisconnectedProviders);
+        Assert.True(await launcher.IsConnectedAsync(CloudProviderType.Aws));
+        Assert.False(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).IsConnected);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).CanConnect);
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure).IsConnected);
+        Assert.DoesNotContain(CloudProviderType.Aws, connectionState.ConnectedProviders);
+        Assert.Contains("CLI credentials are unchanged", viewModel.ConnectionGuidance);
+
+        await viewModel.ConnectAsync(CloudProviderType.Aws);
+
+        Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).IsConnected);
+        Assert.Contains(CloudProviderType.Aws, connectionState.ConnectedProviders);
+        Assert.Equal(1, launcher.LaunchedProviders.Count(provider => provider == CloudProviderType.Aws));
     }
 
     [Fact]
@@ -314,6 +361,24 @@ public sealed class NavigationTests
         Assert.Equal(new[] { CloudProviderType.Azure }, launcher.DisconnectedProviders);
         Assert.Equal("No active CLI sign-in", viewModel.CloudConnectionStatus);
         Assert.Contains("5 minutes of inactivity", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task IdleTimeout_ShouldDisconnectAwsWithoutRemovingCliCredentials()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        launcher.LaunchedProviders.Add(CloudProviderType.Aws);
+        var connectionState = new CloudConnectionState();
+        var cloudAccounts = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, cloudConnectionState: connectionState);
+        var viewModel = new MainWindowViewModel(new TestNavigationService(cloudAccounts), connectionState, launcher);
+
+        await viewModel.DisconnectCloudForInactivityAsync();
+        cloudAccounts.RefreshConnectionsCommand.Execute(null);
+
+        Assert.Empty(launcher.DisconnectedProviders);
+        Assert.True(await launcher.IsConnectedAsync(CloudProviderType.Aws));
+        Assert.DoesNotContain(CloudProviderType.Aws, connectionState.ConnectedProviders);
+        Assert.False(cloudAccounts.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).IsConnected);
     }
 
     [Fact]
@@ -403,6 +468,26 @@ public sealed class NavigationTests
         Assert.All(result.AccountRecords, account => Assert.Equal(nameof(CloudProviderType.Gcp), account.Provider));
         Assert.All(result.IdentityRecords, identity => Assert.Equal(CloudProviderType.Gcp, identity.CloudProvider));
         Assert.DoesNotContain(result.ProviderMessages, message => message.StartsWith("Azure:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LiveCloudScan_ShouldNotRediscoverOrScanExplicitlyDisconnectedAws()
+    {
+        var connectionState = new CloudConnectionState();
+        connectionState.Update(new[] { CloudProviderType.Aws });
+        connectionState.DisconnectProvider(CloudProviderType.Aws);
+        var scanner = new LiveCloudScanService(new ICloudProvider[]
+        {
+            new FakeCloudProvider(CloudProviderType.Aws, connected: true)
+        }, cloudConnectionState: connectionState);
+
+        Assert.Empty(await scanner.DiscoverAccountsAsync());
+        var result = await scanner.ScanAsync();
+
+        Assert.Equal(0, result.AccountCount);
+        Assert.Empty(result.AccountRecords);
+        Assert.Empty(connectionState.ConnectedProviders);
+        Assert.Contains(result.ProviderMessages, message => message.Contains("disconnected from YASK-CIEM"));
     }
 
     [Fact]

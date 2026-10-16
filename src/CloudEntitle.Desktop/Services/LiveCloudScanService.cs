@@ -122,10 +122,10 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
 
     public async Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
     {
-        var providers = _providers;
+        var providers = _providers.Where(provider => _cloudConnectionState?.IsExplicitlyDisconnected(provider.ProviderType) != true).ToArray();
         var connected = _cloudConnectionState?.ConnectedProviders;
         if (connected is { Count: > 0 })
-            providers = _providers.Where(provider => connected.Contains(provider.ProviderType)).ToArray();
+            providers = providers.Where(provider => connected.Contains(provider.ProviderType)).ToArray();
 
         var readyProviders = new List<ICloudProvider>();
         foreach (var provider in providers)
@@ -227,6 +227,12 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         foreach (var provider in _providers.Where(provider => !selectedProvider.HasValue || provider.ProviderType == selectedProvider.Value))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_cloudConnectionState?.IsExplicitlyDisconnected(provider.ProviderType) == true)
+            {
+                messages.Add($"{provider.ProviderType}: disconnected from YASK-CIEM. Use Connect Cloud first.");
+                coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "CLI sign-in", ScanCoverageStatus.Skipped, 0, "Provider was explicitly disconnected from YASK-CIEM."));
+                continue;
+            }
             try
             {
                 if (!await provider.TestConnectionAsync(cancellationToken))

@@ -1,5 +1,13 @@
 # Release checklist
 
+## Local build 1.0.0.57
+
+- AWS connection detection checks named CLI profiles when default credentials are unavailable.
+- AWS Disconnect excludes the provider from new scans and discovery for the current app session without deleting credentials or revoking IAM keys. Refresh does not reconnect it; Connect resumes existing valid credentials. Restarting the app checks CLI credentials again.
+- Self-contained Windows x64 MSIX and Setup EXE were built and signed with the local development certificate; both signatures and packaged versions were verified. These are trusted-test artifacts, not public production releases.
+- Release test suite: 344 passed, 5 PostgreSQL integration tests skipped because `YASK_CIEM_TEST_POSTGRES` was not configured, 0 failed.
+- Clean-machine installation, upgrade behavior, and live AWS acceptance remain manual validation steps; building the installer does not install it.
+
 ## Automated checks
 
 - CI restores and builds the complete solution in Release mode with `.nuget/NuGet.Config`.

@@ -100,6 +100,8 @@ Connect Azure, AWS, and Google Cloud independently with their existing CLI ident
 
 To sign out of one provider, use **Disconnect** on that provider card. **Disconnect Cloud** opens Cloud Accounts; use the provider-specific Disconnect action. A pending sign-in can be canceled separately.
 
+For AWS, **Disconnect** stops AWS use in the current app session without deleting or revoking CLI credentials. Subsequent discovery and scans exclude AWS until **Connect** is selected; **Refresh sign-in status** does not reconnect it. Restarting the app checks CLI credentials again. Use **Stop Scan** separately if a scan is already running.
+
 ### 3.2 Permissions needed
 
 | Provider | Recommended access |
