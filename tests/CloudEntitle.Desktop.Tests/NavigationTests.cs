@@ -244,12 +244,13 @@ public sealed class NavigationTests
     [Fact]
     public async Task CloudAccountsViewModel_ShouldClearAwsErrorWhenGcpConnectionSucceeds()
     {
-        var launcher = new RecordingCloudAuthenticationLauncher();
+        var launcher = new RecordingCloudAuthenticationLauncher { LaunchFailure = new InvalidOperationException("AWS CLI unavailable.") };
         launcher.LaunchedProviders.Add(CloudProviderType.Gcp);
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
         await viewModel.ConnectAsync(CloudProviderType.Aws);
         Assert.NotNull(viewModel.ErrorMessage);
 
+        launcher.LaunchFailure = null;
         await viewModel.ConnectAsync(CloudProviderType.Gcp);
 
         Assert.Null(viewModel.ErrorMessage);
@@ -259,7 +260,6 @@ public sealed class NavigationTests
     public async Task CloudAccountsViewModel_ShouldConnectAwsWithoutWaitingForAnotherProviderCli()
     {
         var launcher = new RecordingCloudAuthenticationLauncher { BlockedProvider = CloudProviderType.Gcp };
-        launcher.LaunchedProviders.Add(CloudProviderType.Aws);
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
 
         try
@@ -315,19 +315,23 @@ public sealed class NavigationTests
     }
 
     [Fact]
-    public async Task CloudAccountsViewModel_ShouldExplainInvalidAwsCredentialsWithoutStartingSsoSetup()
+    public async Task CloudAccountsViewModel_ShouldLaunchAwsProfileConfigurationAndAllowCancellation()
     {
         var launcher = new RecordingCloudAuthenticationLauncher { NeverConnect = true };
         var state = new CloudConnectionState();
         var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, cloudConnectionState: state);
 
-        await viewModel.ConnectAsync(CloudProviderType.Aws);
+        var connectTask = viewModel.ConnectAsync(CloudProviderType.Aws);
+        Assert.Equal(new[] { CloudProviderType.Aws }, launcher.LaunchedProviders);
+        Assert.Equal(CloudProviderType.Aws, state.PendingProvider);
+        Assert.Null(viewModel.ErrorMessage);
+        Assert.Contains("yask-ciem profile", viewModel.ConnectionGuidance);
+        Assert.True(await viewModel.CancelPendingConnectionAsync());
+        await connectTask;
 
-        Assert.Empty(launcher.LaunchedProviders);
         Assert.Null(state.PendingProvider);
         Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).CanConnect);
-        Assert.Contains("aws configure --profile", viewModel.ErrorMessage);
-        Assert.Contains("SecurityAudit", viewModel.ConnectionGuidance);
+        Assert.Empty(launcher.DisconnectedProviders);
     }
 
     [Fact]
@@ -385,7 +389,7 @@ public sealed class NavigationTests
 
         Assert.True(viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Aws).IsConnected);
         Assert.Contains(CloudProviderType.Aws, connectionState.ConnectedProviders);
-        Assert.Equal(1, launcher.LaunchedProviders.Count(provider => provider == CloudProviderType.Aws));
+        Assert.Equal(3, launcher.LaunchedProviders.Count(provider => provider == CloudProviderType.Aws));
     }
 
     [Fact]

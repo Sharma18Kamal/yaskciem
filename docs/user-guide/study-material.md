@@ -90,13 +90,13 @@ Connect Azure, AWS, and Google Cloud independently with their existing CLI ident
 ### 3.1 Step by step
 
 1. Click **Connect Cloud** in the header (or open **Cloud Accounts**).
-2. Configure AWS credentials in your CLI first. For Azure or Google Cloud, **Connect** opens a terminal for sign-in; AWS **Connect** verifies existing CLI profiles:
+2. On the provider card, click **Connect** to open its CLI sign-in or profile-configuration terminal:
    - Azure: `az login`
-   - AWS IAM user: `aws configure --profile audit`; verify with `aws sts get-caller-identity --profile audit`.
-   - AWS IAM Identity Center: `aws configure sso --profile audit`, then `aws sso login --profile audit`.
+   - AWS IAM user: `aws configure --profile yask-ciem`; enter credentials directly in the terminal. Other profile names and the default profile are unchanged.
+   - AWS IAM Identity Center: configure externally with `aws configure sso --profile audit`, then `aws sso login --profile audit`.
    - Google Cloud: `gcloud auth login`
 3. Finish any browser sign-in and all CLI configuration prompts. Use your actual AWS profile name instead of `audit`.
-4. Return to the app. Select **Connect** for AWS after configuring its CLI credentials. **Refresh sign-in status** rechecks selected providers without connecting others.
+4. Return to the app after completing the terminal prompts. **Refresh sign-in status** rechecks selected providers without connecting others. AWS configuration waits can be canceled and have a three-minute deadline; canceling the wait does not close the terminal.
 5. The provider card shows its connection status. Repeat for another provider if needed.
 
 To sign out of one provider, use **Disconnect** on that provider card. **Disconnect Cloud** opens Cloud Accounts; use the provider-specific Disconnect action. A pending sign-in can be canceled separately.

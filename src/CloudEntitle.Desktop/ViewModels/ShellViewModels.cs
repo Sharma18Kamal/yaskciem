@@ -963,7 +963,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         Providers =
         [
             new(CloudProviderType.Azure, "Azure", "Azure CLI", "az login", "Sign in with az. Entra/PIM needs tenant-approved Microsoft Graph read permissions.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Azure)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Azure))),
-            new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure", "Uses configured IAM-user or IAM Identity Center CLI profiles.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
+            new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure --profile yask-ciem", "Configure the yask-ciem IAM-user profile in the AWS CLI terminal.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
             new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
         ];
         RefreshConnectionsCommand = new AsyncRelayCommand(() => RefreshConnectionsAsync());
@@ -1029,6 +1029,8 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         }
 
         var cancellation = new CancellationTokenSource();
+        using var connectionTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        using var connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token, connectionTimeout.Token);
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingProvider = provider;
         _pendingConnectCancellation = cancellation;
@@ -1039,7 +1041,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             _cloudConnectionState.AllowConnection(provider);
             UpdateProviderStates(Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet());
             var connectedProviders = Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet();
-            if (await _authenticationLauncher.IsConnectedAsync(provider, cancellation.Token))
+            if (provider != CloudProviderType.Aws && await _authenticationLauncher.IsConnectedAsync(provider, connectionCancellation.Token))
             {
                 connectedProviders.Add(provider);
                 UpdateProviderStates(connectedProviders);
@@ -1049,22 +1051,17 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             }
             connectedProviders.Remove(provider);
             UpdateProviderStates(connectedProviders);
-            if (provider == CloudProviderType.Aws)
-            {
-                ErrorMessage = "AWS CLI credentials could not be verified. Configure an IAM-user profile with 'aws configure --profile PROFILE', or renew SSO with 'aws sso login --profile PROFILE'. Verify with 'aws sts get-caller-identity --profile PROFILE', then select Connect again.";
-                ConnectionGuidance = "AWS is not connected. Check CLI credentials and network access; SecurityAudit permissions alone do not authenticate the CLI.";
-                OnPropertyChanged(nameof(ConnectionGuidance));
-                return;
-            }
             _authenticationLauncher.LaunchAuthentication(provider);
-            ConnectionGuidance = $"Complete {provider} sign-in in the terminal. Other cloud connections remain available.";
+            ConnectionGuidance = provider == CloudProviderType.Aws
+                ? "Configure the yask-ciem profile in the AWS CLI terminal. Enter IAM-user credentials there, not in YASK-CIEM. Finish all prompts; existing default and other named profiles are unchanged."
+                : $"Complete {provider} sign-in in the terminal. Other cloud connections remain available.";
             ErrorMessage = null;
             OnPropertyChanged(nameof(ConnectionGuidance));
 
             for (var attempt = 0; attempt < 90; attempt++)
             {
-                cancellation.Token.ThrowIfCancellationRequested();
-                if (await _authenticationLauncher.IsConnectedAsync(provider, cancellation.Token))
+                connectionCancellation.Token.ThrowIfCancellationRequested();
+                if (await _authenticationLauncher.IsConnectedAsync(provider, connectionCancellation.Token))
                 {
                     connectedProviders = Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet();
                     connectedProviders.Add(provider);
@@ -1074,7 +1071,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
                     return;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellation.Token);
+                await Task.Delay(TimeSpan.FromSeconds(2), connectionCancellation.Token);
             }
 
             ConnectionGuidance = "Sign-in was not detected. Check the provider terminal and try again.";
@@ -1083,6 +1080,11 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             ConnectionGuidance = "Sign-in wait canceled. Close the provider terminal to stop its sign-in flow.";
+            OnPropertyChanged(nameof(ConnectionGuidance));
+        }
+        catch (OperationCanceledException) when (connectionTimeout.IsCancellationRequested)
+        {
+            ConnectionGuidance = "Sign-in was not detected within three minutes. Finish profile configuration in the terminal, verify credentials, then try again.";
             OnPropertyChanged(nameof(ConnectionGuidance));
         }
         catch (Exception exception)

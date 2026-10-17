@@ -30,7 +30,7 @@ public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
         var (command, arguments, displayName, installUrl) = provider switch
         {
             CloudProviderType.Azure => ("az", "login", "Azure CLI", "https://learn.microsoft.com/cli/azure/install-azure-cli-windows"),
-            CloudProviderType.Aws => ("aws", "configure sso", "AWS CLI v2", "https://awscli.amazonaws.com/AWSCLIV2-User.msi"),
+            CloudProviderType.Aws => ("aws", "configure --profile yask-ciem", "AWS CLI v2", "https://awscli.amazonaws.com/AWSCLIV2-User.msi"),
             CloudProviderType.Gcp => ("gcloud", "auth login", "Google Cloud CLI", "https://dl.google.com/dl/cloudsdk/channels/rapid/GoogleCloudSDKInstaller.exe"),
             _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported cloud provider.")
         };

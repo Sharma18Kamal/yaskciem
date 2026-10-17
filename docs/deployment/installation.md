@@ -13,7 +13,7 @@ YASK-CIEM supports Windows 10/11. Choose the installation method supplied by you
 
 ## Current Setup EXE
 
-The current local build is [YASK-CIEM-Setup-1.0.0.60.exe](../../artifacts/installer-1.0.0.60/YASK-CIEM-Setup-1.0.0.60.exe). It contains the self-contained MSIX, the matching public publisher certificate, and the .NET runtime; a separate .NET Desktop Runtime installation is not required. Run it and follow the Windows prompts, then launch **YASK-CIEM** from Start.
+The current local build is [YASK-CIEM-Setup-1.0.0.61.exe](../../artifacts/installer-1.0.0.61/YASK-CIEM-Setup-1.0.0.61.exe). It contains the self-contained MSIX, the matching public publisher certificate, and the .NET runtime; a separate .NET Desktop Runtime installation is not required. Run it and follow the Windows prompts, then launch **YASK-CIEM** from Start.
 
 This package uses the YASK-CIEM development certificate. On a clean PC, Windows may block the Setup EXE until its signer is trusted. Only if you received the installer and [public development certificate](../../artifacts/certs/yask-ciem-dev.cer) through a trusted channel, verify that the certificate thumbprint is `537C64CF83CF2C6C1EBC89553B7B4EDD13E7F104`, then import it into the **Current User > Trusted Root Certification Authorities** store. For example, from the certificate's folder in PowerShell:
 
@@ -38,11 +38,11 @@ Updates are checked on launch and in the background according to the feed settin
 
 Use this method if your organization supplied a signed `.msix` package but no App Installer feed.
 
-1. Confirm the publisher and signature are trusted by your organization. Do not bypass Windows publisher warnings. The current local package is [YASK-CIEM-1.0.0.60.msix](../../artifacts/msix-1.0.0.60/YASK-CIEM-1.0.0.60.msix). It is signed with the local development certificate and is suitable only for trusted test machines, not public production distribution.
+1. Confirm the publisher and signature are trusted by your organization. Do not bypass Windows publisher warnings. The current local package is [YASK-CIEM-1.0.0.61.msix](../../artifacts/msix-1.0.0.61/YASK-CIEM-1.0.0.61.msix). It is signed with the local development certificate and is suitable only for trusted test machines, not public production distribution.
 2. Double-click the `.msix` package and follow the App Installer prompts. Alternatively, open PowerShell in the download folder and run:
 
    ```powershell
-   Add-AppxPackage -Path .\YASK-CIEM-1.0.0.60.msix
+   Add-AppxPackage -Path .\YASK-CIEM-1.0.0.61.msix
    ```
 
 3. Launch YASK-CIEM from **Start**.
@@ -55,10 +55,10 @@ A standalone MSIX does not provide automatic updates unless it is installed thro
 
 Use the native package when your organization requires a per-machine MSI deployment. The MSI installs under Program Files and requires administrator rights. The Setup EXE launches the MSI and triggers the standard Windows elevation prompt.
 
-The native packages below remain at 1.0.0.56 and do not contain the 1.0.0.57 AWS fixes. Use the current self-contained Setup EXE above for those fixes.
+The current native packages contain app version 1.0.0.61, including the header and AWS CLI profile-configuration changes. The MSI is also available alongside the self-contained Setup EXE in the current installer folder.
 
-- [YASK-CIEM-1.0.0.56.msi](../../artifacts/native-installers-1.0.0.56/YASK-CIEM-1.0.0.56.msi)
-- [YASK-CIEM-Setup-1.0.0.56.exe](../../artifacts/native-installers-1.0.0.56/YASK-CIEM-Setup-1.0.0.56.exe)
+- [YASK-CIEM-1.0.0.61.msi](../../artifacts/installer-1.0.0.61/YASK-CIEM-1.0.0.61.msi)
+- [YASK-CIEM-Setup-1.0.0.61.exe](../../artifacts/native-installers-1.0.0.61/YASK-CIEM-Setup-1.0.0.61.exe)
 
 These native packages are framework-dependent; install the .NET 9 Desktop Runtime x64 first. They are signed with the local development certificate and are for trusted test use only. Production distribution requires an organization-trusted code-signing certificate.
 

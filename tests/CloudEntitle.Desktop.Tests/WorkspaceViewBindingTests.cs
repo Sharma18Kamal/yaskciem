@@ -43,7 +43,7 @@ public sealed class WorkspaceViewBindingTests
     }
 
     [Fact]
-    public void SecurityWorkspace_ShouldAppearOnRightOfDashboardHeadingInsteadOfSidebar()
+    public void SecurityWorkspace_ShouldAppearOnRightOfApplicationHeader()
     {
         var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "MainWindow.xaml"));
@@ -56,9 +56,10 @@ public sealed class WorkspaceViewBindingTests
         Assert.Equal("Right", (string?)panel.Attribute("HorizontalAlignment"));
         Assert.Empty(panel.Ancestors(presentation + "DockPanel"));
         Assert.Contains(panel.Descendants(presentation + "TextBlock"), textBlock => (string?)textBlock.Attribute("Text") == "{Binding CloudConnectionStatus}");
-        Assert.Contains(panel.Descendants(presentation + "DataTrigger"), trigger =>
-            (string?)trigger.Attribute("Binding") == "{Binding CurrentNavigationItem.Title}"
-            && (string?)trigger.Attribute("Value") == "Dashboard");
+        Assert.Empty(panel.Ancestors(presentation + "ScrollViewer"));
+        var header = panel.Ancestors(presentation + "Border").First();
+        Assert.Equal("0", (string?)header.Attribute("Grid.Row"));
+        Assert.Empty(panel.Descendants(presentation + "DataTrigger"));
     }
 
     [Fact]

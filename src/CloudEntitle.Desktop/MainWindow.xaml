@@ -10,7 +10,7 @@
             <Grid>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Grid Grid.ColumnSpan="2" VerticalAlignment="Center">
+                <Grid Grid.Column="0" VerticalAlignment="Center">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <Border Grid.Column="0" Width="42" Height="42" CornerRadius="11" Margin="0,0,14,0" VerticalAlignment="Center">
                         <Border.Background>
@@ -35,6 +35,13 @@
                     </StackPanel>
                     <TextBlock Grid.Column="2" Text="Developed By: Sharma Kamal K" FontWeight="Bold" FontSize="14" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="20,0,0,0" MaxWidth="280"/>
                 </Grid>
+                <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Width="250" Margin="20,0,0,0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="12" CornerRadius="8">
+                    <StackPanel>
+                        <TextBlock Text="SECURITY WORKSPACE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource PrimaryBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="Connect multiple cloud providers. Scans are read-only and do not modify cloud resources." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Border>
                 <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,10,0,0">
                     <Border Style="{StaticResource StatusPill}" ToolTip="Fourteen-day local trial status. The trial continues across app reinstalls on this Windows installation."><TextBlock Text="{Binding TrialStatusText}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
                     <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" IsEnabled="{Binding IsTrialActive}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
@@ -70,21 +77,6 @@
                             <TextBlock Text="{Binding CurrentViewModel.Title}" Foreground="{StaticResource PrimaryBrush}" FontSize="30" FontWeight="SemiBold" Margin="0,7,0,0" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding CurrentViewModel.Subtitle}" Foreground="{StaticResource MutedBrush}" FontSize="13" Margin="0,6,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
-                        <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top" Width="250" Margin="20,0,0,0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="12" CornerRadius="8">
-                            <Border.Style>
-                                <Style TargetType="Border">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding CurrentNavigationItem.Title}" Value="Dashboard"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Border.Style>
-                            <StackPanel>
-                                <TextBlock Text="SECURITY WORKSPACE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold"/>
-                                <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource PrimaryBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                                <TextBlock Text="Connect multiple cloud providers. Scans are read-only and do not modify cloud resources." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
-                            </StackPanel>
-                        </Border>
                     </Grid>
                     <ContentControl Content="{Binding CurrentViewModel}"/>
                 </StackPanel>

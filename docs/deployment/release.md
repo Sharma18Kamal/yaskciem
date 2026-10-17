@@ -1,5 +1,13 @@
 # Release checklist
 
+## Local build 1.0.0.61
+
+- Native MSI and its MSI-launching Setup EXE were also built and signed. The MSI was copied into `artifacts/installer-1.0.0.61` alongside the existing MSIX-based setup without replacing it. Verified MSI ProductVersion is 1.0.61, app version is 1.0.0.61, and install scope is per-machine. Native packages require the .NET 9 Desktop Runtime x64 and administrator installation; no installer was executed.
+- Moves Security Workspace into the right side of the global header. The bold credit `Developed By: Sharma Kamal K` appears beside YASK-CIEM on the left, with header controls in a separate row.
+- AWS Connect opens a terminal running `aws configure --profile yask-ciem` for direct IAM-user profile configuration. Other named profiles and the default profile are unchanged. Connection verification waits can be canceled and have a three-minute overall deadline.
+- Focused header/authentication/navigation tests: 56 passed. Full Release suite: 353 passed, 5 PostgreSQL integration tests skipped because no test database was configured, 0 failed.
+- Self-contained Windows x64 MSIX and Setup EXE were built with matching 1.0.0.61 versions and valid local development-certificate signatures. Installation, visual acceptance, and live AWS configuration were not performed. These are trusted-test artifacts, not public production releases.
+
 ## Local build 1.0.0.60
 
 - Providers require explicit Connect selection in each app session. Existing Azure CLI credentials no longer become an active app connection when GCP is selected; refresh verifies selected providers only. Already-selected shared connection state is preserved.
