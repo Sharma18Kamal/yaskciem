@@ -8,6 +8,8 @@ public interface IAccessReviewStore
 {
     Task<IReadOnlyList<AccessReviewCampaign>> GetAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(AccessReviewCampaign campaign, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>?> GetEligibleReviewerEmailsAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<string>?>(null);
 }
 
 public sealed class LocalAccessReviewStore : IAccessReviewStore

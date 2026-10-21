@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using CloudEntitle.Domain;
 using CloudEntitle.IdentityGovernance.Models;
 using CloudEntitle.IdentityGovernance.Services;
@@ -42,9 +43,29 @@ public static class SharedWorkspaceEndpoints
             .RequireAuthorization("CiemApiAccess");
         app.MapGet("/api/v1/organizations/{organizationId:guid}/scan-summaries", (ClaimsPrincipal principal, Guid organizationId, int limit, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => GetScanSummaries(principal, organizationId, limit, workspaceStore, cancellationToken))
             .RequireAuthorization("CiemApiAccess");
+        app.MapPost("/api/v1/organizations/{organizationId:guid}/scan-schedules", (ClaimsPrincipal principal, Guid organizationId, CreateScanScheduleRequest request, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => CreateScanSchedule(principal, organizationId, request, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapGet("/api/v1/organizations/{organizationId:guid}/scan-schedules", (ClaimsPrincipal principal, Guid organizationId, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => GetScanSchedules(principal, organizationId, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapPut("/api/v1/organizations/{organizationId:guid}/scan-schedules/{scheduleId:guid}", (ClaimsPrincipal principal, Guid organizationId, Guid scheduleId, UpdateScanScheduleRequest request, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => UpdateScanSchedule(principal, organizationId, scheduleId, request, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapPost("/api/v1/organizations/{organizationId:guid}/scan-schedules/{scheduleId:guid}/run-now", (ClaimsPrincipal principal, Guid organizationId, Guid scheduleId, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => QueueScanNow(principal, organizationId, scheduleId, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapGet("/api/v1/organizations/{organizationId:guid}/scan-jobs", (ClaimsPrincipal principal, Guid organizationId, int limit, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => GetScanJobs(principal, organizationId, limit, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapGet("/api/v1/organizations/{organizationId:guid}/scan-jobs/{jobId:guid}", (ClaimsPrincipal principal, Guid organizationId, Guid jobId, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => GetScanJobStatus(principal, organizationId, jobId, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapPost("/api/v1/organizations/{organizationId:guid}/scan-jobs/{jobId:guid}/cancel", (ClaimsPrincipal principal, Guid organizationId, Guid jobId, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => CancelScanJob(principal, organizationId, jobId, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapGet("/api/v1/organizations/{organizationId:guid}/scans/{scanId:guid}/records", (ClaimsPrincipal principal, Guid organizationId, Guid scanId, string? kind, string? accountId, int limit, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => GetCiemScanRecords(principal, organizationId, scanId, kind, accountId, limit, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapGet("/api/v1/organizations/{organizationId:guid}/findings", (ClaimsPrincipal principal, Guid organizationId, Guid? scanId, int limit, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => GetCiemFindings(principal, organizationId, scanId, limit, workspaceStore, cancellationToken))
+            .RequireAuthorization("CiemApiAccess");
         app.MapGet("/api/v1/organizations/{organizationId:guid}/access-reviews", (ClaimsPrincipal principal, Guid organizationId, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => GetAccessReviews(principal, organizationId, workspaceStore, cancellationToken))
             .RequireAuthorization("CiemApiAccess");
-        app.MapPut("/api/v1/organizations/{organizationId:guid}/access-reviews/{campaignId:guid}", (ClaimsPrincipal principal, Guid organizationId, Guid campaignId, AccessReviewCampaign campaign, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => SaveAccessReview(principal, organizationId, campaignId, campaign, workspaceStore, cancellationToken))
+        app.MapGet("/api/v1/organizations/{organizationId:guid}/access-reviews/reviewers", (ClaimsPrincipal principal, Guid organizationId, SharedWorkspaceStore workspaceStore) => GetEligibleAccessReviewers(principal, organizationId, workspaceStore))
+            .RequireAuthorization("CiemApiAccess");
+        app.MapPut("/api/v1/organizations/{organizationId:guid}/access-reviews/{campaignId:guid}", (ClaimsPrincipal principal, Guid organizationId, Guid campaignId, AccessReviewCampaign campaign, HttpContext httpContext, SharedWorkspaceStore workspaceStore, CancellationToken cancellationToken) => SaveAccessReview(principal, organizationId, campaignId, campaign, httpContext, workspaceStore, cancellationToken))
             .RequireAuthorization("CiemApiAccess");
     }
 
@@ -187,8 +208,8 @@ public static class SharedWorkspaceEndpoints
     private static async Task<IResult> UploadScanSummary(ClaimsPrincipal principal, Guid organizationId, UploadSharedScanSummaryRequest request, SharedWorkspaceStore store, CancellationToken cancellationToken)
     {
         if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
-        if (request is null || request.Accounts is null || request.Coverage is null)
-            return BadRequest("invalid_scan_summary", "Scan summary account and coverage lists are required.");
+        if (request is null || request.Accounts is null || request.Coverage is null || request.Records is null)
+            return BadRequest("invalid_scan_summary", "Scan summary account, coverage, and record lists are required.");
         OrganizationManagementService service;
         try
         {
@@ -196,25 +217,113 @@ public static class SharedWorkspaceEndpoints
             if (!service.Authorize(organizationId, identity, OrganizationAction.RunScan).Allowed) return Results.Forbid();
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
-        if (request.ScanId == Guid.Empty || request.CompletedAtUtc < request.StartedAtUtc || request.Accounts.Count > 200
-            || request.Coverage.Count > 10000 || new[] { request.Identities, request.Resources, request.Roles, request.Permissions, request.EffectiveAccess, request.Findings, request.CriticalFindings, request.HighFindings }.Any(value => value < 0))
+        if (request.ScanId == Guid.Empty || request.CompletedAtUtc < request.StartedAtUtc || request.Accounts.Count is 0 or > 200
+            || request.Coverage.Count > 10000 || request.Records.Count > 20000
+            || request.Coverage.Any(item => item is null || string.IsNullOrWhiteSpace(item.Provider) || item.Provider.Length > 64
+                || string.IsNullOrWhiteSpace(item.DataSource) || item.DataSource.Length > 128 || string.IsNullOrWhiteSpace(item.Status)
+                || item.Status.Length > 32 || item.Records < 0 || item.Details is { Length: > 1024 })
+            || request.Accounts.Any(account => account is null || !Enum.IsDefined(account.Provider)
+                || string.IsNullOrWhiteSpace(account.ExternalAccountId) || account.ExternalAccountId.Length > 512
+                || string.IsNullOrWhiteSpace(account.DisplayName) || account.DisplayName.Length > 256)
+            || new[] { request.Identities, request.Resources, request.Roles, request.Permissions, request.EffectiveAccess, request.Findings, request.CriticalFindings, request.HighFindings }
+                .Any(value => value is < 0 or > 10_000_000)
+            || (long)request.CriticalFindings + request.HighFindings > request.Findings)
             return BadRequest("invalid_scan_summary", "Scan summary identifiers, times, counts, or collection sizes are invalid.");
+        var recordKinds = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "identity", "resource", "role", "permission", "effective-access", "finding", "resource-finding", "access-path"
+        };
+        var recordKeys = new HashSet<string>(StringComparer.Ordinal);
+        long payloadBytes = 0;
+        foreach (var record in request.Records)
+        {
+            if (record is null || !Enum.IsDefined(record.Provider) || string.IsNullOrWhiteSpace(record.Kind) || !recordKinds.Contains(record.Kind)
+                || string.IsNullOrWhiteSpace(record.RecordId) || record.RecordId.Length > 200
+                || string.IsNullOrWhiteSpace(record.ExternalAccountId) || record.ExternalAccountId.Length > 512
+                || string.IsNullOrWhiteSpace(record.PayloadJson) || record.PayloadJson.Length > 262144)
+                return BadRequest("invalid_scan_record", "Scan records must contain a supported kind, bounded identifiers, and a bounded JSON payload.");
+            try { using var _ = JsonDocument.Parse(record.PayloadJson); }
+            catch (JsonException) { return BadRequest("invalid_scan_record", "Scan record payloads must be valid JSON."); }
+            payloadBytes += Encoding.UTF8.GetByteCount(record.PayloadJson);
+            if (payloadBytes > 15 * 1024 * 1024)
+                return BadRequest("scan_payload_too_large", "The combined scan record payload cannot exceed 15 MiB.");
+            if (!recordKeys.Add($"{record.Provider}\n{record.Kind}\n{record.ExternalAccountId}\n{record.RecordId}"))
+                return BadRequest("duplicate_scan_record", "A scan cannot contain duplicate record keys.");
+        }
         IReadOnlyList<TenantBinding> bindings;
         try { bindings = service.GetTenantBindings(organizationId, identity); }
         catch (UnauthorizedAccessException) { return Results.Forbid(); }
         catch (KeyNotFoundException) { return Results.NotFound(); }
-        if (request.Accounts.Any(account => account is null || string.IsNullOrWhiteSpace(account.ExternalAccountId)
-                || !bindings.Any(binding => binding.Provider == account.Provider
+        if (request.Accounts.Any(account => !bindings.Any(binding => binding.Provider == account.Provider
                     && binding.ExternalTenantId.Equals(account.ExternalAccountId, StringComparison.OrdinalIgnoreCase))))
             return Results.Forbid();
+        if (request.Accounts.Select(account => $"{account.Provider}\n{account.ExternalAccountId}")
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() != request.Accounts.Count
+            || request.Records.Any(record => !request.Accounts.Any(account => account.Provider == record.Provider
+                && account.ExternalAccountId.Equals(record.ExternalAccountId, StringComparison.OrdinalIgnoreCase))))
+            return BadRequest("invalid_scan_account", "Scan records must refer to unique accounts included in the scan.");
         var providerLabel = string.Join(", ", request.Accounts.Select(account => account.Provider.ToString())
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(provider => provider, StringComparer.OrdinalIgnoreCase));
         var summary = new SharedScanSummaryDto(request.ScanId, organizationId, Guid.Parse(identity.TenantId), identity.UserId,
             request.StartedAtUtc.ToUniversalTime(), request.CompletedAtUtc.ToUniversalTime(), providerLabel,
             request.Accounts, request.Identities, request.Resources, request.Roles, request.Permissions, request.EffectiveAccess,
             request.Findings, request.CriticalFindings, request.HighFindings, request.Coverage);
-        await store.SaveScanSummaryAsync(summary, cancellationToken);
-        return Results.Created($"/api/v1/organizations/{organizationId:D}/scan-summaries/{summary.ScanId:D}", Envelope(summary));
+        var canonicalRequest = request with
+        {
+            Accounts = request.Accounts.OrderBy(account => account.Provider).ThenBy(account => account.ExternalAccountId, StringComparer.OrdinalIgnoreCase).ToArray(),
+            Coverage = request.Coverage.OrderBy(item => item.Provider, StringComparer.Ordinal).ThenBy(item => item.DataSource, StringComparer.Ordinal).ToArray(),
+            Records = request.Records.OrderBy(record => record.Kind, StringComparer.Ordinal)
+                .ThenBy(record => record.Provider)
+                .ThenBy(record => record.ExternalAccountId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(record => record.RecordId, StringComparer.Ordinal).ToArray()
+        };
+        var requestHash = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(canonicalRequest, new JsonSerializerOptions(JsonSerializerDefaults.Web))))
+            .ToLowerInvariant();
+        try
+        {
+            var (saved, created) = await store.SaveCiemScanAsync(summary, request.Records, requestHash, cancellationToken);
+            return created
+                ? Results.Created($"/api/v1/organizations/{organizationId:D}/scan-summaries/{summary.ScanId:D}", Envelope(saved))
+                : Results.Ok(Envelope(saved));
+        }
+        catch (InvalidOperationException exception) { return Results.Conflict(Error("scan_conflict", exception.Message)); }
+    }
+
+    private static async Task<IResult> GetCiemScanRecords(ClaimsPrincipal principal, Guid organizationId, Guid scanId, string? kind,
+        string? accountId, int limit, SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        try
+        {
+            var service = CreateService(store, identity);
+            if (!service.Authorize(organizationId, identity, OrganizationAction.ViewInventory).Allowed) return Results.Forbid();
+            if (kind is not null && (kind.Length > 64 || string.IsNullOrWhiteSpace(kind)))
+                return BadRequest("invalid_scan_record_query", "Record kind is invalid.");
+            if (kind is null || kind.Equals("finding", StringComparison.OrdinalIgnoreCase)
+                || kind.Equals("resource-finding", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!service.Authorize(organizationId, identity, OrganizationAction.ViewFindings).Allowed) return Results.Forbid();
+            }
+            if (accountId is { Length: > 512 })
+                return BadRequest("invalid_scan_record_query", "Account ID is invalid.");
+            return Results.Ok(Envelope(await store.GetCiemScanRecordsAsync(Guid.Parse(identity.TenantId), organizationId, scanId,
+                kind, accountId, limit, cancellationToken)));
+        }
+        catch (ArgumentOutOfRangeException exception) { return BadRequest("invalid_scan_record_query", exception.Message); }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> GetCiemFindings(ClaimsPrincipal principal, Guid organizationId, Guid? scanId, int limit,
+        SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        try
+        {
+            if (!CreateService(store, identity).Authorize(organizationId, identity, OrganizationAction.ViewFindings).Allowed) return Results.Forbid();
+            return Results.Ok(Envelope(await store.GetCiemFindingsAsync(Guid.Parse(identity.TenantId), organizationId, scanId, limit, cancellationToken)));
+        }
+        catch (ArgumentOutOfRangeException exception) { return BadRequest("invalid_findings_query", exception.Message); }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
     }
 
     private static async Task<IResult> GetScanSummaries(ClaimsPrincipal principal, Guid organizationId, int limit, SharedWorkspaceStore store, CancellationToken cancellationToken)
@@ -226,6 +335,119 @@ public static class SharedWorkspaceEndpoints
             return Results.Ok(Envelope(await store.GetScanSummariesAsync(Guid.Parse(identity.TenantId), organizationId, limit, cancellationToken)));
         }
         catch (ArgumentOutOfRangeException exception) { return BadRequest("invalid_scan_summary_query", exception.Message); }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> CreateScanSchedule(
+        ClaimsPrincipal principal, Guid organizationId, CreateScanScheduleRequest request,
+        SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        if (request is null || !Enum.IsDefined(request.Provider) || request.IntervalMinutes is < 5 or > 10080
+            || request.MaxRetries is < 0 or > 4 || string.IsNullOrWhiteSpace(request.ExternalAccountId)
+            || request.ExternalAccountId.Length > 512 || string.IsNullOrWhiteSpace(request.DisplayName)
+            || request.DisplayName.Length > 256)
+            return BadRequest("invalid_scan_schedule", "Provider, account, display name, interval (5 minutes to 7 days), or retry count (0 to 4) is invalid.");
+        try
+        {
+            var service = CreateService(store, identity);
+            if (!service.Authorize(organizationId, identity, OrganizationAction.RunScan).Allowed) return Results.Forbid();
+            var binding = service.GetTenantBindings(organizationId, identity).Any(item =>
+                item.Provider == request.Provider && item.ExternalTenantId.Equals(request.ExternalAccountId, StringComparison.OrdinalIgnoreCase));
+            if (!binding) return Results.Forbid();
+            var schedule = await store.CreateScanScheduleAsync(Guid.Parse(identity.TenantId), organizationId, request, cancellationToken);
+            return schedule is null
+                ? Results.Conflict(Error("scan_schedule_exists", "A schedule already exists for this provider account in the organization."))
+                : Results.Created($"/api/v1/organizations/{organizationId:D}/scan-schedules/{schedule.ScheduleId:D}", Envelope(schedule));
+        }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+        catch (UnauthorizedAccessException) { return Results.Forbid(); }
+    }
+
+    private static async Task<IResult> GetScanSchedules(
+        ClaimsPrincipal principal, Guid organizationId, SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        try
+        {
+            if (!CreateService(store, identity).Authorize(organizationId, identity, OrganizationAction.RunScan).Allowed) return Results.Forbid();
+            return Results.Ok(Envelope(await store.GetScanSchedulesAsync(Guid.Parse(identity.TenantId), organizationId, cancellationToken)));
+        }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> UpdateScanSchedule(
+        ClaimsPrincipal principal, Guid organizationId, Guid scheduleId, UpdateScanScheduleRequest request,
+        SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        if (request is null || request.IntervalMinutes is < 5 or > 10080 || request.MaxRetries is < 0 or > 4)
+            return BadRequest("invalid_scan_schedule", "Interval must be 5 minutes to 7 days and retries must be between 0 and 4.");
+        try
+        {
+            if (!CreateService(store, identity).Authorize(organizationId, identity, OrganizationAction.RunScan).Allowed) return Results.Forbid();
+            var schedule = await store.UpdateScanScheduleAsync(Guid.Parse(identity.TenantId), organizationId, scheduleId, request, cancellationToken);
+            return schedule is null ? Results.NotFound() : Results.Ok(Envelope(schedule));
+        }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> QueueScanNow(
+        ClaimsPrincipal principal, Guid organizationId, Guid scheduleId,
+        SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        try
+        {
+            if (!CreateService(store, identity).Authorize(organizationId, identity, OrganizationAction.RunScan).Allowed) return Results.Forbid();
+            var job = await store.QueueScanNowAsync(Guid.Parse(identity.TenantId), organizationId, scheduleId, cancellationToken);
+            return job is null ? Results.NotFound() : Results.Accepted($"/api/v1/organizations/{organizationId:D}/scan-jobs/{job.JobId:D}", Envelope(job));
+        }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> GetScanJobs(
+        ClaimsPrincipal principal, Guid organizationId, int limit, SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        try
+        {
+            if (!CreateService(store, identity).Authorize(organizationId, identity, OrganizationAction.RunScan).Allowed) return Results.Forbid();
+            return Results.Ok(Envelope(await store.GetScanJobsAsync(Guid.Parse(identity.TenantId), organizationId, limit, cancellationToken)));
+        }
+        catch (ArgumentOutOfRangeException exception) { return BadRequest("invalid_scan_job_query", exception.Message); }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> GetScanJobStatus(
+        ClaimsPrincipal principal, Guid organizationId, Guid jobId, SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        try
+        {
+            if (!CreateService(store, identity).Authorize(organizationId, identity, OrganizationAction.RunScan).Allowed) return Results.Forbid();
+            var tenantId = Guid.Parse(identity.TenantId);
+            var job = await store.GetScanJobAsync(tenantId, organizationId, jobId, cancellationToken);
+            if (job is null) return Results.NotFound();
+            var status = new ScanJobStatusDto(job,
+                await store.GetScanJobAttemptsAsync(tenantId, organizationId, jobId, cancellationToken),
+                await store.GetScanJobCheckpointsAsync(tenantId, organizationId, jobId, cancellationToken));
+            return Results.Ok(Envelope(status));
+        }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> CancelScanJob(
+        ClaimsPrincipal principal, Guid organizationId, Guid jobId, SharedWorkspaceStore store, CancellationToken cancellationToken)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        try
+        {
+            if (!CreateService(store, identity).Authorize(organizationId, identity, OrganizationAction.RunScan).Allowed) return Results.Forbid();
+            return await store.RequestScanJobCancellationAsync(Guid.Parse(identity.TenantId), organizationId, jobId, cancellationToken)
+                ? Results.Accepted($"/api/v1/organizations/{organizationId:D}/scan-jobs/{jobId:D}")
+                : Results.Conflict(Error("scan_job_not_cancellable", "The scan job was not found or is already terminal."));
+        }
         catch (KeyNotFoundException) { return Results.NotFound(); }
     }
 
@@ -243,14 +465,51 @@ public static class SharedWorkspaceEndpoints
             for (var index = 0; index < campaigns.Count; index++)
             {
                 if (HasReviewLifecycleChanges(campaigns[index], reevaluated[index]))
-                    await store.SaveAccessReviewAsync(Guid.Parse(identity.TenantId), organizationId, reevaluated[index], cancellationToken);
+                {
+                    var initial = reevaluated[index];
+                    reevaluated[index] = await store.UpdateAccessReviewAsync(Guid.Parse(identity.TenantId), organizationId, initial.Id,
+                        current =>
+                        {
+                            var baseline = current ?? initial;
+                            var refreshed = governance.ReevaluateCampaign(baseline);
+                            return HasReviewLifecycleChanges(baseline, refreshed)
+                                ? EnsureAuditMetadata(refreshed, Guid.NewGuid())
+                                : baseline;
+                        }, cancellationToken);
+                }
             }
             return Results.Ok(Envelope(reevaluated));
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
     }
 
-    private static async Task<IResult> SaveAccessReview(ClaimsPrincipal principal, Guid organizationId, Guid campaignId, AccessReviewCampaign campaign, SharedWorkspaceStore store, CancellationToken cancellationToken)
+    private static IResult GetEligibleAccessReviewers(ClaimsPrincipal principal, Guid organizationId, SharedWorkspaceStore store)
+    {
+        if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+        try
+        {
+            var service = CreateService(store, identity);
+            var callerAction = service.Authorize(organizationId, identity, OrganizationAction.ViewFindings).Allowed
+                ? OrganizationAction.ViewFindings
+                : OrganizationAction.ManageRemediations;
+            if (!service.Authorize(organizationId, identity, callerAction).Allowed) return Results.Forbid();
+            var reviewers = service.GetMembersAuthorizedForAction(organizationId, identity, callerAction, OrganizationAction.ManageRemediations)
+                .Where(member => member.UserId != identity.UserId)
+                .Select(member => member.Email)
+                .ToArray();
+            return Results.Ok(Envelope(reviewers));
+        }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> SaveAccessReview(
+        ClaimsPrincipal principal,
+        Guid organizationId,
+        Guid campaignId,
+        AccessReviewCampaign campaign,
+        HttpContext httpContext,
+        SharedWorkspaceStore store,
+        CancellationToken cancellationToken)
     {
         if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
         OrganizationManagementService service;
@@ -261,25 +520,42 @@ public static class SharedWorkspaceEndpoints
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
         if (campaign is null || campaign.Items is null || campaign.Id != campaignId || campaignId == Guid.Empty || campaign.Items.Count is 0 or > 10000
-            || campaign.Items.Any(item => item is null || item.Id == Guid.Empty || item.CampaignId != campaignId || !Enum.IsDefined(item.Decision)))
-            return BadRequest("invalid_access_review", "Access review IDs or items are invalid.");
+            || campaign.Items.Any(item => item is null || item.Id == Guid.Empty || item.CampaignId != campaignId || !Enum.IsDefined(item.Decision))
+            || campaign.Items.Any(item => string.IsNullOrWhiteSpace(item.AccessSummary) || item.AccessSummary.Length > 4000
+                || string.IsNullOrWhiteSpace(item.EvidenceSnapshot) || item.EvidenceSnapshot.Length > 65536)
+            || campaign.Items.Select(item => item.Id).Distinct().Count() != campaign.Items.Count)
+            return BadRequest("invalid_access_review", "Access review IDs, evidence snapshots, or items are invalid.");
         var tenantId = Guid.Parse(identity.TenantId);
-        var existing = (await store.GetAccessReviewsAsync(tenantId, organizationId, cancellationToken)).FirstOrDefault(item => item.Id == campaignId);
         try
         {
-            var sanitized = existing is null ? SanitizeNewReview(campaign, identity) : SanitizeReviewUpdate(existing, campaign, identity);
-            sanitized = new IdentityGovernanceService().ReevaluateCampaign(sanitized);
-            await store.SaveAccessReviewAsync(tenantId, organizationId, sanitized, cancellationToken);
-            return Results.Ok(Envelope(sanitized));
+            var correlationId = Guid.TryParse(httpContext.Request.Headers["X-Correlation-ID"].FirstOrDefault(), out var requestedCorrelationId)
+                && requestedCorrelationId != Guid.Empty
+                    ? requestedCorrelationId
+                    : Guid.NewGuid();
+            var sanitized = await store.UpdateAccessReviewAsync(tenantId, organizationId, campaignId, existing =>
+            {
+                var updated = existing is null
+                    ? SanitizeNewReview(campaign, identity, service, organizationId, correlationId)
+                    : SanitizeReviewUpdate(existing, campaign, identity, service, organizationId, correlationId);
+                return EnsureAuditMetadata(new IdentityGovernanceService().ReevaluateCampaign(updated), correlationId);
+            }, cancellationToken);
+            return Results.Ok(Envelope(sanitized, correlationId));
         }
         catch (ArgumentException exception) { return BadRequest("invalid_access_review", exception.Message); }
         catch (InvalidOperationException exception) { return Results.Conflict(Error("access_review_conflict", exception.Message)); }
+        catch (UnauthorizedAccessException) { return Results.Forbid(); }
     }
 
-    private static AccessReviewCampaign SanitizeNewReview(AccessReviewCampaign campaign, OrganizationIdentity identity)
+    private static AccessReviewCampaign SanitizeNewReview(
+        AccessReviewCampaign campaign,
+        OrganizationIdentity identity,
+        OrganizationManagementService service,
+        Guid organizationId,
+        Guid correlationId)
     {
         var now = DateTime.UtcNow;
         if (campaign.DueAt <= now) throw new ArgumentException("A shared review campaign requires a future due date.");
+        ValidateReviewerAssignments(campaign, null, identity, service, organizationId);
         var items = campaign.Items.Select(item => item with
         {
             AssignedReviewer = item.AssignedReviewer?.Trim(),
@@ -295,7 +571,7 @@ public static class SharedWorkspaceEndpoints
             ExceptionExpiredAt = null,
             EscalatedAt = null,
             EscalationReason = null,
-            AuditTrail = new[] { new AccessReviewAuditEntry(now, identity.Email, "ItemCreated", "Review item created by the shared service.") }
+            AuditTrail = new[] { CreateReviewAuditEntry(now, identity.Email, "ItemCreated", "Review item created by the shared service.", correlationId, item.Id, actorUserId: identity.UserId) }
         }).ToArray();
         return campaign with
         {
@@ -305,15 +581,22 @@ public static class SharedWorkspaceEndpoints
             ReminderLeadDays = Math.Clamp(campaign.ReminderLeadDays, 1, 30),
             ReminderIntervalDays = Math.Clamp(campaign.ReminderIntervalDays, 1, 30),
             Items = items,
-            AuditTrail = new[] { new AccessReviewAuditEntry(now, identity.Email, "CampaignCreated", $"{items.Length} review item(s) created.") }
+            AuditTrail = new[] { CreateReviewAuditEntry(now, identity.Email, "CampaignCreated", $"{items.Length} review item(s) created.", correlationId, actorUserId: identity.UserId) }
         };
     }
 
-    private static AccessReviewCampaign SanitizeReviewUpdate(AccessReviewCampaign existing, AccessReviewCampaign incoming, OrganizationIdentity identity)
+    private static AccessReviewCampaign SanitizeReviewUpdate(
+        AccessReviewCampaign existing,
+        AccessReviewCampaign incoming,
+        OrganizationIdentity identity,
+        OrganizationManagementService service,
+        Guid organizationId,
+        Guid correlationId)
     {
         var now = DateTime.UtcNow;
         if (!existing.Items.Select(item => item.Id).OrderBy(id => id).SequenceEqual(incoming.Items.Select(item => item.Id).OrderBy(id => id)))
             throw new InvalidOperationException("A shared review update cannot add or remove review items.");
+        ValidateReviewerAssignments(incoming, existing, identity, service, organizationId);
         var audit = existing.AuditTrail.ToList();
         var updatedItems = new List<AccessReviewItem>(existing.Items.Count);
         foreach (var previous in existing.Items)
@@ -330,8 +613,8 @@ public static class SharedWorkspaceEndpoints
             var itemDueAt = submitted.DueAt?.ToUniversalTime();
             if (!string.Equals(previous.AssignedReviewer, assignedReviewer, StringComparison.OrdinalIgnoreCase) || previous.DueAt != itemDueAt)
             {
-                itemAudit.Add(new AccessReviewAuditEntry(now, identity.Email, "ReviewerAssigned", $"Assigned reviewer: {assignedReviewer ?? "unassigned"}; due: {itemDueAt:O}."));
-                audit.Add(new AccessReviewAuditEntry(now, identity.Email, "ReviewerAssigned", $"Item {previous.Id:D}; reviewer {assignedReviewer ?? "unassigned"}."));
+                itemAudit.Add(CreateReviewAuditEntry(now, identity.Email, "ReviewerAssigned", $"Assigned reviewer: {assignedReviewer ?? "unassigned"}; due: {itemDueAt:O}.", correlationId, previous.Id, actorUserId: identity.UserId));
+                audit.Add(CreateReviewAuditEntry(now, identity.Email, "ReviewerAssigned", $"Item {previous.Id:D}; reviewer {assignedReviewer ?? "unassigned"}.", correlationId, previous.Id, actorUserId: identity.UserId));
             }
 
             var decision = previous.Decision;
@@ -343,8 +626,15 @@ public static class SharedWorkspaceEndpoints
             if (submitted.Decision != previous.Decision)
             {
                 if (submitted.Decision == ReviewDecision.Pending) throw new InvalidOperationException("A recorded access-review decision cannot be reset to Pending.");
+                if (string.IsNullOrWhiteSpace(previous.AssignedReviewer)
+                    || !string.Equals(previous.AssignedReviewer, identity.Email, StringComparison.OrdinalIgnoreCase))
+                    throw new UnauthorizedAccessException("Only the assigned reviewer may record a decision.");
+                if (string.Equals(existing.CreatedBy, identity.Email, StringComparison.OrdinalIgnoreCase))
+                    throw new UnauthorizedAccessException("Campaign creators cannot review their own campaign items.");
                 if (submitted.Decision != ReviewDecision.Certified && string.IsNullOrWhiteSpace(submitted.ReviewComment))
                     throw new ArgumentException("A comment is required for investigation, rejection, and exception decisions.");
+                if (submitted.ReviewComment?.Length > 4000)
+                    throw new ArgumentException("Review rationale cannot exceed 4,000 characters.");
                 if (submitted.Decision == ReviewDecision.ExceptionGranted
                     && (!submitted.ExceptionExpiresAt.HasValue || submitted.ExceptionExpiresAt.Value.ToUniversalTime() <= now))
                     throw new ArgumentException("An exception requires a future expiration time.");
@@ -355,13 +645,13 @@ public static class SharedWorkspaceEndpoints
                 exceptionExpiresAt = decision == ReviewDecision.ExceptionGranted ? submitted.ExceptionExpiresAt?.ToUniversalTime() : null;
                 var evidenceHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(previous.EvidenceSnapshot))).ToLowerInvariant();
                 var attestation = new AccessReviewAttestation(identity.Email, identity.Email, decision, comment ?? string.Empty,
-                    now, evidenceHash, previous.EvidenceSnapshot);
+                    now, evidenceHash, previous.EvidenceSnapshot) { CorrelationId = correlationId, ActorUserId = identity.UserId };
                 attestations = attestations.Append(attestation).ToArray();
-                itemAudit.Add(new AccessReviewAuditEntry(now, identity.Email, "AttestationRecorded", $"{decision} attested against evidence SHA-256 {evidenceHash}."));
-                audit.Add(new AccessReviewAuditEntry(now, identity.Email, "AttestationRecorded", $"Item {previous.Id:D}; evidence SHA-256 {evidenceHash}."));
+                itemAudit.Add(CreateReviewAuditEntry(now, identity.Email, "AttestationRecorded", $"{decision} attested against evidence SHA-256 {evidenceHash}.", correlationId, previous.Id, decision, evidenceHash, identity.UserId));
+                audit.Add(CreateReviewAuditEntry(now, identity.Email, "AttestationRecorded", $"Item {previous.Id:D}; evidence SHA-256 {evidenceHash}.", correlationId, previous.Id, decision, evidenceHash, identity.UserId));
                 var action = $"DecisionRecorded:{decision}";
-                itemAudit.Add(new AccessReviewAuditEntry(now, identity.Email, action, comment ?? "No comment supplied."));
-                audit.Add(new AccessReviewAuditEntry(now, identity.Email, action, $"Item {previous.Id:D}; {comment ?? "No comment supplied."}"));
+                itemAudit.Add(CreateReviewAuditEntry(now, identity.Email, action, comment ?? "No comment supplied.", correlationId, previous.Id, decision, evidenceHash, identity.UserId));
+                audit.Add(CreateReviewAuditEntry(now, identity.Email, action, $"Item {previous.Id:D}; {comment ?? "No comment supplied."}", correlationId, previous.Id, decision, evidenceHash, identity.UserId));
             }
 
             updatedItems.Add(previous with
@@ -384,9 +674,72 @@ public static class SharedWorkspaceEndpoints
         var name = string.IsNullOrWhiteSpace(incoming.Name) ? existing.Name : incoming.Name.Trim();
         var dueAt = incoming.DueAt > now ? incoming.DueAt.ToUniversalTime() : existing.DueAt;
         if (name != existing.Name || dueAt != existing.DueAt)
-            audit.Add(new AccessReviewAuditEntry(now, identity.Email, "CampaignUpdated", $"Name={name}; DueAt={dueAt:O}."));
+            audit.Add(CreateReviewAuditEntry(now, identity.Email, "CampaignUpdated", $"Name={name}; DueAt={dueAt:O}.", correlationId, actorUserId: identity.UserId));
         var status = updatedItems.All(item => item.Decision != ReviewDecision.Pending) ? CampaignStatus.Completed : CampaignStatus.Open;
         return existing with { Name = name, DueAt = dueAt, Status = status, Items = updatedItems, AuditTrail = audit };
+    }
+
+    private static void ValidateReviewerAssignments(
+        AccessReviewCampaign incoming,
+        AccessReviewCampaign? existing,
+        OrganizationIdentity identity,
+        OrganizationManagementService service,
+        Guid organizationId)
+    {
+        var eligibleEmails = service.GetMembersAuthorizedForAction(organizationId, identity, OrganizationAction.ManageRemediations)
+            .Select(member => member.Email)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in incoming.Items)
+        {
+            var previous = existing?.Items.FirstOrDefault(candidate => candidate.Id == item.Id);
+            var reviewer = item.AssignedReviewer?.Trim();
+            if (string.Equals(previous?.AssignedReviewer, reviewer, StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.IsNullOrWhiteSpace(reviewer)) continue;
+            var creator = existing?.CreatedBy ?? identity.Email;
+            if (string.Equals(identity.Email, reviewer, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(creator, reviewer, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Reviewers must be active authorized organization members other than the campaign creator.");
+            if (!eligibleEmails.Contains(reviewer))
+                throw new InvalidOperationException("The assigned reviewer must be an active organization member authorized to manage access reviews.");
+        }
+    }
+
+    private static AccessReviewAuditEntry CreateReviewAuditEntry(
+        DateTime timestamp,
+        string actor,
+        string action,
+        string details,
+        Guid correlationId,
+        Guid? itemId = null,
+        ReviewDecision? decision = null,
+        string? evidenceSha256 = null,
+        Guid actorUserId = default)
+        => new(timestamp, actor, action, details)
+        {
+            EventId = Guid.NewGuid(),
+            CorrelationId = correlationId,
+            ItemId = itemId,
+            ActorUserId = actorUserId,
+            Decision = decision,
+            EvidenceSha256 = evidenceSha256
+        };
+
+    private static AccessReviewCampaign EnsureAuditMetadata(AccessReviewCampaign campaign, Guid correlationId)
+    {
+        AccessReviewAuditEntry EnsureEntry(AccessReviewAuditEntry entry)
+            => entry.EventId != Guid.Empty && entry.CorrelationId != Guid.Empty
+                ? entry
+                : entry with
+                {
+                    EventId = entry.EventId == Guid.Empty ? Guid.NewGuid() : entry.EventId,
+                    CorrelationId = entry.CorrelationId == Guid.Empty ? correlationId : entry.CorrelationId
+                };
+
+        return campaign with
+        {
+            AuditTrail = campaign.AuditTrail.Select(EnsureEntry).ToArray(),
+            Items = campaign.Items.Select(item => item with { AuditTrail = item.AuditTrail.Select(EnsureEntry).ToArray() }).ToArray()
+        };
     }
 
     private static OrganizationManagementService CreateService(SharedWorkspaceStore store, OrganizationIdentity identity)
@@ -411,7 +764,8 @@ public static class SharedWorkspaceEndpoints
         return true;
     }
 
-    private static ApiEnvelope<T> Envelope<T>(T data) => new(data, Guid.NewGuid().ToString("N"), ApiContractVersion.Current);
+    private static ApiEnvelope<T> Envelope<T>(T data, Guid? correlationId = null)
+        => new(data, (correlationId ?? Guid.NewGuid()).ToString("N"), ApiContractVersion.Current);
     private static IResult BadRequest(string code, string message) => Results.BadRequest(Error(code, message));
     private static ApiError Error(string code, string message) => new(code, message, Guid.NewGuid().ToString("N"));
 }

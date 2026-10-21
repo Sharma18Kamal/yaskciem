@@ -16,10 +16,14 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private readonly AuthenticatedOrganizationContext _authenticatedContext;
     private readonly ICentralAuditSyncService? _centralAuditSyncService;
     private readonly ISharedOrganizationApi? _sharedOrganizationApi;
+    private readonly ISharedScanScheduleApi? _sharedScanScheduleApi;
     private OrganizationWorkspaceDto? _sharedWorkspace;
     private IReadOnlyList<OrganizationProfile> _organizations = Array.Empty<OrganizationProfile>();
     private readonly ISharedScanSummaryPublisher? _sharedScanSummaryPublisher;
     private IReadOnlyList<SharedScanSummaryDto> _sharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
+    private IReadOnlyList<SharedCiemRecordDto> _sharedFindings = Array.Empty<SharedCiemRecordDto>();
+    private IReadOnlyList<ScanScheduleDto> _scanSchedules = Array.Empty<ScanScheduleDto>();
+    private IReadOnlyList<ScanJobDto> _scanJobs = Array.Empty<ScanJobDto>();
     private IReadOnlyList<OrganizationMember> _members = Array.Empty<OrganizationMember>();
     private IReadOnlyList<OrganizationRoleOption> _memberRoles = Enum.GetValues<OrganizationMemberRole>()
         .Select(role => new OrganizationRoleOption(role.ToString(), role, null)).ToArray();
@@ -35,6 +39,11 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     private OrganizationRoleOption _selectedMemberRoleOption = new(OrganizationMemberRole.Viewer.ToString(), OrganizationMemberRole.Viewer, null);
     private OrganizationCustomRole? _selectedCustomRole;
     private LiveScanAccountRecord? _selectedAccount;
+    private TenantBinding? _selectedScanBinding;
+    private ScanScheduleDto? _selectedScanSchedule;
+    private ScanJobDto? _selectedScanJob;
+    private int _scanIntervalMinutes = 60;
+    private string _scanOperationsStatus = "Scheduled scans require shared organization mode.";
     private string _organizationName = string.Empty;
     private string _tenantKey = string.Empty;
     private string _organizationTenantId = string.Empty;
@@ -67,7 +76,8 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         AuthenticatedOrganizationContext authenticatedContext,
         ICentralAuditSyncService? centralAuditSyncService = null,
         ISharedOrganizationApi? sharedOrganizationApi = null,
-        ISharedScanSummaryPublisher? sharedScanSummaryPublisher = null) : base(demoData)
+        ISharedScanSummaryPublisher? sharedScanSummaryPublisher = null,
+        ISharedScanScheduleApi? sharedScanScheduleApi = null) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
@@ -75,6 +85,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         _authenticatedContext = authenticatedContext;
         _centralAuditSyncService = centralAuditSyncService;
         _sharedOrganizationApi = sharedOrganizationApi;
+        _sharedScanScheduleApi = sharedScanScheduleApi;
         _sharedScanSummaryPublisher = sharedScanSummaryPublisher;
         CreateOrganizationCommand = new AsyncRelayCommand(CreateOrganizationAsync);
         SignInCommand = new AsyncRelayCommand(SignInAsync);
@@ -88,6 +99,11 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         SaveCustomRoleCommand = new AsyncRelayCommand(SaveCustomRoleAsync);
         DeleteCustomRoleCommand = new AsyncRelayCommand(DeleteCustomRoleAsync);
         BindAccountCommand = new AsyncRelayCommand(BindAccountAsync);
+        CreateScanScheduleCommand = new AsyncRelayCommand(CreateScanScheduleAsync);
+        RunScanNowCommand = new AsyncRelayCommand(RunScanNowAsync);
+        ToggleScanScheduleCommand = new AsyncRelayCommand(ToggleScanScheduleAsync);
+        CancelScanJobCommand = new AsyncRelayCommand(CancelScanJobAsync);
+        RefreshScanOperationsCommand = new AsyncRelayCommand(RefreshScanOperationsAsync);
         _liveScan.ScanCompleted += async (_, _) =>
         {
             RefreshTenantView();
@@ -106,6 +122,9 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public string CentralAuditSyncStatus { get => _centralAuditSyncStatus; private set => SetProperty(ref _centralAuditSyncStatus, value); }
     public string SharedScanSummaryStatus { get => _sharedScanSummaryStatus; private set => SetProperty(ref _sharedScanSummaryStatus, value); }
     public IReadOnlyList<SharedScanSummaryDto> SharedScanSummaries { get => _sharedScanSummaries; private set => SetProperty(ref _sharedScanSummaries, value); }
+    public IReadOnlyList<SharedCiemRecordDto> SharedFindings { get => _sharedFindings; private set => SetProperty(ref _sharedFindings, value); }
+    public IReadOnlyList<ScanScheduleDto> ScanSchedules { get => _scanSchedules; private set => SetProperty(ref _scanSchedules, value); }
+    public IReadOnlyList<ScanJobDto> ScanJobs { get => _scanJobs; private set => SetProperty(ref _scanJobs, value); }
     public IReadOnlyList<LiveScanAccountRecord> AvailableAccounts => _availableAccounts;
     public IReadOnlyList<LiveScanAccountRecord> ConsolidatedAccounts => _consolidatedAccounts;
     public IReadOnlyList<OrganizationRoleOption> MemberRoles => _memberRoles;
@@ -128,6 +147,12 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
             }
             _authenticatedContext.Set(_identity, value?.Id);
             _sharedWorkspace = null;
+            SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
+            SharedFindings = Array.Empty<SharedCiemRecordDto>();
+            ScanSchedules = Array.Empty<ScanScheduleDto>();
+            ScanJobs = Array.Empty<ScanJobDto>();
+            SelectedScanSchedule = null;
+            SelectedScanJob = null;
             if (_sharedOrganizationApi is not null && _identity is not null && value is not null)
                 _ = RefreshSharedWorkspaceAsync();
             else
@@ -175,6 +200,11 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public bool CustomRoleManageRemediations { get => _customRoleManageRemediations; set => SetProperty(ref _customRoleManageRemediations, value); }
     public bool CustomRoleExportReports { get => _customRoleExportReports; set => SetProperty(ref _customRoleExportReports, value); }
     public LiveScanAccountRecord? SelectedAccount { get => _selectedAccount; set { if (SetProperty(ref _selectedAccount, value)) NotifyAuthorization(); } }
+    public TenantBinding? SelectedScanBinding { get => _selectedScanBinding; set { if (SetProperty(ref _selectedScanBinding, value)) NotifyAuthorization(); } }
+    public ScanScheduleDto? SelectedScanSchedule { get => _selectedScanSchedule; set { if (SetProperty(ref _selectedScanSchedule, value)) NotifyAuthorization(); } }
+    public ScanJobDto? SelectedScanJob { get => _selectedScanJob; set { if (SetProperty(ref _selectedScanJob, value)) NotifyAuthorization(); } }
+    public int ScanIntervalMinutes { get => _scanIntervalMinutes; set { if (SetProperty(ref _scanIntervalMinutes, value)) NotifyAuthorization(); } }
+    public string ScanOperationsStatus { get => _scanOperationsStatus; private set => SetProperty(ref _scanOperationsStatus, value); }
     public string OrganizationName { get => _organizationName; set { if (SetProperty(ref _organizationName, value)) NotifyAuthorization(); } }
     public string TenantKey { get => _tenantKey; set { if (SetProperty(ref _tenantKey, value)) NotifyAuthorization(); } }
     public string OrganizationTenantId { get => _organizationTenantId; set { if (SetProperty(ref _organizationTenantId, value)) NotifyAuthorization(); } }
@@ -208,6 +238,13 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public bool CanBindAccount => CanManageConnections && SelectedAccount is not null && SelectedOrganization is not null;
     public bool CanSaveCustomRole => CanManageMembers && !string.IsNullOrWhiteSpace(CustomRoleName);
     public bool CanDeleteCustomRole => CanManageMembers && SelectedCustomRole is not null;
+    public bool CanCreateScanSchedule => _sharedScanScheduleApi is not null && IsAllowed(OrganizationAction.RunScan)
+        && SelectedOrganization is not null && SelectedScanBinding is not null && ScanIntervalMinutes is >= 5 and <= 10080;
+    public bool CanRunScheduledScan => _sharedScanScheduleApi is not null && IsAllowed(OrganizationAction.RunScan)
+        && SelectedOrganization is not null && SelectedScanSchedule is not null;
+    public bool CanToggleScanSchedule => CanRunScheduledScan;
+    public bool CanCancelScanJob => _sharedScanScheduleApi is not null && IsAllowed(OrganizationAction.RunScan)
+        && SelectedOrganization is not null && SelectedScanJob is { Status: "Queued" or "Running" };
 
     public AsyncRelayCommand CreateOrganizationCommand { get; }
     public AsyncRelayCommand SignInCommand { get; }
@@ -221,6 +258,11 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     public AsyncRelayCommand SaveCustomRoleCommand { get; }
     public AsyncRelayCommand DeleteCustomRoleCommand { get; }
     public AsyncRelayCommand BindAccountCommand { get; }
+    public AsyncRelayCommand CreateScanScheduleCommand { get; }
+    public AsyncRelayCommand RunScanNowCommand { get; }
+    public AsyncRelayCommand ToggleScanScheduleCommand { get; }
+    public AsyncRelayCommand CancelScanJobCommand { get; }
+    public AsyncRelayCommand RefreshScanOperationsCommand { get; }
 
     public async Task RefreshAsync()
     {
@@ -315,9 +357,20 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
             var summary = await _sharedScanSummaryPublisher.PublishCurrentAsync(SelectedOrganization.Id);
             SharedScanSummaryStatus = summary is null
                 ? "No scanned accounts are bound to this organization; nothing was published."
-                : $"Shared summary saved for {summary.Provider} at {summary.CompletedAtUtc.ToLocalTime():g}.";
+                : $"Shared scan data saved for {summary.Provider} at {summary.CompletedAtUtc.ToLocalTime():g}.";
             if (summary is not null && _sharedOrganizationApi is not null)
-                SharedScanSummaries = await _sharedOrganizationApi.GetScanSummariesAsync(SelectedOrganization.Id, 20);
+            {
+                try
+                {
+                    SharedScanSummaries = await _sharedOrganizationApi.GetScanSummariesAsync(SelectedOrganization.Id, 20);
+                    if (IsAllowed(OrganizationAction.ViewFindings))
+                        SharedFindings = await _sharedOrganizationApi.GetFindingsAsync(SelectedOrganization.Id, summary.ScanId, 200);
+                }
+                catch (Exception exception)
+                {
+                    SharedScanSummaryStatus += $" Refresh failed: {exception.Message}";
+                }
+            }
         }
         catch (Exception exception)
         {
@@ -330,6 +383,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         _identity = null;
         _sharedWorkspace = null;
         SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
+        SharedFindings = Array.Empty<SharedCiemRecordDto>();
         _authenticatedContext.Set(null, null);
         _members = Array.Empty<OrganizationMember>();
         _bindings = Array.Empty<TenantBinding>();
@@ -489,6 +543,103 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         }
     }
 
+    public async Task CreateScanScheduleAsync()
+    {
+        if (!CanCreateScanSchedule || _sharedScanScheduleApi is null || SelectedOrganization is null || SelectedScanBinding is null)
+            return;
+        try
+        {
+            var schedule = await _sharedScanScheduleApi.CreateScanScheduleAsync(SelectedOrganization.Id,
+                new CreateScanScheduleRequest(SelectedScanBinding.Provider, SelectedScanBinding.ExternalTenantId,
+                    SelectedScanBinding.DisplayName, ScanIntervalMinutes));
+            SelectedScanSchedule = schedule;
+            ScanOperationsStatus = $"Schedule created. First full scan is due {schedule.NextRunAtUtc.ToLocalTime():g}.";
+            await RefreshScanOperationsAsync();
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to create scheduled scan: {exception.Message}";
+        }
+    }
+
+    public async Task RunScanNowAsync()
+    {
+        if (!CanRunScheduledScan || _sharedScanScheduleApi is null || SelectedOrganization is null || SelectedScanSchedule is null)
+            return;
+        try
+        {
+            SelectedScanJob = await _sharedScanScheduleApi.QueueScanNowAsync(SelectedOrganization.Id, SelectedScanSchedule.ScheduleId);
+            ScanOperationsStatus = $"Scan job {SelectedScanJob.JobId:D} queued. Scans execute asynchronously on the server worker.";
+            await RefreshScanOperationsAsync();
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to queue scan: {exception.Message}";
+        }
+    }
+
+    public async Task ToggleScanScheduleAsync()
+    {
+        if (!CanToggleScanSchedule || _sharedScanScheduleApi is null || SelectedOrganization is null || SelectedScanSchedule is null)
+            return;
+        try
+        {
+            SelectedScanSchedule = await _sharedScanScheduleApi.UpdateScanScheduleAsync(SelectedOrganization.Id,
+                SelectedScanSchedule.ScheduleId, new UpdateScanScheduleRequest(!SelectedScanSchedule.Enabled,
+                    SelectedScanSchedule.IntervalMinutes, SelectedScanSchedule.MaxRetries));
+            ScanOperationsStatus = SelectedScanSchedule.Enabled ? "Schedule enabled." : "Schedule paused.";
+            await RefreshScanOperationsAsync();
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to update scheduled scan: {exception.Message}";
+        }
+    }
+
+    public async Task CancelScanJobAsync()
+    {
+        if (!CanCancelScanJob || _sharedScanScheduleApi is null || SelectedOrganization is null || SelectedScanJob is null)
+            return;
+        try
+        {
+            await _sharedScanScheduleApi.CancelScanJobAsync(SelectedOrganization.Id, SelectedScanJob.JobId);
+            ScanOperationsStatus = "Cancellation requested. A running provider command will stop at its next cancellation point.";
+            await RefreshScanOperationsAsync();
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to cancel scan job: {exception.Message}";
+        }
+    }
+
+    public async Task RefreshScanOperationsAsync()
+    {
+        if (_sharedScanScheduleApi is null || _sharedWorkspace is null || SelectedOrganization is null
+            || !_sharedWorkspace.AllowedActions.Contains(OrganizationAction.RunScan))
+        {
+            ScanSchedules = Array.Empty<ScanScheduleDto>();
+            ScanJobs = Array.Empty<ScanJobDto>();
+            if (_sharedOrganizationApi is null)
+                ScanOperationsStatus = "Scheduled scans require shared organization mode.";
+            return;
+        }
+        try
+        {
+            ScanSchedules = await _sharedScanScheduleApi.GetScanSchedulesAsync(SelectedOrganization.Id);
+            ScanJobs = await _sharedScanScheduleApi.GetScanJobsAsync(SelectedOrganization.Id, 50);
+            if (SelectedScanSchedule is not null)
+                SelectedScanSchedule = ScanSchedules.FirstOrDefault(item => item.ScheduleId == SelectedScanSchedule.ScheduleId);
+            if (SelectedScanJob is not null)
+                SelectedScanJob = ScanJobs.FirstOrDefault(item => item.JobId == SelectedScanJob.JobId);
+            ScanOperationsStatus = $"Loaded {ScanSchedules.Count} account schedule(s) and {ScanJobs.Count} recent scan job(s).";
+            NotifyAuthorization();
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Unable to refresh scheduled scans: {exception.Message}";
+        }
+    }
+
     private OrganizationMemberRole? CurrentOrganizationRole =>
         _identity is null || SelectedOrganization is null || _sharedOrganizationApi is not null ? null : _organizationsService.GetCurrentRole(SelectedOrganization.Id, _identity);
 
@@ -536,6 +687,8 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
                 _auditTrail = Array.Empty<OrganizationAuditEntry>();
             }
         }
+        if (_selectedScanBinding is null || !_bindings.Any(binding => binding.Id == _selectedScanBinding.Id))
+            SelectedScanBinding = _bindings.FirstOrDefault();
 
         var result = _liveScan.CurrentResult;
         var allAccounts = result?.AccountRecords ?? Array.Empty<LiveScanAccountRecord>();
@@ -559,7 +712,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         _consolidatedCriticalFindings = findings.Count(item => item.Severity == RiskSeverity.Critical);
         _consolidatedEffectiveAccess = CanViewTenant ? (result?.EffectiveAccessRecords ?? Array.Empty<LiveEffectiveAccessRecord>()).Count(item => item.AccountId is not null && externalAccountIds.Contains(item.AccountId)) : 0;
         _unmatchedBoundAccounts = Math.Max(0, _bindings.Count - _consolidatedAccounts.Count);
-        foreach (var property in new[] { nameof(Members), nameof(Bindings), nameof(AuditTrail), nameof(AvailableAccounts), nameof(ConsolidatedAccounts), nameof(BoundAccountCount), nameof(ConsolidatedAccountCount), nameof(ConsolidatedIdentities), nameof(ConsolidatedResources), nameof(ConsolidatedFindings), nameof(ConsolidatedCriticalFindings), nameof(ConsolidatedEffectiveAccess), nameof(UnmatchedBoundAccounts), nameof(ConsolidatedCoverage), nameof(SharedScanSummaries), nameof(SharedScanSummaryStatus) })
+        foreach (var property in new[] { nameof(Members), nameof(Bindings), nameof(AuditTrail), nameof(AvailableAccounts), nameof(ConsolidatedAccounts), nameof(BoundAccountCount), nameof(ConsolidatedAccountCount), nameof(ConsolidatedIdentities), nameof(ConsolidatedResources), nameof(ConsolidatedFindings), nameof(ConsolidatedCriticalFindings), nameof(ConsolidatedEffectiveAccess), nameof(UnmatchedBoundAccounts), nameof(ConsolidatedCoverage), nameof(SharedScanSummaries), nameof(SharedFindings), nameof(SharedScanSummaryStatus), nameof(ScanSchedules), nameof(ScanJobs), nameof(ScanOperationsStatus) })
             OnPropertyChanged(property);
         OnPropertyChanged(nameof(MemberRoles));
         OnPropertyChanged(nameof(CustomRoles));
@@ -571,6 +724,11 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         if (_sharedOrganizationApi is null || _identity is null || SelectedOrganization is null)
         {
             _sharedWorkspace = null;
+            SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
+            SharedFindings = Array.Empty<SharedCiemRecordDto>();
+            ScanSchedules = Array.Empty<ScanScheduleDto>();
+            ScanJobs = Array.Empty<ScanJobDto>();
+            ScanOperationsStatus = "Scheduled scans require shared organization mode.";
             RefreshTenantView();
             return;
         }
@@ -580,15 +738,35 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
             SharedScanSummaries = _sharedWorkspace.AllowedActions.Contains(OrganizationAction.ViewInventory)
                 ? await _sharedOrganizationApi.GetScanSummariesAsync(SelectedOrganization.Id, 20)
                 : Array.Empty<SharedScanSummaryDto>();
+            SharedFindings = _sharedWorkspace.AllowedActions.Contains(OrganizationAction.ViewFindings)
+                ? await _sharedOrganizationApi.GetFindingsAsync(SelectedOrganization.Id, SharedScanSummaries.FirstOrDefault()?.ScanId, 200)
+                : Array.Empty<SharedCiemRecordDto>();
+            if (_sharedScanScheduleApi is not null && _sharedWorkspace.AllowedActions.Contains(OrganizationAction.RunScan))
+            {
+                ScanSchedules = await _sharedScanScheduleApi.GetScanSchedulesAsync(SelectedOrganization.Id);
+                ScanJobs = await _sharedScanScheduleApi.GetScanJobsAsync(SelectedOrganization.Id, 50);
+                ScanOperationsStatus = $"Loaded {ScanSchedules.Count} account schedule(s) and {ScanJobs.Count} recent scan job(s).";
+            }
+            else
+            {
+                ScanSchedules = Array.Empty<ScanScheduleDto>();
+                ScanJobs = Array.Empty<ScanJobDto>();
+                ScanOperationsStatus = "Your organization role does not allow scheduled scans.";
+            }
             SharedScanSummaryStatus = SharedScanSummaries.Count == 0
                 ? "No shared scan summaries are available for this organization."
-                : $"Loaded {SharedScanSummaries.Count} shared scan summaries.";
+                : $"Loaded {SharedScanSummaries.Count} shared scan summaries and {SharedFindings.Count} findings.";
             RefreshTenantView();
             NotifyAuthorization();
         }
         catch (Exception exception)
         {
             _sharedWorkspace = null;
+            SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
+            SharedFindings = Array.Empty<SharedCiemRecordDto>();
+            ScanSchedules = Array.Empty<ScanScheduleDto>();
+            ScanJobs = Array.Empty<ScanJobDto>();
+            ScanOperationsStatus = "Unable to load shared scan operations.";
             RefreshTenantView();
             ErrorMessage = $"Unable to load shared organization workspace: {exception.Message}";
         }
@@ -640,7 +818,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
 
     private void NotifyAuthorization()
     {
-        foreach (var property in new[] { nameof(SignedInAs), nameof(CurrentRole), nameof(CanCreateOrganization), nameof(CanSignIn), nameof(CanManageMembers), nameof(CanManageConnections), nameof(CanViewTenant), nameof(CanPublishSharedScanSummary), nameof(CanAddMember), nameof(CanChangeMemberRole), nameof(CanToggleMember), nameof(CanBindAccount), nameof(CanSaveCustomRole), nameof(CanDeleteCustomRole), nameof(Identity) })
+        foreach (var property in new[] { nameof(SignedInAs), nameof(CurrentRole), nameof(CanCreateOrganization), nameof(CanSignIn), nameof(CanManageMembers), nameof(CanManageConnections), nameof(CanViewTenant), nameof(CanPublishSharedScanSummary), nameof(CanAddMember), nameof(CanChangeMemberRole), nameof(CanToggleMember), nameof(CanBindAccount), nameof(CanSaveCustomRole), nameof(CanDeleteCustomRole), nameof(CanCreateScanSchedule), nameof(CanRunScheduledScan), nameof(CanToggleScanSchedule), nameof(CanCancelScanJob), nameof(Identity) })
             OnPropertyChanged(property);
     }
 }

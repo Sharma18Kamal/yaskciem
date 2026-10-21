@@ -62,7 +62,16 @@ public sealed record AccessReviewCandidate(
     bool IsPrivileged = false,
     bool IsExternal = false);
 
-public sealed record AccessReviewAuditEntry(DateTime Timestamp, string Actor, string Action, string Details);
+public sealed record AccessReviewAuditEntry(DateTime Timestamp, string Actor, string Action, string Details)
+{
+    public Guid EventId { get; init; }
+    public Guid CorrelationId { get; init; }
+    public Guid? ItemId { get; init; }
+    public Guid ActorUserId { get; init; }
+    public ReviewDecision? Decision { get; init; }
+    public string? EvidenceSha256 { get; init; }
+    public string CorrelationIdText => CorrelationId == Guid.Empty ? "local" : CorrelationId.ToString("N");
+}
 
 public sealed record AccessReviewAttestation(
     string Reviewer,
@@ -71,7 +80,11 @@ public sealed record AccessReviewAttestation(
     string Comment,
     DateTime AttestedAtUtc,
     string EvidenceSha256,
-    string EvidenceSnapshot);
+    string EvidenceSnapshot)
+{
+    public Guid CorrelationId { get; init; }
+    public Guid ActorUserId { get; init; }
+}
 
 public sealed record AccessReviewItem(
     Guid Id,

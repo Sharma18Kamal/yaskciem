@@ -53,7 +53,11 @@ public sealed record UploadSharedScanSummaryRequest(
     int Findings,
     int CriticalFindings,
     int HighFindings,
-    IReadOnlyList<SharedScanCoverageDto> Coverage);
+    IReadOnlyList<SharedScanCoverageDto> Coverage)
+{
+    public IReadOnlyList<SharedCiemRecordDto> Records { get; init; } = Array.Empty<SharedCiemRecordDto>();
+}
+public sealed record SharedCiemRecordDto(CloudProvider Provider, string Kind, string RecordId, string ExternalAccountId, string PayloadJson);
 public sealed record SharedScanSummaryDto(
     Guid ScanId,
     Guid OrganizationId,
@@ -72,6 +76,61 @@ public sealed record SharedScanSummaryDto(
     int CriticalFindings,
     int HighFindings,
     IReadOnlyList<SharedScanCoverageDto> Coverage);
+public sealed record CreateScanScheduleRequest(CloudProvider Provider, string ExternalAccountId, string DisplayName, int IntervalMinutes, int MaxRetries = 2);
+public sealed record UpdateScanScheduleRequest(bool Enabled, int IntervalMinutes, int MaxRetries);
+public sealed record ScanScheduleDto(
+    Guid ScheduleId,
+    Guid TenantId,
+    Guid OrganizationId,
+    CloudProvider Provider,
+    string ExternalAccountId,
+    string DisplayName,
+    int IntervalMinutes,
+    int MaxRetries,
+    bool Enabled,
+    DateTime NextRunAtUtc,
+    DateTime CreatedAtUtc,
+    DateTime UpdatedAtUtc,
+    DateTime? LastSuccessfulScanAtUtc);
+public sealed record ScanJobDto(
+    Guid JobId,
+    Guid ScheduleId,
+    Guid TenantId,
+    Guid OrganizationId,
+    CloudProvider Provider,
+    string ExternalAccountId,
+    string DisplayName,
+    string Status,
+    int AttemptCount,
+    int MaxRetries,
+    DateTime QueuedAtUtc,
+    DateTime? StartedAtUtc,
+    DateTime? CompletedAtUtc,
+    DateTime? NextAttemptAtUtc,
+    long? DurationMilliseconds,
+    Guid? ScanId,
+    bool CancellationRequested,
+    string? LastError);
+public sealed record ScanJobAttemptDto(
+    Guid AttemptId,
+    Guid JobId,
+    int AttemptNumber,
+    DateTime StartedAtUtc,
+    DateTime? CompletedAtUtc,
+    long? DurationMilliseconds,
+    string Outcome,
+    string? Error);
+public sealed record ScanJobCheckpointDto(
+    Guid JobId,
+    string DataSource,
+    string Status,
+    int Records,
+    DateTime UpdatedAtUtc,
+    string? Details);
+public sealed record ScanJobStatusDto(
+    ScanJobDto Job,
+    IReadOnlyList<ScanJobAttemptDto> Attempts,
+    IReadOnlyList<ScanJobCheckpointDto> Checkpoints);
 public sealed record CentralAuditAppendRequest(string EventType, string Description, DateTime? SourceTimestampUtc, IReadOnlyDictionary<string, string> Metadata, Guid EventId = default);
 public sealed record CentralAuditEventDto(long Sequence, Guid EventId, Guid TenantId, Guid ActorObjectId, string EventType, string Description, DateTime RecordedAtUtc, DateTime? SourceTimestampUtc, IReadOnlyDictionary<string, string> Metadata, string PreviousHash, string Hash, DateTime RetainUntilUtc)
 {

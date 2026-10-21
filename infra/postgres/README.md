@@ -1,6 +1,6 @@
 # PostgreSQL Setup
 
-The License Server uses one PostgreSQL database for shared workspace data and central audit events. PostgreSQL must be reachable from every License Server instance over a protected network connection. Use PostgreSQL 15 or later, TLS certificate validation, routine backups, and a secret provider for connection credentials and the audit HMAC key.
+The License Server uses one PostgreSQL database for shared workspace data and central audit events. Shared CIEM scans are persisted in `SharedCiemScans` with account-scoped normalized records in `SharedCiemScanRecords`; the API enforces organization membership, account bindings, and scan idempotency. Scheduled full scans use `SharedScanSchedules` and a durable `SharedScanJobs` queue, with attempt history and per-source checkpoints in `SharedScanJobAttempts` and `SharedScanJobCheckpoints`. Workers claim jobs with row-level skip-locked semantics and expiring leases; active-account uniqueness prevents duplicate overlapping jobs across schedules or server instances. Access-review campaigns are stored centrally with their evidence snapshots, attestations, and append-only correlated audit events in `SharedAccessReviewAuditEvents`. Review campaign updates and event insertion commit atomically. PostgreSQL must be reachable from every License Server instance over a protected network connection. Use PostgreSQL 15 or later, TLS certificate validation, routine backups, and a secret provider for connection credentials and the audit HMAC key.
 
 ## Schema and Runtime Role
 
@@ -27,7 +27,9 @@ Configure:
 - `AuditRetention__IntegrityKey` with a Base64-encoded, cryptographically random key of at least 32 bytes for the initial legacy key, or `AuditRetention__IntegrityKeys__<key-id>` values plus `AuditRetention__IntegrityKeyId` for versioned keys.
 - The existing Entra settings required by the License Server.
 
-Production startup does not create or migrate tables. `/api/v1/readiness` returns HTTP 503 until the database and both required schemas are accessible. Keep application credentials separate from the DBA migration identity.
+Production startup does not create or migrate tables. `/api/v1/readiness` returns HTTP 503 until the database, shared workspace tables (including shared review audit, scan record, schedule, job, attempt, and checkpoint tables), and required audit schemas are accessible. Keep application credentials separate from the DBA migration identity.
+
+The scan worker runs as part of the License Server process and uses that process identity's cloud CLI authentication. Install/configure the Azure CLI, AWS CLI, and/or Google Cloud CLI required by scheduled accounts under the service identity, and grant only the approved read permissions. The worker doesn't reuse a Desktop user's credentials. Schedule intervals are 5 minutes to 7 days; retry count is capped at four. Failed scans use bounded exponential retry, partial scans persist their source coverage and are terminal outcomes, and cancellation is stored durably for the worker to observe. Incremental scans/checkpoints are not used to resume cloud collection; checkpoints report source progress for job visibility only.
 
 ## WORM Archive
 
@@ -88,7 +90,7 @@ The script prompts for the Windows task account and registers limited-privilege 
 
 ## Existing SQLite Workspace Migration
 
-The utility migrates the former shared License Server workspace SQLite database, not the desktop's local `cloudentitle.db`. It supports the four shared tables for organization directories, account bindings, access reviews, and scan summaries. It does not migrate central audit history or desktop inventory/findings.
+The utility migrates the former shared License Server workspace SQLite database, not the desktop's local `cloudentitle.db`. It supports the legacy shared tables for organization directories, account bindings, access reviews, and scan summaries. It does not migrate central audit history, desktop inventory/findings, or normalized CIEM scan records. New full scan uploads are written directly to PostgreSQL.
 
 First run a read-only count:
 

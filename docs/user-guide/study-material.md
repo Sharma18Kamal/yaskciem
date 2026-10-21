@@ -95,9 +95,11 @@ Connect Azure, AWS, and Google Cloud independently with their existing CLI ident
    - AWS IAM user: `aws configure --profile yask-ciem`; enter credentials directly in the terminal. Other profile names and the default profile are unchanged.
    - AWS IAM Identity Center: configure externally with `aws configure sso --profile audit`, then `aws sso login --profile audit`.
    - Google Cloud: `gcloud auth login`
-3. Finish any browser sign-in and all CLI configuration prompts. Use your actual AWS profile name instead of `audit`.
+3. Finish any browser sign-in and all CLI configuration prompts. For AWS, prefer IAM Identity Center with a dedicated read-only permission set and a short-lived SSO profile; use IAM-user credentials only when required by your organization's policy. Enter credentials only in the provider CLI terminal, never in YASK-CIEM.
 4. Return to the app after completing the terminal prompts. **Refresh sign-in status** rechecks selected providers without connecting others. AWS configuration waits can be canceled and have a three-minute deadline; canceling the wait does not close the terminal.
-5. The provider card shows its connection status. Repeat for another provider if needed.
+5. Use **Discover accessible accounts** on Cloud Accounts to check which account scopes are visible to the selected CLI identities. This confirms discovery, not every permission required by CIEM.
+6. Run a read-only scan, then review **Latest permission and source coverage** on Cloud Accounts. Resolve `Denied`, `Partial`, or `Unavailable` sources using the per-source details. `Unsupported` means the connector does not collect that data; granting broader cloud roles will not enable it.
+7. Bind only the intended, discovered account in the Organizations workspace. Repeat for each account or permission set that should be included.
 
 To sign out of one provider, use **Disconnect** on that provider card. **Disconnect Cloud** opens Cloud Accounts; use the provider-specific Disconnect action. A pending sign-in can be canceled separately.
 
@@ -107,16 +109,18 @@ For AWS, **Disconnect** stops AWS use in the current app session without deletin
 
 | Provider | Recommended access |
 |---|---|
-| Azure | Reader on the subscription, plus Microsoft Graph read permissions for Entra (users, groups, service principals, directory roles) |
-| AWS | Read-only IAM and Organizations access (for example SecurityAudit) |
-| Google Cloud | Viewer and IAM viewer roles on the project or organization |
+| Azure | Reader on intended subscriptions. Entra enrichment needs tenant-approved Graph read permissions. Optional PIM schedules require separate Graph read consent. Do not grant Owner, Contributor, or User Access Administrator for scans. |
+| AWS | Prefer IAM Identity Center SSO with SecurityAudit or an approved least-privilege equivalent. Each target account requires a working profile; an Organizations roster does not grant member-account access. |
+| Google Cloud | Project Viewer and the connector's IAM, service-account, and Cloud Asset Inventory read permissions at intended project scopes. Inherited policy discovery additionally needs read access on ancestor folders/organization. |
 
-For Azure PIM data, a tenant administrator must grant admin consent for `RoleAssignmentSchedule.Read.Directory` and `RoleEligibilitySchedule.Read.Directory`. If it is not granted, the app falls back to permanent directory role assignments and reports PIM as unavailable.
+The exact permissions and optional data-source requirements are listed in [Azure provider setup](../providers/azure.md), [AWS provider setup](../providers/aws.md), and [Google Cloud provider setup](../providers/gcp.md). For Azure PIM data, a tenant administrator must grant admin consent for `RoleAssignmentSchedule.Read.Directory` and `RoleEligibilitySchedule.Read.Directory`. If it is not granted, YASK-CIEM falls back to permanent directory role assignments and reports PIM as unavailable.
 
 ### 3.3 Cloud Accounts page
 
-- **Connect a cloud provider** cards with Connect, Disconnect and **Refresh sign-in status**.
+- **Connect a cloud provider** cards with least-privilege guidance, CLI authentication status, and the latest scan-permission validation summary.
+- **Discover accessible accounts** lists visible account scopes before a scan. Account discovery is not a full permission check.
 - **Discovered accounts and permission sets** table: provider, account, account ID, CLI profile, permission set, and scan access.
+- **Latest permission and source coverage** lists the last scan's collection status by provider/source, including details for denied, partial, unavailable, unsupported, and skipped sources. The results are time-bounded to the latest scan, not a live health check.
 
 ---
 
@@ -249,18 +253,18 @@ Cloud changes are disabled in this build; the workflow produces approvals and dr
    - External identities (14 days)
 2. Enter a **campaign name** and **duration** (1-365 days).
 3. Choose a **fallback reviewer**. Only eligible reviewers are listed (see below).
-4. Confirm the **actor name** (recorded in the audit trail).
+4. In local mode, confirm the **actor name**. Shared mode records the signed-in organization identity instead.
 5. Click **Create from Current Scan**. Each item is assigned to the identity owner when the owner is an eligible reviewer, otherwise to the fallback reviewer if eligible, otherwise left unassigned.
 
 **Who can be a reviewer**
 
-- An active user from Azure, AWS or Google Cloud (not a group, service account or disabled user).
-- Holds an active grant of Global Administrator, Security Administrator or System Analyst.
-- Equivalents recognised: Security Analyst; AWS AdministratorAccess and SecurityAudit; GCP roles/owner, roles/iam.securityAdmin and roles/iam.securityReviewer.
-- Eligible-only PIM roles do not count. Users who are unavailable are never listed.
-- The list is built from the latest scan, so scan first.
+- In local/offline mode: an active Azure, AWS, or Google Cloud user with an active qualifying privileged grant. Eligible-only PIM roles do not count; the list is built from the latest scan.
+- In shared mode: an active organization member with `ManageRemediations` authorization (Organization Admin, Security Analyst, or an approved custom role). The campaign creator is excluded to enforce separation of duties; only the assigned reviewer can decide an item.
+- The License Server verifies membership, role, assignment, and actor from authenticated Entra identity. Client-supplied reviewer or actor names do not authorize a decision.
 
 **Review an item**
+
+Shared campaigns and decisions are saved centrally for authorized team members and remain available across devices. Each decision records the authenticated actor, UTC time, rationale, audit correlation ID, and SHA-256 digest of the captured evidence. The evidence snapshot is locked when the campaign is created and cannot be changed after a decision. Without shared API configuration, reviews remain in the local store and preserve offline behavior.
 
 1. Select a campaign, then an item. Read **Review evidence**.
 2. To change the reviewer: pick an eligible reviewer, set the deadline, then **Assign reviewer**.
@@ -270,7 +274,7 @@ Cloud changes are disabled in this build; the workflow produces approvals and dr
 4. Click **Record decision**. An attestation with an evidence hash is stored.
 5. Review **Attestations** and the **Audit history**.
 
-The top cards show open campaigns, pending items and escalated items. Overdue items receive reminders and are escalated automatically when the workspace refreshes. Decisions are local governance records and never change cloud access.
+The top cards show open campaigns, pending items and escalated items. Overdue items receive reminders and are escalated automatically when the workspace refreshes. Decisions are governance records and never change cloud access.
 
 ---
 
@@ -284,10 +288,12 @@ Used for multi-user workspaces and tenant membership.
 3. **Bind account** to attach a cloud account to the organization.
 4. **Add member** and assign a role.
 5. View consolidated totals from the latest scan (accounts, identities, resources, findings, critical, effective access).
-6. **Publish latest scan summary** shares aggregate counts and coverage (no resource-level findings).
-7. **Sync central audit events** uploads local audit events to the tenant's central audit log.
+6. **Publish latest scan data** explicitly uploads summary counts, source coverage, and normalized records for selected, scanned accounts bound to this organization. The organization workspace shows shared scan history and findings to members whose roles allow access.
+7. In **Scheduled full scans**, choose a bound account and interval, then create a schedule. Use **Run selected now** to enqueue an immediate job; pause/resume the selected schedule as needed.
+8. Review recent account scan jobs for queued/running/succeeded/partial/failed/cancelled outcomes, attempts, duration and errors. Select a queued or running job and request cancellation; the server worker observes the durable request.
+9. **Sync central audit events** uploads local audit events to the tenant's central audit log.
 
-Shared features need the central service URL (`YASK_CIEM_API_BASE_URL`, HTTPS) to be configured; without it the app works locally.
+Scheduled scans require shared mode (`YASK_CIEM_API_BASE_URL`, HTTPS), an account bound to the organization, the `RunScan` role action, the License Server worker, and read-only cloud CLI credentials configured for that server's service identity. The Desktop user's CLI credentials are not sent to the server. Scans are full per-account scans. Partial source coverage remains visible, retries are bounded, and cancellation is best-effort while a provider command is running. The initial server executor does not yet run the Desktop risk-evaluation pipeline, so scheduled scan summaries report zero findings; do not treat this as a clean risk assessment. Without shared mode, the desktop retains its local workflows; server-side scheduling is unavailable.
 
 ---
 
@@ -297,7 +303,7 @@ Shared features need the central service URL (`YASK_CIEM_API_BASE_URL`, HTTPS) t
 |---|---|
 | Application | Shows version and the data location |
 | **Demo mode** | **Load Demo Data** fills the app with synthetic Azure, AWS and GCP data (no cloud access). **Reset Demo Data** clears it |
-| **Continuous monitoring** | Tick **Enable scheduled scans**, choose an interval (5 minutes to 7 days), click **Save schedule**. Scans run while the app is open |
+| **Continuous monitoring** | Optional local Desktop schedule; it runs only while the app is open. For cross-device, per-account server schedules and job outcomes, use **Organizations > Scheduled full scans** with shared mode configured. |
 | **Posture alerts** | Save an organization-approved HTTPS webhook endpoint. It is protected in Windows Credential Manager; eligible high-impact posture changes are delivered after a scan |
 | Cloud connections | Use Connect Cloud in the header |
 | **Ticketing connection** | Choose the system (native: Jira, Jira Service Management, ServiceNow; others use a signed webhook). Enter HTTPS site URL, project key or service desk ID, issue/request type, optional signed webhook URL, API user and token. **Save URL**, **Save credential** (stored in Windows Credential Manager) and then the request button |

@@ -5,12 +5,159 @@ using CloudEntitle.Integration.Contracts;
 using CloudEntitle.LicenseServer.Services;
 using CloudEntitle.OrganizationManagement.Models;
 using CloudEntitle.OrganizationManagement.Services;
+using Npgsql;
 using Xunit;
 
 namespace CloudEntitle.Integration.Tests;
 
 public sealed class SharedWorkspaceStoreTests
 {
+    [PostgreSqlFact]
+    public async Task ScanSchedules_ShouldQueuePerAccountDeduplicateRetryAndTrackAttempts()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
+        await store.InitializeAsync();
+        var tenantId = Guid.NewGuid();
+        var organizationId = Guid.NewGuid();
+        var request = new CreateScanScheduleRequest(CloudProvider.Aws, "123456789012", "Production AWS", 5, 1);
+        var schedule = Assert.IsType<ScanScheduleDto>(await store.CreateScanScheduleAsync(tenantId, organizationId, request));
+        Assert.Null(await store.CreateScanScheduleAsync(tenantId, organizationId, request));
+
+        await using (var connection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand("""
+                UPDATE SharedScanSchedules SET NextRunAtUtc=@due
+                WHERE TenantId=@tenant AND OrganizationId=@organization AND ScheduleId=@schedule;
+                """, connection);
+            command.Parameters.AddWithValue("due", DateTime.UtcNow.AddMinutes(-1));
+            command.Parameters.AddWithValue("tenant", tenantId);
+            command.Parameters.AddWithValue("organization", organizationId);
+            command.Parameters.AddWithValue("schedule", schedule.ScheduleId);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.Equal(1, await store.EnqueueDueScanSchedulesAsync());
+        Assert.Equal(0, await store.EnqueueDueScanSchedulesAsync());
+        var firstLease = Assert.IsType<ScanJobLease>(await store.ClaimNextScanJobAsync());
+        Assert.Equal(1, firstLease.Job.AttemptCount);
+        Assert.Null(await store.ClaimNextScanJobAsync());
+        await store.SaveScanJobCheckpointAsync(firstLease.Job, "Identities", "Collected", 4, null);
+        await store.CompleteScanJobAttemptAsync(firstLease, "Failed", "temporary provider failure", null);
+
+        await using (var connection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand("""
+                UPDATE SharedScanJobs SET NextAttemptAtUtc=@due
+                WHERE TenantId=@tenant AND OrganizationId=@organization AND JobId=@job;
+                """, connection);
+            command.Parameters.AddWithValue("due", DateTime.UtcNow.AddSeconds(-1));
+            command.Parameters.AddWithValue("tenant", tenantId);
+            command.Parameters.AddWithValue("organization", organizationId);
+            command.Parameters.AddWithValue("job", firstLease.Job.JobId);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var retryLease = Assert.IsType<ScanJobLease>(await store.ClaimNextScanJobAsync());
+        Assert.Equal(firstLease.Job.JobId, retryLease.Job.JobId);
+        Assert.Equal(2, retryLease.Job.AttemptCount);
+        await store.CompleteScanJobAttemptAsync(retryLease, "Failed", "second provider failure", null);
+        var status = Assert.IsType<ScanJobDto>(await store.GetScanJobAsync(tenantId, organizationId, firstLease.Job.JobId));
+        Assert.Equal("Failed", status.Status);
+        Assert.Equal(2, status.AttemptCount);
+        Assert.NotNull(status.DurationMilliseconds);
+        Assert.Equal(new[] { "Retrying", "Failed" },
+            (await store.GetScanJobAttemptsAsync(tenantId, organizationId, status.JobId)).Select(attempt => attempt.Outcome));
+        Assert.Equal("Collected", Assert.Single(await store.GetScanJobCheckpointsAsync(tenantId, organizationId, status.JobId)).Status);
+
+        var secondSchedule = Assert.IsType<ScanScheduleDto>(await store.CreateScanScheduleAsync(tenantId, organizationId,
+            request with { ExternalAccountId = "987654321098", DisplayName = "Staging AWS" }));
+        var queued = Assert.IsType<ScanJobDto>(await store.QueueScanNowAsync(tenantId, organizationId, secondSchedule.ScheduleId));
+        Assert.True(await store.RequestScanJobCancellationAsync(tenantId, organizationId, queued.JobId));
+        Assert.False(await store.RequestScanJobCancellationAsync(tenantId, organizationId, queued.JobId));
+        Assert.Equal("Cancelled", (await store.GetScanJobAsync(tenantId, organizationId, queued.JobId))!.Status);
+    }
+
+    [PostgreSqlFact]
+    public async Task ScanJobs_ShouldFenceExpiredWorkerAttempts()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
+        await store.InitializeAsync();
+        var tenantId = Guid.NewGuid();
+        var organizationId = Guid.NewGuid();
+        var schedule = Assert.IsType<ScanScheduleDto>(await store.CreateScanScheduleAsync(tenantId, organizationId,
+            new CreateScanScheduleRequest(CloudProvider.Aws, "123456789012", "Production AWS", 5, 1)));
+        var queued = Assert.IsType<ScanJobDto>(await store.QueueScanNowAsync(tenantId, organizationId, schedule.ScheduleId));
+        var expiredLease = Assert.IsType<ScanJobLease>(await store.ClaimNextScanJobAsync());
+        Assert.Equal(queued.JobId, expiredLease.Job.JobId);
+
+        await using (var connection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand("""
+                UPDATE SharedScanJobs SET LeaseExpiresAtUtc=@expired
+                WHERE TenantId=@tenant AND OrganizationId=@organization AND JobId=@job;
+                """, connection);
+            command.Parameters.AddWithValue("expired", DateTime.UtcNow.AddMinutes(-1));
+            command.Parameters.AddWithValue("tenant", tenantId);
+            command.Parameters.AddWithValue("organization", organizationId);
+            command.Parameters.AddWithValue("job", queued.JobId);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var currentLease = Assert.IsType<ScanJobLease>(await store.ClaimNextScanJobAsync());
+        Assert.NotEqual(expiredLease.AttemptId, currentLease.AttemptId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.RenewScanJobLeaseAsync(expiredLease));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.CompleteScanJobAttemptAsync(expiredLease, "Succeeded", null, null));
+        await store.CompleteScanJobAttemptAsync(currentLease, "Succeeded", null, null);
+
+        var status = Assert.IsType<ScanJobDto>(await store.GetScanJobAsync(tenantId, organizationId, queued.JobId));
+        Assert.Equal("Succeeded", status.Status);
+        Assert.Equal(new[] { "Interrupted", "Succeeded" },
+            (await store.GetScanJobAttemptsAsync(tenantId, organizationId, queued.JobId)).Select(attempt => attempt.Outcome));
+    }
+
+    [PostgreSqlFact]
+    public async Task ScanJobs_ShouldFinishCancelledWhenCancellationOutlivesWorkerLease()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
+        await store.InitializeAsync();
+        var tenantId = Guid.NewGuid();
+        var organizationId = Guid.NewGuid();
+        var schedule = Assert.IsType<ScanScheduleDto>(await store.CreateScanScheduleAsync(tenantId, organizationId,
+            new CreateScanScheduleRequest(CloudProvider.Azure, "subscription-1", "Production Azure", 5, 2)));
+        var queued = Assert.IsType<ScanJobDto>(await store.QueueScanNowAsync(tenantId, organizationId, schedule.ScheduleId));
+        var lease = Assert.IsType<ScanJobLease>(await store.ClaimNextScanJobAsync());
+
+        await using (var connection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand("""
+                UPDATE SharedScanJobs SET LeaseExpiresAtUtc=@expired
+                WHERE TenantId=@tenant AND OrganizationId=@organization AND JobId=@job;
+                """, connection);
+            command.Parameters.AddWithValue("expired", DateTime.UtcNow.AddMinutes(-1));
+            command.Parameters.AddWithValue("tenant", tenantId);
+            command.Parameters.AddWithValue("organization", organizationId);
+            command.Parameters.AddWithValue("job", queued.JobId);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.True(await store.RequestScanJobCancellationAsync(tenantId, organizationId, queued.JobId));
+        Assert.Null(await store.ClaimNextScanJobAsync());
+        var status = Assert.IsType<ScanJobDto>(await store.GetScanJobAsync(tenantId, organizationId, queued.JobId));
+        Assert.Equal("Cancelled", status.Status);
+        Assert.Equal("Interrupted", Assert.Single(
+            await store.GetScanJobAttemptsAsync(tenantId, organizationId, queued.JobId)).Outcome);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.CompleteScanJobAttemptAsync(lease, "Failed", "late failure", null));
+    }
+
     [PostgreSqlFact]
     public async Task OrganizationDirectories_ShouldPersistPerTenantAndEnforceGlobalAccountBindingUniqueness()
     {
@@ -74,7 +221,7 @@ public sealed class SharedWorkspaceStoreTests
             Assert.Equal(campaignId, Assert.Single(await store.GetAccessReviewsAsync(tenantId, organizationId)).Id);
             Assert.Empty(await store.GetAccessReviewsAsync(Guid.NewGuid(), organizationId));
             var loaded = Assert.Single(await store.GetScanSummariesAsync(tenantId, organizationId));
-            Assert.Equal(2, loaded.Findings);
+            Assert.Equal(99, loaded.Findings);
             Assert.Empty(await store.GetScanSummariesAsync(tenantId, Guid.NewGuid()));
         }
         finally

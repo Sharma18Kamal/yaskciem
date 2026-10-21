@@ -54,11 +54,11 @@ public sealed class AccessReviewViewModelTests
             await viewModel.AssignReviewerAsync();
 
             viewModel.SelectedItem = Assert.Single(viewModel.SelectedCampaign!.Items);
-            viewModel.ReviewerName = "reviewer@example.invalid";
             viewModel.SelectedDecision = ReviewDecision.ExceptionGranted;
             viewModel.ExceptionExpiresAt = DateTime.Today.AddDays(3);
             viewModel.ReviewComment = "Temporary production exception; owner approval attached.";
             viewModel.ActionActor = "security-admin@example.invalid";
+            Assert.True(viewModel.CanRecordDecision);
             await viewModel.RecordDecisionAsync();
 
             var persisted = Assert.Single(await store.GetAsync());

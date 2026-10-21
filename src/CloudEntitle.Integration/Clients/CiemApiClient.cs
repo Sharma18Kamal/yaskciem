@@ -62,11 +62,80 @@ public sealed class CiemApiClient
     public Task<ApiEnvelope<SharedScanSummaryDto>?> UploadSharedScanSummaryAsync(Guid organizationId, UploadSharedScanSummaryRequest request, string accessToken, CancellationToken cancellationToken = default)
         => SendForEnvelopeAsync<SharedScanSummaryDto>(HttpMethod.Post, $"api/v1/organizations/{organizationId:D}/scan-summaries", accessToken, request, cancellationToken);
 
+    public Task<ApiEnvelope<ScanScheduleDto>?> CreateScanScheduleAsync(
+        Guid organizationId, CreateScanScheduleRequest request, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<ScanScheduleDto>(HttpMethod.Post,
+            $"api/v1/organizations/{organizationId:D}/scan-schedules", accessToken, request, cancellationToken);
+
+    public Task<ApiEnvelope<IReadOnlyList<ScanScheduleDto>>?> GetScanSchedulesAsync(
+        Guid organizationId, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<ScanScheduleDto>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/scan-schedules", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<ScanScheduleDto>?> UpdateScanScheduleAsync(
+        Guid organizationId, Guid scheduleId, UpdateScanScheduleRequest request, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<ScanScheduleDto>(HttpMethod.Put,
+            $"api/v1/organizations/{organizationId:D}/scan-schedules/{scheduleId:D}", accessToken, request, cancellationToken);
+
+    public Task<ApiEnvelope<ScanJobDto>?> QueueScanNowAsync(
+        Guid organizationId, Guid scheduleId, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<ScanJobDto>(HttpMethod.Post,
+            $"api/v1/organizations/{organizationId:D}/scan-schedules/{scheduleId:D}/run-now",
+            accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<IReadOnlyList<ScanJobDto>>?> GetScanJobsAsync(
+        Guid organizationId, int limit, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<ScanJobDto>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/scan-jobs?limit={limit}", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<ScanJobStatusDto>?> GetScanJobStatusAsync(
+        Guid organizationId, Guid jobId, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<ScanJobStatusDto>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/scan-jobs/{jobId:D}", accessToken, cancellationToken: cancellationToken);
+
+    public async Task CancelScanJobAsync(
+        Guid organizationId, Guid jobId, string accessToken, CancellationToken cancellationToken = default)
+        => await SendWithoutEnvelopeAsync(HttpMethod.Post,
+            $"api/v1/organizations/{organizationId:D}/scan-jobs/{jobId:D}/cancel", accessToken, cancellationToken);
+
+    public Task<ApiEnvelope<IReadOnlyList<SharedCiemRecordDto>>?> GetSharedScanRecordsAsync(
+        Guid organizationId, Guid scanId, string accessToken, string? kind = null, string? accountId = null, int limit = 500,
+        CancellationToken cancellationToken = default)
+    {
+        var query = $"?limit={limit}";
+        if (!string.IsNullOrWhiteSpace(kind)) query += $"&kind={Uri.EscapeDataString(kind)}";
+        if (!string.IsNullOrWhiteSpace(accountId)) query += $"&accountId={Uri.EscapeDataString(accountId)}";
+        return SendForEnvelopeAsync<IReadOnlyList<SharedCiemRecordDto>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/scans/{scanId:D}/records{query}", accessToken, cancellationToken: cancellationToken);
+    }
+
+    public Task<ApiEnvelope<IReadOnlyList<SharedCiemRecordDto>>?> GetSharedFindingsAsync(
+        Guid organizationId, string accessToken, Guid? scanId = null, int limit = 500, CancellationToken cancellationToken = default)
+    {
+        var query = $"?limit={limit}";
+        if (scanId.HasValue) query += $"&scanId={scanId.Value:D}";
+        return SendForEnvelopeAsync<IReadOnlyList<SharedCiemRecordDto>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/findings{query}", accessToken, cancellationToken: cancellationToken);
+    }
+
     public Task<ApiEnvelope<IReadOnlyList<AccessReviewCampaign>>?> GetSharedAccessReviewsAsync(Guid organizationId, string accessToken, CancellationToken cancellationToken = default)
         => SendForEnvelopeAsync<IReadOnlyList<AccessReviewCampaign>>(HttpMethod.Get, $"api/v1/organizations/{organizationId:D}/access-reviews", accessToken, cancellationToken: cancellationToken);
 
-    public Task<ApiEnvelope<AccessReviewCampaign>?> SaveSharedAccessReviewAsync(Guid organizationId, AccessReviewCampaign campaign, string accessToken, CancellationToken cancellationToken = default)
-        => SendForEnvelopeAsync<AccessReviewCampaign>(HttpMethod.Put, $"api/v1/organizations/{organizationId:D}/access-reviews/{campaign.Id:D}", accessToken, campaign, cancellationToken);
+    public Task<ApiEnvelope<IReadOnlyList<string>>?> GetEligibleSharedAccessReviewersAsync(Guid organizationId, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<string>>(HttpMethod.Get, $"api/v1/organizations/{organizationId:D}/access-reviews/reviewers", accessToken, cancellationToken: cancellationToken);
+
+    public async Task<ApiEnvelope<AccessReviewCampaign>?> SaveSharedAccessReviewAsync(Guid organizationId, AccessReviewCampaign campaign, string accessToken, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"api/v1/organizations/{organizationId:D}/access-reviews/{campaign.Id:D}")
+        {
+            Content = JsonContent.Create(campaign)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Add("X-Correlation-ID", Guid.NewGuid().ToString("N"));
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ApiEnvelope<AccessReviewCampaign>>(cancellationToken);
+    }
 
     public async Task<ApiEnvelope<CentralAuditEventDto>?> AppendAuditEventAsync(CentralAuditAppendRequest auditEvent, string accessToken, CancellationToken cancellationToken = default)
     {

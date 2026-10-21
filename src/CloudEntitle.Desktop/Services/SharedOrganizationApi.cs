@@ -18,11 +18,25 @@ public interface ISharedOrganizationApi
     Task DeleteCustomRoleAsync(Guid organizationId, Guid roleId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AccessReviewCampaign>> GetAccessReviewsAsync(Guid organizationId, CancellationToken cancellationToken = default);
     Task SaveAccessReviewAsync(Guid organizationId, AccessReviewCampaign campaign, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> GetEligibleAccessReviewersAsync(Guid organizationId, CancellationToken cancellationToken = default);
     Task<SharedScanSummaryDto> UploadScanSummaryAsync(Guid organizationId, UploadSharedScanSummaryRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SharedScanSummaryDto>> GetScanSummariesAsync(Guid organizationId, int limit = 30, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SharedCiemRecordDto>> GetScanRecordsAsync(Guid organizationId, Guid scanId, string? kind = null, string? accountId = null, int limit = 500, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SharedCiemRecordDto>> GetFindingsAsync(Guid organizationId, Guid? scanId = null, int limit = 500, CancellationToken cancellationToken = default);
 }
 
-public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi
+public interface ISharedScanScheduleApi
+{
+    Task<IReadOnlyList<ScanScheduleDto>> GetScanSchedulesAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<ScanScheduleDto> CreateScanScheduleAsync(Guid organizationId, CreateScanScheduleRequest request, CancellationToken cancellationToken = default);
+    Task<ScanScheduleDto> UpdateScanScheduleAsync(Guid organizationId, Guid scheduleId, UpdateScanScheduleRequest request, CancellationToken cancellationToken = default);
+    Task<ScanJobDto> QueueScanNowAsync(Guid organizationId, Guid scheduleId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ScanJobDto>> GetScanJobsAsync(Guid organizationId, int limit = 50, CancellationToken cancellationToken = default);
+    Task<ScanJobStatusDto> GetScanJobStatusAsync(Guid organizationId, Guid jobId, CancellationToken cancellationToken = default);
+    Task CancelScanJobAsync(Guid organizationId, Guid jobId, CancellationToken cancellationToken = default);
+}
+
+public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi
 {
     public async Task<IReadOnlyList<OrganizationProfile>> GetOrganizationsAsync(CancellationToken cancellationToken = default)
         => await RequireDataAsync(client.GetOrganizationsAsync(await TokenAsync(cancellationToken), cancellationToken));
@@ -57,11 +71,47 @@ public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenP
     public async Task SaveAccessReviewAsync(Guid organizationId, AccessReviewCampaign campaign, CancellationToken cancellationToken = default)
         => _ = await RequireDataAsync(client.SaveSharedAccessReviewAsync(organizationId, campaign, await TokenAsync(cancellationToken), cancellationToken));
 
+    public async Task<IReadOnlyList<string>> GetEligibleAccessReviewersAsync(Guid organizationId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetEligibleSharedAccessReviewersAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
+
     public async Task<SharedScanSummaryDto> UploadScanSummaryAsync(Guid organizationId, UploadSharedScanSummaryRequest request, CancellationToken cancellationToken = default)
         => await RequireDataAsync(client.UploadSharedScanSummaryAsync(organizationId, request, await TokenAsync(cancellationToken), cancellationToken));
 
     public async Task<IReadOnlyList<SharedScanSummaryDto>> GetScanSummariesAsync(Guid organizationId, int limit = 30, CancellationToken cancellationToken = default)
         => await RequireDataAsync(client.GetSharedScanSummariesAsync(organizationId, limit, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<IReadOnlyList<SharedCiemRecordDto>> GetScanRecordsAsync(Guid organizationId, Guid scanId, string? kind = null,
+        string? accountId = null, int limit = 500, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetSharedScanRecordsAsync(organizationId, scanId, await TokenAsync(cancellationToken), kind, accountId, limit, cancellationToken));
+
+    public async Task<IReadOnlyList<SharedCiemRecordDto>> GetFindingsAsync(Guid organizationId, Guid? scanId = null, int limit = 500,
+        CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetSharedFindingsAsync(organizationId, await TokenAsync(cancellationToken), scanId, limit, cancellationToken));
+
+    public async Task<IReadOnlyList<ScanScheduleDto>> GetScanSchedulesAsync(Guid organizationId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetScanSchedulesAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<ScanScheduleDto> CreateScanScheduleAsync(
+        Guid organizationId, CreateScanScheduleRequest request, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.CreateScanScheduleAsync(organizationId, request, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<ScanScheduleDto> UpdateScanScheduleAsync(
+        Guid organizationId, Guid scheduleId, UpdateScanScheduleRequest request, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.UpdateScanScheduleAsync(organizationId, scheduleId, request, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<ScanJobDto> QueueScanNowAsync(Guid organizationId, Guid scheduleId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.QueueScanNowAsync(organizationId, scheduleId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<IReadOnlyList<ScanJobDto>> GetScanJobsAsync(
+        Guid organizationId, int limit = 50, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetScanJobsAsync(organizationId, limit, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<ScanJobStatusDto> GetScanJobStatusAsync(
+        Guid organizationId, Guid jobId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetScanJobStatusAsync(organizationId, jobId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task CancelScanJobAsync(Guid organizationId, Guid jobId, CancellationToken cancellationToken = default)
+        => await client.CancelScanJobAsync(organizationId, jobId, await TokenAsync(cancellationToken), cancellationToken);
 
     private Task<string> TokenAsync(CancellationToken cancellationToken) => tokenProvider.GetApiAccessTokenAsync(cancellationToken);
 

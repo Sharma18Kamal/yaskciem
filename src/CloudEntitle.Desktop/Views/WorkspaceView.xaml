@@ -417,7 +417,7 @@
         <DataTemplate DataType="{x:Type vm:CloudAccountsViewModel}">
             <StackPanel>
                 <TextBlock Text="CONNECT A CLOUD PROVIDER" Style="{StaticResource CardLabel}"/>
-                <TextBlock Text="Sign-in opens in the provider's CLI. Connecting authenticates only; go to Dashboard and select Scan Now to fetch cloud data. Use organization-approved read-only identities; credentials stay with the CLI. Azure Entra/PIM enrichment needs tenant-approved Microsoft Graph read consent. AWS Disconnect applies to this app session and preserves CLI credentials. Other providers sign out of the shared CLI session and may affect other tools." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
+                <TextBlock Text="Use dedicated, organization-approved read-only identities and grant access only at intended account scopes. CLI authentication is not proof of scan permissions: run a read-only scan and check source coverage for denied, partial, unavailable, and unsupported data. YASK-CIEM does not receive or store cloud credentials. Prefer short-lived or federated credentials where your provider supports them." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
                     <Button Content="Refresh sign-in status" Command="{Binding RefreshConnectionsCommand}" Style="{StaticResource QuietButton}" ToolTip="Recheck authentication status in every configured provider CLI."/>
                     <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
@@ -430,11 +430,14 @@
                                 <StackPanel>
                                     <TextBlock Text="{Binding Name}" Foreground="{StaticResource PrimaryBrush}" FontSize="19" FontWeight="SemiBold"/>
                                     <TextBlock Text="{Binding CliName}" Foreground="{StaticResource AccentBrush}" FontSize="11" Margin="0,6,0,0"/>
-                                    <TextBlock Text="{Binding StateText}" Foreground="{StaticResource SuccessBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,6,0,0"/>
+                                    <TextBlock Text="{Binding StateText}" Foreground="{StaticResource AccentBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,6,0,0"/>
                                     <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" MinHeight="38" Margin="0,10,0,12"/>
+                                    <TextBlock Text="LEAST-PRIVILEGE SETUP" Style="{StaticResource CardLabel}" Margin="0,0,0,4"/>
+                                    <TextBlock Text="{Binding PermissionGuidance}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" MinHeight="62" Margin="0,0,0,10"/>
+                                    <TextBlock Text="{Binding AccessValidationText}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                     <StackPanel Orientation="Horizontal">
                                         <Button Content="Connect" Command="{Binding ConnectCommand}" IsEnabled="{Binding CanConnect}" Style="{StaticResource PrimaryButton}" ToolTip="Run the provider's interactive sign-in command"/>
-                                        <Button Content="Disconnect" Command="{Binding DisconnectCommand}" IsEnabled="{Binding IsConnected}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Sign out of this provider's shared CLI session"/>
+                                        <Button Content="Disconnect" Command="{Binding DisconnectCommand}" IsEnabled="{Binding IsConnected}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Stop using this provider in YASK-CIEM; provider CLI credentials may remain available to other tools."/>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
@@ -443,7 +446,12 @@
                 </ItemsControl>
                 <Border Style="{StaticResource SectionCard}" Padding="18" Margin="0,8,0,14">
                     <StackPanel>
-                        <TextBlock Text="DISCOVERED ACCOUNTS AND PERMISSION SETS" Style="{StaticResource CardLabel}" Margin="0,0,0,10"/>
+                        <TextBlock Text="ACCOUNT DISCOVERY" Style="{StaticResource CardLabel}" Margin="0,0,0,8"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button Content="Discover accessible accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" ToolTip="List account scopes visible to the selected CLI sessions. This does not validate all scan permissions."/>
+                            <TextBlock Text="{Binding DiscoveryStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <TextBlock Text="DISCOVERED ACCOUNTS AND PERMISSION SETS" Style="{StaticResource CardLabel}" Margin="0,4,0,10"/>
                         <DataGrid ItemsSource="{Binding DiscoveredAccounts}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="320" CanUserSortColumns="True">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="100"/>
@@ -454,7 +462,23 @@
                                 <DataGridTextColumn Header="Scan access" Binding="{Binding ScanAccess}" Width="*"/>
                             </DataGrid.Columns>
                         </DataGrid>
-                        <TextBlock Text="AWS Organizations members are listed separately from accounts scanned through configured CLI profiles. Configure one SSO profile per account and permission set to scan access." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="An account listed here is visible to the current CLI identity; it is not proof that every inventory source is readable. AWS Organizations members are listed separately from accounts scanned through configured profiles. Prefer IAM Identity Center SSO profiles and configure access for each target account/permission set." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCard}" Padding="18" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="LATEST PERMISSION AND SOURCE COVERAGE" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="{Binding LastCollectionText}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,8" TextWrapping="Wrap"/>
+                        <DataGrid ItemsSource="{Binding SourceCoverage}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="70" MaxHeight="280" CanUserSortColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="90"/>
+                                <DataGridTextColumn Header="Source / scope" Binding="{Binding DataSource}" Width="190"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
+                                <DataGridTextColumn Header="Records" Binding="{Binding Records}" Width="75"/>
+                                <DataGridTextColumn Header="Details / remediation hint" Binding="{Binding Details}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="Collected and NoData are successful query outcomes. Denied, Partial, Unavailable, Unsupported, and Skipped are distinct coverage states; none of the latter should be interpreted as safe or complete." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
                 <TextBlock Text="{Binding ConnectionGuidance}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
@@ -751,7 +775,7 @@
                         <Border Style="{StaticResource SectionCard}" Margin="0,0,0,12">
                             <StackPanel>
                                 <TextBlock Text="SHARED SCAN HISTORY" Style="{StaticResource CardLabel}"/>
-                                <Button Content="Publish latest scan summary" Command="{Binding PublishSharedScanSummaryCommand}" IsEnabled="{Binding CanPublishSharedScanSummary}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Share aggregate counts and coverage for this organization's bound accounts. Resource-level findings are not uploaded here."/>
+                                <Button Content="Publish latest scan data" Command="{Binding PublishSharedScanSummaryCommand}" IsEnabled="{Binding CanPublishSharedScanSummary}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Share normalized inventory, access paths, findings, counts, and source coverage for this organization's bound accounts."/>
                                 <TextBlock Text="{Binding SharedScanSummaryStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                                 <DataGrid ItemsSource="{Binding SharedScanSummaries}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="55" MaxHeight="140" Margin="0,8,0,0">
                                     <DataGrid.Columns>
@@ -764,6 +788,57 @@
                                         <DataGridTextColumn Header="Critical" Binding="{Binding CriticalFindings}" Width="75"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                                <TextBlock Text="LATEST SHARED FINDINGS" Style="{StaticResource CardLabel}" Margin="0,12,0,0"/>
+                                <DataGrid ItemsSource="{Binding SharedFindings}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="55" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80"/>
+                                        <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="110"/>
+                                        <DataGridTextColumn Header="Account" Binding="{Binding ExternalAccountId}" Width="120"/>
+                                        <DataGridTextColumn Header="Record ID" Binding="{Binding RecordId}" Width="210"/>
+                                        <DataGridTextColumn Header="Evidence JSON" Binding="{Binding PayloadJson}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="SCHEDULED FULL SCANS" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="Schedules run on the License Server worker using its configured read-only cloud CLI credentials. They are per bound account; retries are bounded, and incremental collection is not enabled." Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <ComboBox Grid.Column="0" ItemsSource="{Binding Bindings}" SelectedItem="{Binding SelectedScanBinding, Mode=TwoWay}" DisplayMemberPath="DisplayName" ToolTip="Choose a bound cloud account"/>
+                                    <TextBox Grid.Column="1" Text="{Binding ScanIntervalMinutes, UpdateSourceTrigger=PropertyChanged}" Width="72" Margin="8,0,0,0" ToolTip="Schedule interval in minutes (minimum 5)"/>
+                                    <Button Grid.Column="2" Content="Create schedule" Command="{Binding CreateScanScheduleCommand}" IsEnabled="{Binding CanCreateScanSchedule}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Create a full-scan schedule for the selected bound cloud account"/>
+                                    <Button Grid.Column="3" Content="Refresh" Command="{Binding RefreshScanOperationsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Refresh server-side scan schedules and job outcomes"/>
+                                </Grid>
+                                <TextBlock Text="{Binding ScanOperationsStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <DataGrid ItemsSource="{Binding ScanSchedules}" SelectedItem="{Binding SelectedScanSchedule, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="60" MaxHeight="150" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80"/>
+                                        <DataGridTextColumn Header="Account" Binding="{Binding DisplayName}" Width="*"/>
+                                        <DataGridTextColumn Header="Interval (min)" Binding="{Binding IntervalMinutes}" Width="90"/>
+                                        <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70"/>
+                                        <DataGridTextColumn Header="Next run" Binding="{Binding NextRunAtUtc, StringFormat=g}" Width="140"/>
+                                        <DataGridTextColumn Header="Last successful" Binding="{Binding LastSuccessfulScanAtUtc, StringFormat=g}" Width="140"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Content="Run selected now" Command="{Binding RunScanNowCommand}" IsEnabled="{Binding CanRunScheduledScan}" Style="{StaticResource QuietButton}" ToolTip="Queue an immediate full scan for the selected account"/>
+                                    <Button Content="Pause / resume" Command="{Binding ToggleScanScheduleCommand}" IsEnabled="{Binding CanToggleScanSchedule}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Pause or resume the selected account scan schedule"/>
+                                </StackPanel>
+                                <TextBlock Text="RECENT ACCOUNT SCAN JOBS" Style="{StaticResource CardLabel}" Margin="0,12,0,0"/>
+                                <DataGrid ItemsSource="{Binding ScanJobs}" SelectedItem="{Binding SelectedScanJob, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="60" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80"/>
+                                        <DataGridTextColumn Header="Account" Binding="{Binding DisplayName}" Width="*"/>
+                                        <DataGridTextColumn Header="State" Binding="{Binding Status}" Width="85"/>
+                                        <DataGridTextColumn Header="Attempts" Binding="{Binding AttemptCount}" Width="70"/>
+                                        <DataGridTextColumn Header="Queued" Binding="{Binding QueuedAtUtc, StringFormat=g}" Width="140"/>
+                                        <DataGridTextColumn Header="Duration (ms)" Binding="{Binding DurationMilliseconds}" Width="90"/>
+                                        <DataGridTextColumn Header="Last outcome" Binding="{Binding LastError}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <Button Content="Cancel selected job" Command="{Binding CancelScanJobCommand}" IsEnabled="{Binding CanCancelScanJob}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Request cancellation of the selected queued or running scan job"/>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource SectionCard}">
@@ -874,8 +949,8 @@
                             <ComboBox Grid.Column="0" ItemsSource="{Binding Templates}" DisplayMemberPath="Name" SelectedItem="{Binding SelectedTemplate, Mode=TwoWay}" ToolTip="Campaign template" Margin="0,0,8,0"/>
                             <TextBox Grid.Column="1" Text="{Binding CampaignName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Campaign name" Margin="4,0"/>
                             <TextBox Grid.Column="2" Text="{Binding CampaignDurationDays, UpdateSourceTrigger=PropertyChanged}" ToolTip="Campaign duration in days" Margin="4,0"/>
-                            <ComboBox Grid.Column="3" ItemsSource="{Binding EligibleReviewers}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding AssignedReviewerName, Mode=TwoWay}" ToolTip="Fallback reviewer; only active cloud users with Global Administrator, Security Administrator, or System Analyst access are listed" Margin="4,0"/>
-                            <TextBox Grid.Column="4" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" ToolTip="Your audit actor name" Margin="8,0,0,0"/>
+                            <ComboBox Grid.Column="3" ItemsSource="{Binding EligibleReviewers}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding AssignedReviewerName, Mode=TwoWay}" ToolTip="Shared mode lists active organization review members; local mode lists eligible privileged cloud users." Margin="4,0"/>
+                            <TextBox Grid.Column="4" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding IsSharedStore}" ToolTip="Shared mode records the authenticated organization identity; local mode records this actor label." Margin="8,0,0,0"/>
                         </Grid>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                             <Button Content="Create from Current Scan" Command="{Binding CreateCampaignCommand}" IsEnabled="{Binding CanCreateCampaign}" Style="{StaticResource PrimaryButton}" ToolTip="Create review items from the latest scan using the selected template and reviewer settings."/>
@@ -929,9 +1004,9 @@
                                 </ItemsControl>
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <ComboBox Grid.Column="0" ItemsSource="{Binding EligibleReviewers}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding AssignedReviewerName, Mode=TwoWay}" ToolTip="Assigned reviewer; only active cloud users with Global Administrator, Security Administrator, or System Analyst access are listed" Margin="0,0,6,0"/>
+                                    <ComboBox Grid.Column="0" ItemsSource="{Binding EligibleReviewers}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding AssignedReviewerName, Mode=TwoWay}" ToolTip="Shared mode lists active organization members authorized for reviews; local mode lists eligible privileged cloud users." Margin="0,0,6,0"/>
                                     <DatePicker Grid.Column="1" SelectedDate="{Binding ItemDueAt, Mode=TwoWay}" ToolTip="Review deadline" Margin="3,0"/>
-                                    <TextBox Grid.Column="2" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" ToolTip="Actor recording this action" Margin="3,0"/>
+                                    <TextBox Grid.Column="2" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding IsSharedStore}" ToolTip="Shared mode records the authenticated organization identity; local mode records this actor label." Margin="3,0"/>
                                     <ComboBox Grid.Column="3" ItemsSource="{Binding Decisions}" SelectedItem="{Binding SelectedDecision, Mode=TwoWay}" Margin="6,0,0,0" ToolTip="Choose the review decision for the selected access item."/>
                                 </Grid>
                                 <TextBox Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Decision rationale; required for exception, rejection, or investigation" Margin="0,8,0,0"/>
@@ -942,7 +1017,7 @@
                                 </StackPanel>
                                 <TextBlock Text="AUDIT HISTORY" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                                 <ItemsControl ItemsSource="{Binding SelectedAuditTrail}">
-                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, Mode=OneWay, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Action, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Details, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, Mode=OneWay, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Action, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Details, Mode=OneWay}"/><Run Text=" | correlation: "/><Run Text="{Binding CorrelationIdText, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </StackPanel>
                         </Border>

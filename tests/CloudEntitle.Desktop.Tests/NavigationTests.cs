@@ -222,6 +222,38 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task CloudAccountsViewModel_ShouldDiscoverAccountsAndExposeLastPermissionCoverage()
+    {
+        var account = new LiveScanAccountRecord("Azure", "Production", "subscription-123", "", "Reader", "Scanned");
+        var completedAt = DateTime.UtcNow;
+        var scan = new LiveCloudScanResult(1, 0, 0, 0, 0, 0, Array.Empty<RiskFinding>(), completedAt,
+            Array.Empty<string>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(),
+            Array.Empty<DiscoveredCloudRole>(), Array.Empty<DiscoveredCloudPermission>(), completedAt.AddMinutes(-1),
+            Array.Empty<LiveEffectiveAccessRecord>(), new[] { account })
+        {
+            Coverage = new[]
+            {
+                new ScanCoverageRecord("Azure", "Identities", ScanCoverageStatus.Denied, 0, "Microsoft Graph consent missing."),
+                new ScanCoverageRecord("Azure", "Resources", ScanCoverageStatus.Collected, 12, "Read succeeded.")
+            }
+        };
+        var liveScan = new OnboardingLiveScanService(scan, new[] { account });
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), new RecordingCloudAuthenticationLauncher(), liveCloudScanService: liveScan);
+
+        Assert.Equal(2, viewModel.SourceCoverage.Count);
+        Assert.Contains(completedAt.ToLocalTime().ToString("g"), viewModel.LastCollectionText);
+        await viewModel.DiscoverAccountsAsync();
+        liveScan.CompleteScan();
+
+        Assert.Equal(account.AccountId, Assert.Single(viewModel.DiscoveredAccounts).AccountId);
+        Assert.Contains("does not validate every scan permission", viewModel.DiscoveryStatus);
+        Assert.Equal(2, viewModel.SourceCoverage.Count);
+        Assert.Contains("1 denied", viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure).AccessValidationText);
+        Assert.Contains("0 unsupported", viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure).AccessValidationText);
+        Assert.Contains(completedAt.ToLocalTime().ToString("g"), viewModel.LastCollectionText);
+    }
+
+    [Fact]
     public async Task CloudAccountsViewModel_ShouldNotConnectCachedAzureCredentialsWhenGcpIsSelected()
     {
         var launcher = new RecordingCloudAuthenticationLauncher();
@@ -1071,6 +1103,32 @@ public sealed class NavigationTests
             CurrentResult = result;
             ScanCompleted?.Invoke(this, EventArgs.Empty);
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class OnboardingLiveScanService : ILiveCloudScanService
+    {
+        private readonly LiveCloudScanResult _result;
+        private readonly IReadOnlyList<LiveScanAccountRecord> _discoveredAccounts;
+
+        public OnboardingLiveScanService(LiveCloudScanResult result, IReadOnlyList<LiveScanAccountRecord> discoveredAccounts)
+        {
+            _result = result;
+            _discoveredAccounts = discoveredAccounts;
+            CurrentResult = result;
+        }
+
+        public LiveCloudScanResult? CurrentResult { get; private set; }
+        public event EventHandler? ScanCompleted;
+        public Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(_discoveredAccounts);
+        public Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default) => Task.FromResult(_result);
+        public Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default)
+            => Task.FromResult(_result);
+        public void CompleteScan()
+        {
+            CurrentResult = _result;
+            ScanCompleted?.Invoke(this, EventArgs.Empty);
         }
     }
 

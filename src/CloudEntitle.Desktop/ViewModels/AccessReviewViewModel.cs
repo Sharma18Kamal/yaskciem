@@ -37,6 +37,7 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
 
     private readonly IDemoDataService _demoData;
     private readonly IAccessReviewStore _store;
+    private readonly bool _isSharedStore;
     private readonly ILiveCloudScanService? _liveScan;
     private readonly IdentityGovernanceService _governance;
     private IReadOnlyList<AccessReviewCampaign> _campaigns = Array.Empty<AccessReviewCampaign>();
@@ -60,6 +61,12 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     {
         _demoData = demoData;
         _store = store;
+        _isSharedStore = store is SharedAccessReviewStore;
+        if (store is SharedAccessReviewStore sharedStore)
+        {
+            var authenticatedActor = sharedStore.AuthenticatedActorEmail;
+            if (!string.IsNullOrWhiteSpace(authenticatedActor)) _actionActor = authenticatedActor;
+        }
         _liveScan = liveScan;
         _governance = new IdentityGovernanceService();
         CreateCampaignCommand = new AsyncRelayCommand(CreateCampaignAsync);
@@ -85,9 +92,14 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     public IReadOnlyList<ReviewDecision> Decisions => AvailableDecisions;
     public IReadOnlyList<AccessReviewTemplate> Templates => BuiltInTemplates;
     public IReadOnlyList<ReviewerOption> EligibleReviewers => _eligibleReviewers;
+    public bool IsSharedStore => _isSharedStore;
     public string ReviewerEligibilityMessage => _eligibleReviewers.Count == 0
-        ? "No eligible reviewers. Reviewers must be active Azure, AWS, or GCP users with Global Administrator, Security Administrator, or System Analyst access. Run a scan first."
-        : $"{_eligibleReviewers.Count} eligible reviewer(s): active cloud users with Global Administrator, Security Administrator, or System Analyst access.";
+        ? _isSharedStore
+            ? "No eligible organization reviewers. Add an active Organization Admin or Security Analyst, or grant an approved custom review role."
+            : "No eligible reviewers. Reviewers must be active Azure, AWS, or GCP users with an approved privileged role. Run a scan first."
+        : _isSharedStore
+            ? $"{_eligibleReviewers.Count} active organization reviewer(s) authorized to manage access reviews."
+            : $"{_eligibleReviewers.Count} eligible reviewer(s): active cloud users with qualifying privileged access.";
     public bool HasCampaigns => FilteredCampaigns.Count > 0;
     public bool HasReviewItems => ReviewItems.Count > 0;
     public IReadOnlyList<AccessReviewAttestation> SelectedAttestations => SelectedItem?.Attestations ?? Array.Empty<AccessReviewAttestation>();
@@ -136,7 +148,16 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
             CampaignDurationDays = value.DurationDays.ToString();
         }
     }
-    public string AssignedReviewerName { get => _assignedReviewerName; set { if (SetProperty(ref _assignedReviewerName, value)) OnPropertyChanged(nameof(CanAssignReviewer)); } }
+    public string AssignedReviewerName
+    {
+        get => _assignedReviewerName;
+        set
+        {
+            if (!SetProperty(ref _assignedReviewerName, value)) return;
+            OnPropertyChanged(nameof(CanAssignReviewer));
+            OnPropertyChanged(nameof(CanRecordDecision));
+        }
+    }
     public string ReviewerName { get => _reviewerName; set { if (SetProperty(ref _reviewerName, value)) { OnPropertyChanged(nameof(CanAssignReviewer)); OnPropertyChanged(nameof(CanRecordDecision)); } } }
     public string ActionActor { get => _actionActor; set { if (SetProperty(ref _actionActor, value)) { OnPropertyChanged(nameof(CanAssignReviewer)); OnPropertyChanged(nameof(CanRecordDecision)); } } }
     public string ReviewComment { get => _reviewComment; set { if (SetProperty(ref _reviewComment, value)) { OnPropertyChanged(nameof(CanRecordDecision)); } } }
@@ -146,10 +167,13 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     public ReviewDecision SelectedDecision { get => _selectedDecision; set { if (SetProperty(ref _selectedDecision, value)) OnPropertyChanged(nameof(CanRecordDecision)); } }
     public bool CanCreateCampaign => !IsLoading && SelectedTemplate is not null && !string.IsNullOrWhiteSpace(CampaignName) && int.TryParse(CampaignDurationDays, out var days) && days is > 0 and <= 365;
     public bool CanAssignReviewer => SelectedCampaign is not null && SelectedItem is not null && IsEligibleReviewer(AssignedReviewerName) && !string.IsNullOrWhiteSpace(ActionActor) && ItemDueAt?.Date >= DateTime.Today;
-    public bool CanRecordDecision => SelectedCampaign is not null && SelectedItem is not null && !string.IsNullOrWhiteSpace(ReviewerName) && !string.IsNullOrWhiteSpace(ActionActor)
+    public bool CanRecordDecision => SelectedCampaign is not null && SelectedItem is not null && !string.IsNullOrWhiteSpace(ActionActor)
+        && !string.IsNullOrWhiteSpace(string.IsNullOrWhiteSpace(ReviewerName) ? AssignedReviewerName : ReviewerName)
         && (SelectedDecision != ReviewDecision.ExceptionGranted || ExceptionExpiresAt?.Date >= DateTime.Today)
         && (SelectedDecision == ReviewDecision.Certified || !string.IsNullOrWhiteSpace(ReviewComment));
-    public string CoverageMessage => "Review decisions and exceptions are local governance records only. They never grant, revoke, or alter cloud access.";
+    public string CoverageMessage => _isSharedStore
+        ? "Review campaigns, assignments, decisions, evidence snapshots, and audit events are shared with the selected organization. They never grant, revoke, or alter cloud access."
+        : "Review decisions and exceptions are local governance records only. They never grant, revoke, or alter cloud access.";
     public AsyncRelayCommand CreateCampaignCommand { get; }
     public AsyncRelayCommand AssignReviewerCommand { get; }
     public AsyncRelayCommand RecordDecisionCommand { get; }
@@ -161,7 +185,10 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
         ErrorMessage = null;
         try
         {
-            _eligibleReviewers = await BuildEligibleReviewersAsync();
+            var sharedReviewers = await _store.GetEligibleReviewerEmailsAsync();
+            _eligibleReviewers = sharedReviewers is null
+                ? await BuildEligibleReviewersAsync()
+                : sharedReviewers.Select(email => new ReviewerOption(email, $"{email} (organization reviewer)")).ToArray();
             OnPropertyChanged(nameof(EligibleReviewers));
             OnPropertyChanged(nameof(ReviewerEligibilityMessage));
             OnPropertyChanged(nameof(CanAssignReviewer));
@@ -262,7 +289,8 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
         if (!CanRecordDecision || SelectedCampaign is null || SelectedItem is null) return;
         try
         {
-            var campaign = _governance.RecordDecision(SelectedCampaign, SelectedItem.Id, SelectedDecision, ReviewerName, ReviewComment,
+            var reviewer = string.IsNullOrWhiteSpace(ReviewerName) ? AssignedReviewerName : ReviewerName;
+            var campaign = _governance.RecordDecision(SelectedCampaign, SelectedItem.Id, SelectedDecision, reviewer, ReviewComment,
                 SelectedDecision == ReviewDecision.ExceptionGranted && ExceptionExpiresAt.HasValue ? EndOfSelectedDayUtc(ExceptionExpiresAt.Value) : null,
                 actor: ActionActor);
             await _store.SaveAsync(campaign);

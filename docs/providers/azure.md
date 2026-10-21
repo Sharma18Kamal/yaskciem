@@ -10,6 +10,10 @@ The connector uses the authenticated Azure CLI session (`az account show`) for A
 
 Use the least-privileged read-only access needed for the selected scope. ARM discovery requires permission to read subscriptions, resources, role definitions, and role assignments. Azure Activity Log timestamps require `Microsoft.Insights/eventtypes/values/read` at subscription scope. Entra discovery uses Microsoft Graph delegated read permissions `User.ReadBasic.All`, `Group.Read.All`, and `Application.Read.All`. PIM active and eligible assignments use `RoleAssignmentSchedule.Read.Directory` and `RoleEligibilitySchedule.Read.Directory`. Microsoft Graph documents supported read roles including Global Reader, Security Reader, Security Operator, Security Administrator, and Privileged Role Administrator. A tenant administrator may need to grant consent to these delegated permissions for the Azure CLI application used by `az rest`. Do not grant Owner, Contributor, or User Access Administrator for scanning.
 
+## Onboarding and Coverage Validation
+
+Sign in with `az login` using a dedicated operator identity. Grant ARM Reader only on subscriptions intended for analysis; tenant-wide Entra and optional PIM data require separate, tenant-approved Graph read consent. Discover accessible accounts in YASK-CIEM to confirm visible subscription scopes, then run a read-only scan and review each source's coverage. Successful sign-in or subscription discovery does not prove that Graph, PIM, or Activity Log sources are readable. Revoke access by removing the scoped role assignments and any unneeded Graph consent through your Azure governance process.
+
 ## Discovery
 
 The adapter normalizes:

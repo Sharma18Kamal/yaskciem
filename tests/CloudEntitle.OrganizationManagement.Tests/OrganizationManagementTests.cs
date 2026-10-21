@@ -52,6 +52,10 @@ public sealed class OrganizationManagementTests
         Assert.False(service.Authorize(organization.Id, analyst, OrganizationAction.ManageMembers).Allowed);
         Assert.True(service.Authorize(organization.Id, analyst, OrganizationAction.ManageRemediations).Allowed);
         Assert.False(service.Authorize(organization.Id, viewer, OrganizationAction.ManageRemediations).Allowed);
+        var reviewManagers = service.GetMembersAuthorizedForAction(
+            organization.Id, owner, OrganizationAction.ViewFindings, OrganizationAction.ManageRemediations);
+        Assert.Contains(reviewManagers, member => member.Email == analyst.Email);
+        Assert.DoesNotContain(reviewManagers, member => member.Email == viewer.Email);
     }
 
     [Fact]

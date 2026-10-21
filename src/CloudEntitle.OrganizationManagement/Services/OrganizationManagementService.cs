@@ -117,12 +117,25 @@ public sealed class OrganizationManagementService
                 && item.UserId == identity.UserId);
         if (member == null) return new(false, "User is not an active organization member.");
         if (organization.Status != OrganizationStatus.Active) return new(false, $"Organization is {organization.Status}.");
-        var allowed = member.CustomRoleId is Guid customRoleId
-            ? _customRoles.TryGetValue(customRoleId, out var customRole)
-                && customRole.OrganizationId == organizationId
-                && customRole.Permissions.Contains(action)
-            : BuiltInRoleAllows(member.Role, action);
+        var allowed = MemberAllows(member, organizationId, action);
         return new(allowed, allowed ? "Organization role permits this action." : "Organization role does not permit this action.");
+    }
+
+    public IReadOnlyList<OrganizationMember> GetMembersAuthorizedForAction(Guid organizationId, OrganizationIdentity identity, OrganizationAction action)
+        => GetMembersAuthorizedForAction(organizationId, identity, action, action);
+
+    public IReadOnlyList<OrganizationMember> GetMembersAuthorizedForAction(
+        Guid organizationId,
+        OrganizationIdentity identity,
+        OrganizationAction callerAction,
+        OrganizationAction memberAction)
+    {
+        EnsureAuthorized(organizationId, identity, callerAction);
+        return _members.Values
+            .Where(member => member.OrganizationId == organizationId && member.IsActive && !member.IsPending)
+            .Where(member => MemberAllows(member, organizationId, memberAction))
+            .OrderBy(member => member.Email, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     public IReadOnlyList<OrganizationProfile> GetOrganizations() => _organizations.Values.OrderBy(item => item.Name).ToArray();
@@ -297,6 +310,13 @@ public sealed class OrganizationManagementService
         OrganizationAction.ManageRemediations => role is OrganizationMemberRole.OrganizationAdmin or OrganizationMemberRole.SecurityAnalyst,
         _ => false
     };
+
+    private bool MemberAllows(OrganizationMember member, Guid organizationId, OrganizationAction action)
+        => member.CustomRoleId is Guid customRoleId
+            ? _customRoles.TryGetValue(customRoleId, out var customRole)
+                && customRole.OrganizationId == organizationId
+                && customRole.Permissions.Contains(action)
+            : BuiltInRoleAllows(member.Role, action);
 
     private OrganizationRoleOption ResolveRole(Guid organizationId, OrganizationRoleOption role)
     {

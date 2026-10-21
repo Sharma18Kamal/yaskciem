@@ -10,6 +10,10 @@ The connector supports the authenticated `gcloud` path and includes a `GcpCreden
 
 At project scope, use read-only permissions for project metadata and IAM policy inspection. Ancestor discovery requires Resource Manager permissions at the relevant project, folder, and organization scopes. Cloud Asset Inventory resource discovery requires the API to be enabled and `cloudasset.assets.searchAllResources` on each project scope. Inherited IAM discovery also requires `cloudasset.assets.searchAllIamPolicies` on each ancestor folder and organization. Project IAM change timestamps require `logging.logEntries.list` for Cloud Audit Logs. Service-account discovery requires service-account read permissions. Role permission details and audit activity require additional read-only permissions and are optional.
 
+## Onboarding and Coverage Validation
+
+Authenticate with `gcloud auth login` using a dedicated read-only identity, and grant access only at the projects and ancestor scopes intended for analysis. Discover accessible projects in YASK-CIEM to confirm visible account scopes, then run a read-only scan and review source coverage. Project discovery or successful IAM inspection does not prove that Cloud Asset Inventory, inherited ancestor policies, or Cloud Audit Logs are available. Revoke onboarding access through your Google Cloud IAM process by removing the scoped role bindings or disabling the dedicated identity.
+
 ## Discovery and Normalization
 
 - Projects map to `CloudAccount` with `ProjectId` preserved as the provider identifier and `AccountType.Project`.

@@ -20,8 +20,8 @@ public sealed class SharedScanSummaryPublisherTests
         var scan = new LiveCloudScanResult(2, 2, 3, 1, 2, 1,
             new[]
             {
-                new RiskFinding { CloudProvider = CloudProviderType.Aws, CloudAccountId = boundAccountId, Severity = RiskSeverity.Critical },
-                new RiskFinding { CloudProvider = CloudProviderType.Azure, CloudAccountId = unrelatedAccountId, Severity = RiskSeverity.High }
+                new RiskFinding { Id = Guid.NewGuid(), CloudProvider = CloudProviderType.Aws, CloudAccountId = boundAccountId, Severity = RiskSeverity.Critical },
+                new RiskFinding { Id = Guid.NewGuid(), CloudProvider = CloudProviderType.Azure, CloudAccountId = unrelatedAccountId, Severity = RiskSeverity.High }
             },
             DateTime.UtcNow, Array.Empty<string>(),
             new[]
@@ -75,6 +75,11 @@ public sealed class SharedScanSummaryPublisherTests
         Assert.Equal(1, saved.Findings);
         Assert.Equal(1, saved.CriticalFindings);
         Assert.Equal(1, sharedApi.UploadCount);
+        Assert.NotNull(sharedApi.UploadRequest);
+        Assert.Contains(sharedApi.UploadRequest.Records, record => record.Kind == "identity" && record.ExternalAccountId == "123456789012");
+        Assert.Contains(sharedApi.UploadRequest.Records, record => record.Kind == "finding" && record.Provider == CloudProvider.Aws);
+        Assert.Contains(sharedApi.UploadRequest.Records, record => record.Kind == "effective-access" && record.Provider == CloudProvider.Aws);
+        Assert.DoesNotContain(sharedApi.UploadRequest.Records, record => record.ExternalAccountId == "unbound-subscription");
     }
 
     private sealed class FakeLiveScanService : ILiveCloudScanService
@@ -93,6 +98,7 @@ public sealed class SharedScanSummaryPublisherTests
     private sealed class FakeSharedOrganizationApi(Guid organizationId, Guid accountId) : ISharedOrganizationApi
     {
         public int UploadCount { get; private set; }
+        public UploadSharedScanSummaryRequest? UploadRequest { get; private set; }
         public Task<IReadOnlyList<OrganizationProfile>> GetOrganizationsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<OrganizationWorkspaceDto> GetWorkspaceAsync(Guid id, CancellationToken cancellationToken = default)
             => Task.FromResult(new OrganizationWorkspaceDto(new OrganizationProfile(organizationId, "Shared", "shared", OrganizationStatus.Active, DateTime.UtcNow),
@@ -109,13 +115,17 @@ public sealed class SharedScanSummaryPublisherTests
         public Task DeleteCustomRoleAsync(Guid id, Guid roleId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AccessReviewCampaign>> GetAccessReviewsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task SaveAccessReviewAsync(Guid id, AccessReviewCampaign campaign, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<string>> GetEligibleAccessReviewersAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<SharedScanSummaryDto> UploadScanSummaryAsync(Guid id, UploadSharedScanSummaryRequest request, CancellationToken cancellationToken = default)
         {
             UploadCount++;
+            UploadRequest = request;
             return Task.FromResult(new SharedScanSummaryDto(request.ScanId, id, Guid.NewGuid(), Guid.NewGuid(), request.StartedAtUtc, request.CompletedAtUtc,
                 request.Provider, request.Accounts, request.Identities, request.Resources, request.Roles, request.Permissions, request.EffectiveAccess,
                 request.Findings, request.CriticalFindings, request.HighFindings, request.Coverage));
         }
         public Task<IReadOnlyList<SharedScanSummaryDto>> GetScanSummariesAsync(Guid id, int limit = 30, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<SharedCiemRecordDto>> GetScanRecordsAsync(Guid id, Guid scanId, string? kind = null, string? accountId = null, int limit = 500, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<SharedCiemRecordDto>> GetFindingsAsync(Guid id, Guid? scanId = null, int limit = 500, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 }

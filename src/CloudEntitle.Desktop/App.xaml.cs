@@ -101,6 +101,7 @@ public partial class App : System.Windows.Application
 				services.AddSingleton(new CiemApiClient(new HttpClient { BaseAddress = centralApiUri }));
 				services.AddSingleton<ICentralAuditSyncService, CentralAuditSyncService>();
 				services.AddSingleton<ISharedOrganizationApi, SharedOrganizationApi>();
+				services.AddSingleton<ISharedScanScheduleApi>(provider => (ISharedScanScheduleApi)provider.GetRequiredService<ISharedOrganizationApi>());
 				services.AddSingleton<ISharedScanSummaryPublisher, SharedScanSummaryPublisher>();
 				services.AddSingleton<IAccessReviewStore, SharedAccessReviewStore>();
 				sharedWorkspaceConfigured = true;
@@ -166,4 +167,3 @@ public partial class App : System.Windows.Application
 	private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e) => Log.Fatal(e.ExceptionObject as Exception, "Unhandled application exception");
 	private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e) { Log.Error(e.Exception, "Unobserved task exception"); e.SetObserved(); }
 }
-

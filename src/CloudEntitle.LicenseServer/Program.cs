@@ -1,6 +1,8 @@
 using CloudEntitle.Domain;
+using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Integration.Contracts;
 using CloudEntitle.LicenseServer.Services;
+using CloudEntitle.Infrastructure;
 using CloudEntitle.Security.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Identity.Web;
@@ -73,6 +75,9 @@ else
 builder.Services.AddSingleton<IAuditRetentionStore>(_ => auditStore);
 var sharedWorkspaceStore = new SharedWorkspaceStore(postgresDataSource);
 builder.Services.AddSingleton<SharedWorkspaceStore>(_ => sharedWorkspaceStore);
+builder.Services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
+builder.Services.AddSingleton<IScanJobExecutor, CloudProviderScanJobExecutor>();
+builder.Services.AddHostedService<ScanOrchestrationWorker>();
 
 var auditArchiveConfiguration = builder.Configuration.GetSection("AuditArchive");
 var archiveCredentialError = string.Empty;

@@ -949,6 +949,10 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
     private CloudProviderType? _pendingProvider;
     private CancellationTokenSource? _pendingConnectCancellation;
     private TaskCompletionSource? _pendingConnectCompletion;
+    private IReadOnlyList<LiveScanAccountRecord> _discoveredAccounts = Array.Empty<LiveScanAccountRecord>();
+    private IReadOnlyList<ProviderSourceCoverageRow> _sourceCoverage = Array.Empty<ProviderSourceCoverageRow>();
+    private string _discoveryStatus = "Discover accessible accounts after connecting a provider.";
+    private DateTime? _lastCollectionAtUtc;
 
     public CloudAccountsViewModel(IDemoDataService demoData, ICloudAuthenticationLauncher? authenticationLauncher = null, IDialogService? dialogService = null, CloudConnectionState? cloudConnectionState = null, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
     {
@@ -962,29 +966,101 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         };
         Providers =
         [
-            new(CloudProviderType.Azure, "Azure", "Azure CLI", "az login", "Sign in with az. Entra/PIM needs tenant-approved Microsoft Graph read permissions.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Azure)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Azure))),
-            new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure --profile yask-ciem", "Configure the yask-ciem IAM-user profile in the AWS CLI terminal.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
-            new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login", "Sign in to your Google Cloud account in your browser.", new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
+            new(CloudProviderType.Azure, "Azure", "Azure CLI", "az login",
+                "Use a dedicated read-only identity. Subscription Reader supports inventory/RBAC discovery; Entra and PIM data need additional Graph read consent.",
+                "ARM: Reader on selected subscriptions. Entra: User.ReadBasic.All, Group.Read.All, Application.Read.All. Optional PIM: RoleAssignmentSchedule.Read.Directory and RoleEligibilitySchedule.Read.Directory. Do not grant Owner, Contributor, or User Access Administrator.",
+                new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Azure)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Azure))),
+            new(CloudProviderType.Aws, "AWS", "AWS CLI", "aws configure --profile yask-ciem",
+                "Prefer AWS IAM Identity Center with a dedicated read-only permission set such as SecurityAudit. Configure an SSO profile externally; IAM-user profile configuration is also available.",
+                "Use a read-only SecurityAudit policy or an organization-approved least-privilege equivalent. Each target account and permission set needs a working profile; Organizations roster visibility alone does not grant member-account scan access.",
+                new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Aws)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Aws))),
+            new(CloudProviderType.Gcp, "Google Cloud", "Google Cloud CLI", "gcloud auth login",
+                "Use a dedicated read-only Google identity and grant access only at the project, folder, or organization scopes that should be scanned.",
+                "Project Viewer plus the required IAM, service-account, and Cloud Asset Inventory read permissions. Ancestor discovery and inherited IAM require read access at those folder/organization scopes; audit timestamps are optional.",
+                new AsyncRelayCommand(() => ConnectAsync(CloudProviderType.Gcp)), new AsyncRelayCommand(() => DisconnectProviderAsync(CloudProviderType.Gcp)))
         ];
         RefreshConnectionsCommand = new AsyncRelayCommand(() => RefreshConnectionsAsync());
+        DiscoverAccountsCommand = new AsyncRelayCommand(() => DiscoverAccountsAsync());
         foreach (var option in Providers.Where(option => !_cloudConnectionState.ConnectedProviders.Contains(option.Provider)))
         {
             _cloudConnectionState.DisconnectProvider(option.Provider);
         }
         if (_liveCloudScanService is not null)
         {
-            _liveCloudScanService.ScanCompleted += (_, _) => OnPropertyChanged(nameof(DiscoveredAccounts));
+            _liveCloudScanService.ScanCompleted += (_, _) => UpdateScanCoverage();
+            UpdateScanCoverage();
         }
         _ = RefreshConnectionsAsync();
     }
 
     public override string Title => "Cloud Accounts";
-    public override string Subtitle => "Connect Azure, AWS, or Google Cloud with your existing CLI identity.";
+    public override string Subtitle => "Onboard read-only provider identities, discover accessible scopes, and validate source permissions.";
     public IReadOnlyList<CloudProviderConnectionOption> Providers { get; }
     public string ConnectionGuidance { get; private set; } = "Choose a provider to start its official sign-in flow in a separate terminal.";
     public string CloudConnectionStatus => _cloudConnectionState.Status;
-    public IReadOnlyList<LiveScanAccountRecord> DiscoveredAccounts => _liveCloudScanService?.CurrentResult?.AccountRecords ?? Array.Empty<LiveScanAccountRecord>();
+    public IReadOnlyList<LiveScanAccountRecord> DiscoveredAccounts => _discoveredAccounts;
+    public IReadOnlyList<ProviderSourceCoverageRow> SourceCoverage => _sourceCoverage;
+    public string DiscoveryStatus { get => _discoveryStatus; private set => SetProperty(ref _discoveryStatus, value); }
+    public string LastCollectionText => _lastCollectionAtUtc.HasValue
+        ? $"Latest read-only collection completed {_lastCollectionAtUtc.Value.ToLocalTime():g}. Coverage is from that scan and can be stale."
+        : "No read-only collection has been run in this app session.";
     public AsyncRelayCommand RefreshConnectionsCommand { get; }
+    public AsyncRelayCommand DiscoverAccountsCommand { get; }
+
+    public async Task DiscoverAccountsAsync()
+    {
+        if (_liveCloudScanService is null)
+        {
+            DiscoveryStatus = "Account discovery is unavailable because cloud providers are not configured.";
+            return;
+        }
+
+        try
+        {
+            DiscoveryStatus = "Discovering accounts accessible through selected provider sign-ins...";
+            _discoveredAccounts = await _liveCloudScanService.DiscoverAccountsAsync();
+            OnPropertyChanged(nameof(DiscoveredAccounts));
+            DiscoveryStatus = _discoveredAccounts.Count == 0
+                ? "No accounts were discovered. Check provider sign-in, scope selection, and permissions."
+                : $"Discovered {_discoveredAccounts.Count} accessible account or context row(s). Discovery does not validate every scan permission; run a read-only scan and review source coverage.";
+            ErrorMessage = null;
+        }
+        catch (OperationCanceledException)
+        {
+            DiscoveryStatus = "Account discovery was canceled.";
+            throw;
+        }
+        catch (Exception exception)
+        {
+            DiscoveryStatus = $"Account discovery failed: {exception.Message}";
+            ErrorMessage = DiscoveryStatus;
+        }
+    }
+
+    private void UpdateScanCoverage()
+    {
+        var result = _liveCloudScanService?.CurrentResult;
+        _discoveredAccounts = result?.AccountRecords ?? Array.Empty<LiveScanAccountRecord>();
+        _lastCollectionAtUtc = result?.CompletedAt;
+        _sourceCoverage = result is null
+            ? Array.Empty<ProviderSourceCoverageRow>()
+            : result.Coverage
+                .OrderBy(item => item.Provider, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.DataSource, StringComparer.OrdinalIgnoreCase)
+                .Select(item => new ProviderSourceCoverageRow(item.Provider, item.DataSource, item.Status.ToString(),
+                    item.Records, item.Details, result.CompletedAt))
+                .ToArray();
+        foreach (var provider in Providers)
+        {
+            var providerCoverage = result?.Coverage
+                .Where(item => item.Provider.Equals(provider.Provider.ToString(), StringComparison.OrdinalIgnoreCase))
+                .ToArray() ?? Array.Empty<ScanCoverageRecord>();
+            provider.UpdateCoverage(providerCoverage, result?.CompletedAt);
+        }
+        OnPropertyChanged(nameof(DiscoveredAccounts));
+        OnPropertyChanged(nameof(SourceCoverage));
+        OnPropertyChanged(nameof(LastCollectionText));
+    }
 
     public async Task<bool> DisconnectActiveCloudAsync()
     {
@@ -1182,14 +1258,17 @@ public sealed class CloudProviderConnectionOption : ObservableObject
     private bool _isConnected;
     private bool _canConnect;
     private bool _isConnecting;
+    private string _accessValidationText = "Permissions not yet validated; run a read-only scan.";
 
-    public CloudProviderConnectionOption(CloudProviderType provider, string name, string cliName, string command, string description, AsyncRelayCommand connectCommand, AsyncRelayCommand disconnectCommand)
+    public CloudProviderConnectionOption(CloudProviderType provider, string name, string cliName, string command, string description,
+        string permissionGuidance, AsyncRelayCommand connectCommand, AsyncRelayCommand disconnectCommand)
     {
         Provider = provider;
         Name = name;
         CliName = cliName;
         Command = command;
         Description = description;
+        PermissionGuidance = permissionGuidance;
         ConnectCommand = connectCommand;
         DisconnectCommand = disconnectCommand;
     }
@@ -1199,12 +1278,14 @@ public sealed class CloudProviderConnectionOption : ObservableObject
     public string CliName { get; }
     public string Command { get; }
     public string Description { get; }
+    public string PermissionGuidance { get; }
     public AsyncRelayCommand ConnectCommand { get; }
     public AsyncRelayCommand DisconnectCommand { get; }
     public bool IsConnected { get => _isConnected; private set => SetProperty(ref _isConnected, value); }
     public bool CanConnect { get => _canConnect; private set => SetProperty(ref _canConnect, value); }
     public bool IsConnecting { get => _isConnecting; private set => SetProperty(ref _isConnecting, value); }
-    public string StateText => IsConnecting ? "Connecting" : IsConnected ? "Connected" : "Available";
+    public string StateText => IsConnecting ? "Connecting" : IsConnected ? "CLI authenticated" : "Not connected";
+    public string AccessValidationText { get => _accessValidationText; private set => SetProperty(ref _accessValidationText, value); }
 
     internal void UpdateState(bool isConnected, bool canConnect, bool isConnecting)
     {
@@ -1213,7 +1294,28 @@ public sealed class CloudProviderConnectionOption : ObservableObject
         IsConnecting = isConnecting;
         OnPropertyChanged(nameof(StateText));
     }
+
+    internal void UpdateCoverage(IReadOnlyList<ScanCoverageRecord> coverage, DateTime? completedAtUtc)
+    {
+        if (coverage.Count == 0 || !completedAtUtc.HasValue)
+        {
+            AccessValidationText = "Permissions not yet validated; run a read-only scan.";
+            return;
+        }
+
+        var denied = coverage.Count(item => item.Status == ScanCoverageStatus.Denied);
+        var partial = coverage.Count(item => item.Status == ScanCoverageStatus.Partial);
+        var unavailable = coverage.Count(item => item.Status == ScanCoverageStatus.Unavailable);
+        var unsupported = coverage.Count(item => item.Status == ScanCoverageStatus.Unsupported);
+        var needsAttention = denied + partial + unavailable + unsupported;
+        var summary = needsAttention == 0
+            ? "No permission or unsupported-source gaps reported"
+            : $"{denied} denied, {partial} partial, {unavailable} unavailable, {unsupported} unsupported source(s)";
+        AccessValidationText = $"Last checked {completedAtUtc.Value.ToLocalTime():g}: {summary}.";
+    }
 }
+
+public sealed record ProviderSourceCoverageRow(string Provider, string DataSource, string Status, int Records, string Details, DateTime CheckedAtUtc);
 public sealed class IdentitiesViewModel : WorkspaceViewModel
 {
     private readonly ILiveCloudScanService? _liveCloudScanService;

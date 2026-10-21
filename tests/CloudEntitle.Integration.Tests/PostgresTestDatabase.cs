@@ -7,16 +7,18 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 {
     private readonly NpgsqlDataSource _adminDataSource;
     private readonly NpgsqlDataSource _testDataSource;
+    private readonly string _connectionString;
 
-    private PostgresTestDatabase(NpgsqlDataSource adminDataSource, NpgsqlDataSource testDataSource, string schema)
+    private PostgresTestDatabase(NpgsqlDataSource adminDataSource, NpgsqlDataSource testDataSource, string connectionString, string schema)
     {
         _adminDataSource = adminDataSource;
         _testDataSource = testDataSource;
+        _connectionString = connectionString;
         Schema = schema;
     }
 
     public string Schema { get; }
-    public string ConnectionString => _testDataSource.ConnectionString;
+    public string ConnectionString => _connectionString;
 
     public static async Task<PostgresTestDatabase> CreateAsync()
     {
@@ -33,7 +35,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             await command.ExecuteNonQueryAsync();
             var testConnectionString = new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = schema }.ConnectionString;
             var testDataSource = new NpgsqlDataSourceBuilder(testConnectionString).Build();
-            return new PostgresTestDatabase(adminDataSource, testDataSource, schema);
+            return new PostgresTestDatabase(adminDataSource, testDataSource, testConnectionString, schema);
         }
         catch
         {
