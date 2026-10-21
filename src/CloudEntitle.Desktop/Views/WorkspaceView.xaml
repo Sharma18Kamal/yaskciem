@@ -8,17 +8,16 @@
         </Style>
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
             <StackPanel>
-            <Grid Margin="0,0,0,16">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Button Grid.Column="0" Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" ToolTip="Scan all connected providers and selected accounts or Kubernetes contexts using read-only access."/>
-                <Button Grid.Column="1" Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" MinWidth="100" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
-                <Button Grid.Column="2" Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Choose a folder and save findings as JSON or CSV"/>
-                <Button Grid.Column="3" Content="Discover accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Refresh connected-provider accounts and local Kubernetes contexts for scan selection."/>
-                <TextBlock Grid.Column="4" Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxWidth="180" MaxHeight="48" ToolTip="Cloud CLI connection status"/>
-                <ComboBox Grid.Column="5" ItemsSource="{Binding ComplianceFrameworks}" SelectedItem="{Binding SelectedComplianceFramework, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="145" Margin="8,0,0,0" ToolTip="Compliance framework for the exported evidence bundle"/>
-                <Button Grid.Column="6" Content="Export evidence bundle" Command="{Binding ExportComplianceBundleCommand}" IsEnabled="{Binding CanExportComplianceBundle}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Export organization-scoped controls, evidence, gaps, and assessment metadata"/>
-                <TextBlock Grid.Column="7" Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" ToolTip="{Binding ScanStatusMessage}"/>
-            </Grid>
+            <WrapPanel Margin="0,0,0,16">
+                <Button Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" ToolTip="Scan all connected providers and selected accounts or Kubernetes contexts using read-only access."/>
+                <Button Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" MinWidth="100" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
+                <Button Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Choose a folder and save findings as JSON or CSV"/>
+                <Button Content="Discover accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Refresh connected-provider accounts and local Kubernetes contexts for scan selection."/>
+                <TextBlock Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,12,8" TextWrapping="Wrap" MaxWidth="180" ToolTip="Cloud CLI connection status"/>
+                <ComboBox ItemsSource="{Binding ComplianceFrameworks}" SelectedItem="{Binding SelectedComplianceFramework, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="145" Margin="0,0,8,8" ToolTip="Compliance framework for the exported evidence bundle"/>
+                <Button Content="Export evidence bundle" Command="{Binding ExportComplianceBundleCommand}" IsEnabled="{Binding CanExportComplianceBundle}" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Export organization-scoped controls, evidence, gaps, and assessment metadata"/>
+                <TextBlock Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,12,8" TextWrapping="Wrap" MaxWidth="240" ToolTip="{Binding ScanStatusMessage}"/>
+            </WrapPanel>
             <Expander Header="Standards and assessment history" IsExpanded="False" Margin="0,0,0,14" ToolTip="Choose compliance frameworks, record time-limited control exceptions, and review saved assessments.">
                 <StackPanel>
                     <TextBlock Text="Standards included in the assessment crosswalk" Style="{StaticResource CardLabel}" Margin="0,8,0,4"/>

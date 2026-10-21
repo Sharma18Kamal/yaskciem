@@ -7,6 +7,34 @@ namespace CloudEntitle.Desktop.Tests;
 public sealed class WorkspaceViewBindingTests
 {
     [Fact]
+    public void Navigation_ShouldScrollWhenWindowHeightIsLimited()
+    {
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "MainWindow.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var navigation = Assert.Single(document.Descendants(presentation + "ItemsControl"), control =>
+            (string?)control.Attribute("ItemsSource") == "{Binding NavigationItems}");
+        var scrollViewer = Assert.Single(navigation.Ancestors(presentation + "ScrollViewer"));
+
+        Assert.Equal("Auto", (string?)scrollViewer.Attribute("VerticalScrollBarVisibility"));
+        Assert.Equal("Disabled", (string?)scrollViewer.Attribute("HorizontalScrollBarVisibility"));
+    }
+
+    [Fact]
+    public void DashboardToolbar_ShouldWrapAtLimitedWindowWidths()
+    {
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var scan = Assert.Single(document.Descendants(presentation + "Button"), button =>
+            (string?)button.Attribute("Content") == "Scan Now");
+
+        Assert.Equal(presentation + "WrapPanel", scan.Parent!.Name);
+        Assert.Contains(scan.Parent.Elements(presentation + "Button"), button =>
+            (string?)button.Attribute("Content") == "Export evidence bundle");
+    }
+
+    [Fact]
     public void InlineRunBindings_ShouldBeOneWay()
     {
         var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
@@ -72,7 +100,7 @@ public sealed class WorkspaceViewBindingTests
 
         Assert.Contains(document.Descendants(presentation + "TextBlock"), textBlock =>
             ((string?)textBlock.Attribute("Text"))?.Contains("CloudConnectionStatus", StringComparison.Ordinal) == true
-            && ((string?)textBlock.Attribute("Grid.Column")) == "4");
+            && textBlock.Parent?.Name == presentation + "WrapPanel");
     }
 
     [Fact]

@@ -56,7 +56,7 @@
         <Grid Grid.Row="1" IsEnabled="{Binding IsTrialActive}">
             <Grid.ColumnDefinitions><ColumnDefinition Width="250"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0" Padding="16,22">
-                <DockPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <ItemsControl ItemsSource="{Binding NavigationItems}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:NavigationItem}">
@@ -66,7 +66,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </DockPanel>
+                </ScrollViewer>
             </Border>
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="34,30">
                 <StackPanel MaxWidth="1120" HorizontalAlignment="Left">
