@@ -32,6 +32,9 @@ public sealed class CentralWebhookTransportTests
         Assert.DoesNotContain("do-not-log", JsonSerializer.Serialize(result));
         Assert.DoesNotContain("response-secret", JsonSerializer.Serialize(result));
         Assert.Equal(lease.Event.EventId.ToString("D"), handler.Headers["X-Yask-Event-Id"]);
+        Assert.Equal("access.added", handler.Headers["X-Yask-Event-Type"]);
+        using (var document = JsonDocument.Parse(handler.Body))
+            Assert.Equal("access.added", document.RootElement.GetProperty("event").GetProperty("eventType").GetString());
         Assert.Equal(lease.Delivery.DeliveryId.ToString("D"), handler.Headers["Idempotency-Key"]);
         var timestamp = handler.Headers["X-Yask-Timestamp"];
         Assert.True(Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - long.Parse(timestamp, CultureInfo.InvariantCulture)) < 10);

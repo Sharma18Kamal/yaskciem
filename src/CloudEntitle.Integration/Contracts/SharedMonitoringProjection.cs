@@ -4,7 +4,10 @@ using System.Text.Json;
 
 namespace CloudEntitle.Integration.Contracts;
 
-public sealed record SharedMonitoringEntity(string Key, string StateHash, SharedAlertSeverity Severity);
+public sealed record SharedMonitoringEntity(string Key, string StateHash, SharedAlertSeverity Severity)
+{
+    public bool Resolved { get; init; }
+}
 
 public static class SharedMonitoringProjection
 {
@@ -59,7 +62,10 @@ public static class SharedMonitoringProjection
             var state = access
                 ? new[] { severity.ToString(), Read("assignmentType") }
                 : new[] { severity.ToString(), Read("status"), Read("evaluationState"), Read("recommendation") };
-            var entity = new SharedMonitoringEntity(key, Hash(JsonSerializer.Serialize(state)), severity);
+            var entity = new SharedMonitoringEntity(key, Hash(JsonSerializer.Serialize(state)), severity)
+            {
+                Resolved = !access && (Read("status").Equals("Resolved", StringComparison.OrdinalIgnoreCase) || Read("status") == "1")
+            };
             if (entities.TryGetValue(key, out var existing) && existing != entity)
                 throw new ArgumentException("Monitoring records contain ambiguous natural identifiers.");
             entities[key] = entity;

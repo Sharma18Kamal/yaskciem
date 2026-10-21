@@ -81,35 +81,12 @@ public sealed partial class SharedWorkspaceStore
                         scope.ExternalAccountId, scope.Kind, change, key,
                         (SharedAlertSeverity)Math.Max((int)(next?.Severity ?? SharedAlertSeverity.Informational),
                             (int)(previous?.Severity ?? SharedAlertSeverity.Informational)),
-                        previous?.StateHash, next?.StateHash, DateTime.UtcNow);
-                    await using var insert = new NpgsqlCommand("""
-                        INSERT INTO SharedDriftEvents (TenantId, OrganizationId, EventId, DetectedAtUtc, PayloadJson)
-                        VALUES (@tenant, @organization, @event, @detected, @payload) ON CONFLICT DO NOTHING;
-                        """, connection, transaction);
-                    insert.Parameters.AddWithValue("tenant", scan.TenantId);
-                    insert.Parameters.AddWithValue("organization", scan.OrganizationId);
-                    insert.Parameters.AddWithValue("event", drift.EventId);
-                    insert.Parameters.AddWithValue("detected", drift.DetectedAtUtc);
-                    insert.Parameters.AddWithValue("payload", JsonSerializer.Serialize(drift, JsonOptions));
-                    await insert.ExecuteNonQueryAsync(cancellationToken);
-                    foreach (var rule in rules.Where(rule => Matches(rule, drift)).OrderBy(rule => rule.RuleId))
+                        previous?.StateHash, next?.StateHash, DateTime.UtcNow)
                     {
-                        var deliveryId = new Guid(Convert.FromHexString(SharedMonitoringProjection.Hash($"{eventId:D}|{rule.Channel}")).AsSpan(0, 16));
-                        await using var delivery = new NpgsqlCommand("""
-                            INSERT INTO SharedNotificationDeliveries
-                                (TenantId, OrganizationId, DeliveryId, EventId, RuleId, Channel, Status, CreatedAtUtc, NextAttemptAtUtc)
-                            VALUES (@tenant, @organization, @delivery, @event, @rule, @channel, 'Pending', @now, @now)
-                            ON CONFLICT (TenantId, OrganizationId, EventId, Channel) DO NOTHING;
-                            """, connection, transaction);
-                        delivery.Parameters.AddWithValue("tenant", scan.TenantId);
-                        delivery.Parameters.AddWithValue("organization", scan.OrganizationId);
-                        delivery.Parameters.AddWithValue("delivery", deliveryId);
-                        delivery.Parameters.AddWithValue("event", eventId);
-                        delivery.Parameters.AddWithValue("rule", rule.RuleId);
-                        delivery.Parameters.AddWithValue("channel", rule.Channel);
-                        delivery.Parameters.AddWithValue("now", drift.DetectedAtUtc);
-                        await delivery.ExecuteNonQueryAsync(cancellationToken);
-                    }
+                        EventType = scope.Kind != "effective-access" && next?.Resolved == true && previous?.Resolved != true
+                        ? "finding.resolved" : OperationalEventTypes.ForDrift(scope.Kind, change)
+                    };
+                    await RecordOperationalEventAsync(connection, transaction, scan.TenantId, scan.OrganizationId, drift, cancellationToken, rules);
                 }
             }
             await using var baseline = new NpgsqlCommand("""
@@ -129,8 +106,11 @@ public sealed partial class SharedWorkspaceStore
 
     private static bool Matches(SharedNotificationRuleDto rule, SharedDriftEventDto drift)
         => rule.Enabled && drift.Severity >= rule.MinimumSeverity
-            && (drift.Kind == "effective-access" ? rule.EffectiveAccess : rule.Findings)
-            && (drift.Change == "Added" ? rule.Added : drift.Change == "Removed" ? rule.Removed : rule.Changed);
+            && (rule.ConnectorKind != "Jira" || rule.AllowAutomaticTickets)
+            && (rule.EventTypes.Count > 0 ? rule.EventTypes.Contains(drift.EventType, StringComparer.Ordinal)
+                : drift.Kind is "finding" or "resource-finding" or "effective-access"
+                    && (drift.Kind == "effective-access" ? rule.EffectiveAccess : rule.Findings)
+                    && (drift.Change == "Added" ? rule.Added : drift.Change == "Removed" ? rule.Removed : rule.Changed));
 
     private static void AddScope(NpgsqlCommand command, SharedScanSummaryDto scan, SharedMonitoringScopeDto scope)
     {
@@ -145,8 +125,12 @@ public sealed partial class SharedWorkspaceStore
     public static void ValidateNotificationRule(SharedNotificationRuleDto rule)
     {
         if (rule is null || rule.RuleId == Guid.Empty || string.IsNullOrWhiteSpace(rule.Name) || rule.Name.Length > 128
-            || !Enum.IsDefined(rule.MinimumSeverity) || !(rule.Findings || rule.EffectiveAccess)
-            || !(rule.Added || rule.Removed || rule.Changed) || string.IsNullOrEmpty(rule.Channel) || rule.Channel.Length > 64
+            || !Enum.IsDefined(rule.MinimumSeverity) || rule.EventTypes is null || rule.EventTypes.Count > OperationalEventTypes.All.Count
+            || rule.EventTypes.Any(type => !OperationalEventTypes.All.Contains(type, StringComparer.Ordinal))
+            || rule.ConnectorKind is not ("SignedWebhook" or "Jira")
+            || rule.EventTypes.Count == 0 && (!(rule.Findings || rule.EffectiveAccess) || !(rule.Added || rule.Removed || rule.Changed))
+            || rule.ConnectorKind == "Jira" && rule.AllowAutomaticTickets && rule.EventTypes.Count == 0
+            || string.IsNullOrEmpty(rule.Channel) || rule.Channel.Length > 64
             || rule.Channel.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '-' or '_')))
             throw new ArgumentException("Rules require an ID, name, severity, source/change selection, and a channel alias (letters, digits, - or _).");
     }

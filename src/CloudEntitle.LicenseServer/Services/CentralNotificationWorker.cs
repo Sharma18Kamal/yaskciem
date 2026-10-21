@@ -10,7 +10,7 @@ public sealed record NotificationSendResult(bool Delivered, bool Retryable, int?
     public static bool IsSafe(NotificationSendResult result)
         => result.HttpStatus is null or >= 100 and <= 599
             && result.FailureCode is null or "channel_unconfigured" or "channel_invalid" or "network_error"
-                or "timeout" or "http_rejected" or "rule_disabled" or "worker_shutdown"
+                or "timeout" or "http_rejected" or "rule_disabled" or "worker_shutdown" or "outcome_unknown"
             && !(result.Delivered && result.Suppressed);
 }
 
@@ -36,6 +36,10 @@ public sealed class CentralWebhookTransport : ICentralNotificationTransport, IDi
     public async Task<NotificationSendResult> SendAsync(NotificationDeliveryLease lease, CancellationToken cancellationToken)
     {
         var section = _configuration.GetSection($"CentralNotifications:Organizations:{lease.TenantId:D}:{lease.OrganizationId:D}:Channels:{lease.Delivery.Channel}");
+        if (ConnectorConfiguration.Kind(section) != lease.Delivery.ConnectorKind)
+            return new(false, false, null, "channel_invalid");
+        if (lease.Delivery.ConnectorKind == "Jira")
+            return await SendJiraAsync(lease, section, cancellationToken);
         var endpoint = section["Url"];
         var key = section["SigningKey"];
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(key))
@@ -55,6 +59,7 @@ public sealed class CentralWebhookTransport : ICentralNotificationTransport, IDi
         };
         request.Content.Headers.ContentType = new("application/json");
         request.Headers.Add("X-Yask-Event-Id", lease.Event.EventId.ToString("D"));
+        request.Headers.Add("X-Yask-Event-Type", lease.Event.EventType);
         request.Headers.Add("X-Yask-Delivery-Id", lease.Delivery.DeliveryId.ToString("D"));
         request.Headers.Add("X-Yask-Timestamp", timestamp);
         request.Headers.Add("X-Yask-Signature", signature);
@@ -77,7 +82,65 @@ public sealed class CentralWebhookTransport : ICentralNotificationTransport, IDi
         }
     }
 
+    private async Task<NotificationSendResult> SendJiraAsync(NotificationDeliveryLease lease, IConfigurationSection section, CancellationToken token)
+    {
+        if (ConnectorConfiguration.Status(section, "Jira") != "Configured")
+            return new(false, false, null, "channel_invalid");
+        var uri = new Uri(section["Url"]!.TrimEnd('/') + "/rest/api/3/issue");
+        var body = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            fields = new
+            {
+                project = new { key = section["ProjectKey"] },
+                issuetype = new { name = section["IssueType"] },
+                summary = $"YASK-CIEM {lease.Event.EventType} ({lease.Event.Provider})",
+                labels = new[] { "yask-ciem", $"yask-delivery-{lease.Delivery.DeliveryId:D}" },
+                description = new
+                {
+                    type = "doc", version = 1,
+                    content = new[] { new { type = "paragraph", content = new[] { new { type = "text",
+                        text = $"YASK-CIEM operational event\nEvent: {lease.Event.EventType}\nEvent ID: {lease.Event.EventId:D}\nDelivery ID: {lease.Delivery.DeliveryId:D}\nProvider: {lease.Event.Provider}\nAccount: {lease.Event.ExternalAccountId}\nEntity: {lease.Event.EntityKey}\nSubject: {lease.Event.SubjectId}\nDetected UTC: {lease.Event.DetectedAtUtc:O}\nThis ticket is a governance record. It does not change cloud access." } } } }
+                }
+            }
+        });
+        using var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new ByteArrayContent(body) };
+        request.Content.Headers.ContentType = new("application/json");
+        request.Headers.Authorization = new("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{section["UserName"]}:{section["ApiToken"]}")));
+        request.Headers.Add("Idempotency-Key", lease.Delivery.DeliveryId.ToString("D"));
+        try
+        {
+            using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+            var status = (int)response.StatusCode;
+            return status == 201 ? new(true, false, status, null)
+                : status == 429 ? new(false, true, status, "http_rejected")
+                : new(false, false, status, status >= 500 || status == 408 ? "outcome_unknown" : "http_rejected");
+        }
+        catch (HttpRequestException) { return new(false, false, null, "outcome_unknown"); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        { return new(false, false, null, "outcome_unknown"); }
+    }
+
     public void Dispose() => _client.Dispose();
+}
+
+public static class ConnectorConfiguration
+{
+    public static string Kind(IConfiguration section) => section["Kind"] ?? "SignedWebhook";
+
+    public static string Status(IConfiguration section, string kind)
+    {
+        if (section["Url"] is null) return "Unconfigured";
+        if (Kind(section) != kind || kind is not ("SignedWebhook" or "Jira")
+            || !Uri.TryCreate(section["Url"], UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps
+            || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment)) return "Invalid";
+        return kind == "SignedWebhook"
+            ? Encoding.UTF8.GetByteCount(section["SigningKey"] ?? "") >= 32 ? "Configured" : "Invalid"
+            : string.IsNullOrEmpty(uri.Query) && uri.AbsolutePath == "/"
+                && !string.IsNullOrWhiteSpace(section["UserName"]) && !section["UserName"]!.Contains(':')
+                && !string.IsNullOrWhiteSpace(section["ApiToken"])
+                && section["ProjectKey"] is { Length: > 0 and <= 64 } project && project.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')
+                && section["IssueType"] is { Length: > 0 and <= 100 } ? "Configured" : "Invalid";
+    }
 }
 
 public sealed class CentralNotificationWorker(SharedWorkspaceStore store, ICentralNotificationTransport transport,

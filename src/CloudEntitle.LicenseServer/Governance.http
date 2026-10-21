@@ -1,0 +1,45 @@
+# Use the deployed HTTPS URL and an organization-scoped delegated API token.
+@baseUrl = https://license.example.invalid
+@organizationId = 00000000-0000-0000-0000-000000000000
+@campaignId = 11111111-1111-1111-1111-111111111111
+@itemId = 22222222-2222-2222-2222-222222222222
+@token = replace-with-delegated-api-token
+
+### Organization-wide completion, overdue work, current exception aging and audit history
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/governance/report
+Authorization: Bearer {{token}}
+
+### Eligible active owners and reviewers (creator is still excluded by assignment validation)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/governance/assignees
+Authorization: Bearer {{token}}
+
+### Audited reassignment; use the item's current assignmentVersion and a future UTC date
+PATCH {{baseUrl}}/api/v1/organizations/{{organizationId}}/access-reviews/{{campaignId}}/items/{{itemId}}/assignment
+Authorization: Bearer {{token}}
+Content-Type: application/json
+X-Correlation-ID: 33333333-3333-3333-3333-333333333333
+
+{
+  "expectedAssignmentVersion": 0,
+  "owner": "owner@example.invalid",
+  "reviewer": "reviewer@example.invalid",
+  "team": "Platform",
+  "externalAccountId": "123456789012",
+  "dueAtUtc": "2030-12-01T00:00:00Z",
+  "reason": "Ownership transferred to the platform team"
+}
+
+### Unknown campaign/item (404); stale version on a real item returns 409
+PATCH {{baseUrl}}/api/v1/organizations/{{organizationId}}/access-reviews/00000000-0000-0000-0000-000000000000/items/{{itemId}}/assignment
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "expectedAssignmentVersion": 0,
+  "owner": null,
+  "reviewer": "reviewer@example.invalid",
+  "team": null,
+  "externalAccountId": null,
+  "dueAtUtc": "2030-12-01T00:00:00Z",
+  "reason": "Unknown campaign example"
+}

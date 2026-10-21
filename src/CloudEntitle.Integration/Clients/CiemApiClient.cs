@@ -12,6 +12,32 @@ public sealed class CiemApiClient
 
     public CiemApiClient(HttpClient httpClient) => _httpClient = httpClient;
 
+    public Task<ApiEnvelope<IReadOnlyList<ConnectorHealthDto>>?> GetConnectorHealthAsync(Guid organizationId,
+        string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<ConnectorHealthDto>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/connectors/health", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<SharedDeliveryStatusDto>?> RequestOperationalTicketAsync(Guid organizationId, Guid eventId,
+        CreateOperationalTicketRequest request, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<SharedDeliveryStatusDto>(HttpMethod.Post,
+            $"api/v1/organizations/{organizationId:D}/operational-events/{eventId:D}/ticket", accessToken, request, cancellationToken);
+
+    public Task<ApiEnvelope<GovernanceReportDto>?> GetGovernanceReportAsync(Guid organizationId,
+        string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<GovernanceReportDto>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/governance/report", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<GovernanceAssigneesDto>?> GetGovernanceAssigneesAsync(Guid organizationId,
+        string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<GovernanceAssigneesDto>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/governance/assignees", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<AccessReviewCampaign>?> ReassignReviewItemAsync(Guid organizationId, Guid campaignId,
+        Guid itemId, ReassignReviewItemRequest request, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<AccessReviewCampaign>(HttpMethod.Patch,
+            $"api/v1/organizations/{organizationId:D}/access-reviews/{campaignId:D}/items/{itemId:D}/assignment",
+            accessToken, request, cancellationToken);
+
     public Task<ApiEnvelope<IReadOnlyList<SharedNotificationRuleDto>>?> GetNotificationRulesAsync(Guid organizationId,
         string accessToken, CancellationToken cancellationToken = default)
         => SendForEnvelopeAsync<IReadOnlyList<SharedNotificationRuleDto>>(HttpMethod.Get,

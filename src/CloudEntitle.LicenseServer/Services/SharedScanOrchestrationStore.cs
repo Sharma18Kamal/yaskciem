@@ -193,6 +193,7 @@ public sealed partial class SharedWorkspaceStore
             recoverAttempts.Parameters.AddWithValue("now", recoveryTime);
             await recoverAttempts.ExecuteNonQueryAsync(cancellationToken);
         }
+        var recoveredFailures = new List<(Guid Tenant, Guid Organization, Guid Job, CloudProvider Provider, string Account)>();
         await using (var recoverJobs = new NpgsqlCommand("""
             UPDATE SharedScanJobs
             SET Status=CASE WHEN CancellationRequested THEN 'Cancelled'
@@ -202,12 +203,20 @@ public sealed partial class SharedWorkspaceStore
                 LeaseExpiresAtUtc=NULL, ActiveAttemptId=NULL,
                 LastError=CASE WHEN CancellationRequested THEN 'Cancellation requested while the worker lease expired.'
                                ELSE 'Worker lease expired before the attempt completed.' END
-            WHERE Status='Running' AND LeaseExpiresAtUtc < @now;
+            WHERE Status='Running' AND LeaseExpiresAtUtc < @now
+            RETURNING TenantId, OrganizationId, JobId, Provider, ExternalAccountId, Status;
             """, connection, transaction))
         {
             recoverJobs.Parameters.AddWithValue("now", recoveryTime);
-            await recoverJobs.ExecuteNonQueryAsync(cancellationToken);
+            await using var reader = await recoverJobs.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                if (reader.GetString(5) == "Failed")
+                    recoveredFailures.Add((reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2),
+                        Enum.Parse<CloudProvider>(reader.GetString(3)), reader.GetString(4)));
         }
+        foreach (var failure in recoveredFailures)
+            await RecordScanFailureAsync(connection, transaction, failure.Tenant, failure.Organization, failure.Job,
+                failure.Provider, failure.Account, null, recoveryTime, cancellationToken);
         ScanJobDto? job;
         var attemptId = Guid.NewGuid();
         await using (var claim = new NpgsqlCommand("""
@@ -335,6 +344,9 @@ public sealed partial class SharedWorkspaceStore
                 throw new InvalidOperationException("The scan worker lost ownership of the job before completion.");
         }
 
+        if (status == "Failed")
+            await RecordScanFailureAsync(connection, transaction, lease.Job.TenantId, lease.Job.OrganizationId,
+                lease.Job.JobId, lease.Job.Provider, lease.Job.ExternalAccountId, scanId, now, cancellationToken);
         if (outcome == "Succeeded" && scanId.HasValue)
         {
             await using var success = new NpgsqlCommand("""

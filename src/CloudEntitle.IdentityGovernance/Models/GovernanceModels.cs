@@ -60,7 +60,11 @@ public sealed record AccessReviewCandidate(
     string? SuggestedReviewer = null,
     IdentityType IdentityType = IdentityType.Unknown,
     bool IsPrivileged = false,
-    bool IsExternal = false);
+    bool IsExternal = false)
+{
+    public string? ExternalAccountId { get; init; }
+    public string? Team { get; init; }
+}
 
 public sealed record AccessReviewAuditEntry(DateTime Timestamp, string Actor, string Action, string Details)
 {
@@ -101,13 +105,20 @@ public sealed record AccessReviewItem(
 {
     public string? AssignedReviewer { get; init; }
     public string? OwnerSnapshot { get; init; }
+    public string? AssignedOwner { get; init; }
+    public string? ExternalAccountId { get; init; }
+    public string? Team { get; init; }
+    public long AssignmentVersion { get; init; }
     public DateTime? DueAt { get; init; }
+    public DateTime? WorkflowDeadline => Decision == ReviewDecision.ExceptionGranted && ExceptionExpiresAt.HasValue ? ExceptionExpiresAt : DueAt;
     public string EvidenceSnapshot { get; init; } = string.Empty;
     public int ReminderCount { get; init; }
     public DateTime? LastReminderAt { get; init; }
     public IReadOnlyList<AccessReviewAttestation> Attestations { get; init; } = Array.Empty<AccessReviewAttestation>();
     public DateTime? ExceptionExpiresAt { get; init; }
     public DateTime? ExceptionExpiredAt { get; init; }
+    public int ExceptionReminderCount { get; init; }
+    public DateTime? LastExceptionReminderAt { get; init; }
     public DateTime? EscalatedAt { get; init; }
     public string? EscalationReason { get; init; }
     public IReadOnlyList<AccessReviewAuditEntry> AuditTrail { get; init; } = Array.Empty<AccessReviewAuditEntry>();

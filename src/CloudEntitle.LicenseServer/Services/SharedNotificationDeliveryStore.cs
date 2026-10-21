@@ -12,7 +12,7 @@ public sealed partial class SharedWorkspaceStore
 {
     private const string DeliveryColumns = """
         DeliveryId, EventId, RuleId, Channel, Status, AttemptCount, CreatedAtUtc,
-        NextAttemptAtUtc, CompletedAtUtc, FailureCode
+        NextAttemptAtUtc, CompletedAtUtc, FailureCode, ConnectorKind, RequestedBy
         """;
 
     public async Task<IReadOnlyList<SharedDeliveryDto>> GetNotificationDeliveriesAsync(Guid tenantId, Guid organizationId,
@@ -86,9 +86,9 @@ public sealed partial class SharedWorkspaceStore
                 UPDATE SharedNotificationAttempts SET CompletedAtUtc=@now, FailureCode='lease_expired'
                 WHERE TenantId=@tenant AND OrganizationId=@organization AND DeliveryId=@delivery AND AttemptId=@attempt;
                 UPDATE SharedNotificationDeliveries
-                SET Status=CASE WHEN AttemptCount >= 5 THEN 'Failed' ELSE 'Pending' END,
-                    NextAttemptAtUtc=CASE WHEN AttemptCount >= 5 THEN NULL ELSE @retry END,
-                    CompletedAtUtc=CASE WHEN AttemptCount >= 5 THEN @now ELSE NULL END,
+                SET Status=CASE WHEN AttemptCount >= 5 OR ConnectorKind='Jira' THEN 'Failed' ELSE 'Pending' END,
+                    NextAttemptAtUtc=CASE WHEN AttemptCount >= 5 OR ConnectorKind='Jira' THEN NULL ELSE @retry END,
+                    CompletedAtUtc=CASE WHEN AttemptCount >= 5 OR ConnectorKind='Jira' THEN @now ELSE NULL END,
                     FailureCode='lease_expired', ActiveAttemptId=NULL, LeaseExpiresAtUtc=NULL
                 WHERE TenantId=@tenant AND OrganizationId=@organization AND DeliveryId=@delivery;
                 """, connection, transaction);
@@ -155,8 +155,8 @@ public sealed partial class SharedWorkspaceStore
     }
 
     public async Task<bool> IsNotificationEnabledAsync(NotificationDeliveryLease lease, CancellationToken cancellationToken)
-        => (await GetNotificationRulesAsync(lease.TenantId, lease.OrganizationId, cancellationToken))
-            .Any(rule => rule.Channel == lease.Delivery.Channel && Matches(rule, lease.Event));
+        => lease.Delivery.RequestedBy.HasValue || (await GetNotificationRulesAsync(lease.TenantId, lease.OrganizationId, cancellationToken))
+            .Any(rule => rule.Channel == lease.Delivery.Channel && rule.ConnectorKind == lease.Delivery.ConnectorKind && Matches(rule, lease.Event));
 
     public async Task CompleteNotificationDeliveryAsync(NotificationDeliveryLease lease, NotificationSendResult result,
         CancellationToken cancellationToken = default)
@@ -165,7 +165,8 @@ public sealed partial class SharedWorkspaceStore
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var now = DateTime.UtcNow;
-        var retry = result.Retryable && lease.Delivery.AttemptCount < 5 && !result.Delivered && !result.Suppressed;
+        var retry = result.Retryable && lease.Delivery.AttemptCount < 5 && !result.Delivered && !result.Suppressed
+            && (lease.Delivery.ConnectorKind != "Jira" || result.HttpStatus == 429);
         await using var complete = new NpgsqlCommand("""
             UPDATE SharedNotificationDeliveries
             SET Status=@status, NextAttemptAtUtc=@retry, CompletedAtUtc=@completed, FailureCode=@failure,
@@ -200,7 +201,11 @@ public sealed partial class SharedWorkspaceStore
             reader.GetString(offset + 4), reader.GetInt32(offset + 5), reader.GetDateTime(offset + 6),
             reader.IsDBNull(offset + 7) ? null : reader.GetDateTime(offset + 7),
             reader.IsDBNull(offset + 8) ? null : reader.GetDateTime(offset + 8),
-            reader.IsDBNull(offset + 9) ? null : reader.GetString(offset + 9));
+            reader.IsDBNull(offset + 9) ? null : reader.GetString(offset + 9))
+        {
+            ConnectorKind = reader.GetString(offset + 10),
+            RequestedBy = reader.IsDBNull(offset + 11) ? null : reader.GetGuid(offset + 11)
+        };
 
     private static void AddDeliveryIdentity(NpgsqlCommand command, Guid tenantId, Guid organizationId, Guid deliveryId)
     {

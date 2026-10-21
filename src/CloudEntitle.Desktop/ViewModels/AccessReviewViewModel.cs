@@ -6,6 +6,7 @@ using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.IdentityGovernance.Models;
 using CloudEntitle.IdentityGovernance.Services;
+using CloudEntitle.Integration.Contracts;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
@@ -48,6 +49,12 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     private string _campaignDurationDays = BuiltInTemplates[0].DurationDays.ToString();
     private AccessReviewTemplate _selectedTemplate = BuiltInTemplates[0];
     private string _assignedReviewerName = string.Empty;
+    private string _assignedOwner = string.Empty;
+    private string _assignmentTeam = string.Empty;
+    private string _assignmentAccount = string.Empty;
+    private string _assignmentReason = string.Empty;
+    private GovernanceReportDto? _governanceReport;
+    private IReadOnlyList<string> _eligibleOwners = Array.Empty<string>();
     private IReadOnlyList<ReviewerOption> _eligibleReviewers = Array.Empty<ReviewerOption>();
     private string _reviewerName = string.Empty;
     private string _actionActor = Environment.UserName;
@@ -86,7 +93,7 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
         .ToArray();
     public IReadOnlyList<AccessReviewItem> ReviewItems => SelectedCampaign?.Items
         .Where(item => WorkspaceDataFormatting.Matches(SearchText, item.AccessSummary, item.AssignedReviewer, item.Decision.ToString(), item.ReviewComment, item.EvidenceSnapshot))
-        .OrderBy(item => item.DueAt ?? SelectedCampaign.DueAt)
+        .OrderBy(item => item.WorkflowDeadline ?? SelectedCampaign.DueAt)
         .ToArray() ?? Array.Empty<AccessReviewItem>();
     public IReadOnlyList<AccessReviewAuditEntry> SelectedAuditTrail => SelectedItem?.AuditTrail ?? Array.Empty<AccessReviewAuditEntry>();
     public IReadOnlyList<ReviewDecision> Decisions => AvailableDecisions;
@@ -104,8 +111,21 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     public bool HasReviewItems => ReviewItems.Count > 0;
     public IReadOnlyList<AccessReviewAttestation> SelectedAttestations => SelectedItem?.Attestations ?? Array.Empty<AccessReviewAttestation>();
     public int OpenCampaigns => _campaigns.Count(item => item.Status == CampaignStatus.Open);
-    public int EscalatedItems => _campaigns.Sum(campaign => campaign.Items.Count(item => item.EscalatedAt.HasValue));
-    public int PendingItems => _campaigns.Sum(campaign => campaign.Items.Count(item => item.Decision == ReviewDecision.Pending || item.ExceptionExpiredAt.HasValue));
+    public int EscalatedItems => _campaigns.Where(campaign => campaign.Status is not (CampaignStatus.Cancelled or CampaignStatus.Draft))
+        .Sum(campaign => campaign.Items.Count(item => item.EscalatedAt.HasValue && IdentityGovernanceService.IsUnresolved(item, DateTime.UtcNow)));
+    public int PendingItems => _campaigns.Where(campaign => campaign.Status is not (CampaignStatus.Cancelled or CampaignStatus.Draft))
+        .Sum(campaign => campaign.Items.Count(item => IdentityGovernanceService.IsUnresolved(item, DateTime.UtcNow)));
+    public IReadOnlyList<string> EligibleOwners => _eligibleOwners;
+    public IReadOnlyList<GovernanceGroupDto> GovernanceGroups => _governanceReport?.Groups ?? Array.Empty<GovernanceGroupDto>();
+    public IReadOnlyList<GovernanceWorkItemDto> GovernanceWork => _governanceReport?.Items ?? Array.Empty<GovernanceWorkItemDto>();
+    public IReadOnlyList<GovernanceHistoryDto> GovernanceHistory => _governanceReport?.History ?? Array.Empty<GovernanceHistoryDto>();
+    public string GovernanceReportStatus => _governanceReport is null
+        ? "Organization-wide reporting is available in shared organization mode."
+        : $"Organization-wide report as of {_governanceReport.AsOfUtc:u}; exception age buckets: <30, 30-89, 90+ days. Latest 500 audit events.";
+    public string AssignedOwner { get => _assignedOwner; set => SetProperty(ref _assignedOwner, value); }
+    public string AssignmentTeam { get => _assignmentTeam; set => SetProperty(ref _assignmentTeam, value); }
+    public string AssignmentAccount { get => _assignmentAccount; set => SetProperty(ref _assignmentAccount, value); }
+    public string AssignmentReason { get => _assignmentReason; set { if (SetProperty(ref _assignmentReason, value)) OnPropertyChanged(nameof(CanAssignReviewer)); } }
     public AccessReviewCampaign? SelectedCampaign
     {
         get => _selectedCampaign;
@@ -125,6 +145,10 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
         {
             if (!SetProperty(ref _selectedItem, value)) return;
             AssignedReviewerName = value?.AssignedReviewer ?? string.Empty;
+            AssignedOwner = value?.AssignedOwner ?? string.Empty;
+            AssignmentTeam = value?.Team ?? string.Empty;
+            AssignmentAccount = value?.ExternalAccountId ?? string.Empty;
+            AssignmentReason = string.Empty;
             ReviewerName = value?.Reviewer ?? string.Empty;
             ReviewComment = value?.ReviewComment ?? string.Empty;
             ItemDueAt = value?.DueAt ?? SelectedCampaign?.DueAt;
@@ -166,7 +190,8 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     public DateTime? ExceptionExpiresAt { get => _exceptionExpiresAt; set { if (SetProperty(ref _exceptionExpiresAt, value)) OnPropertyChanged(nameof(CanRecordDecision)); } }
     public ReviewDecision SelectedDecision { get => _selectedDecision; set { if (SetProperty(ref _selectedDecision, value)) OnPropertyChanged(nameof(CanRecordDecision)); } }
     public bool CanCreateCampaign => !IsLoading && SelectedTemplate is not null && !string.IsNullOrWhiteSpace(CampaignName) && int.TryParse(CampaignDurationDays, out var days) && days is > 0 and <= 365;
-    public bool CanAssignReviewer => SelectedCampaign is not null && SelectedItem is not null && IsEligibleReviewer(AssignedReviewerName) && !string.IsNullOrWhiteSpace(ActionActor) && ItemDueAt?.Date >= DateTime.Today;
+    public bool CanAssignReviewer => SelectedCampaign is not null && SelectedItem is not null && IsEligibleReviewer(AssignedReviewerName) && !string.IsNullOrWhiteSpace(ActionActor) && ItemDueAt?.Date >= DateTime.Today
+        && (!_isSharedStore || !string.IsNullOrWhiteSpace(AssignmentReason));
     public bool CanRecordDecision => SelectedCampaign is not null && SelectedItem is not null && !string.IsNullOrWhiteSpace(ActionActor)
         && !string.IsNullOrWhiteSpace(string.IsNullOrWhiteSpace(ReviewerName) ? AssignedReviewerName : ReviewerName)
         && (SelectedDecision != ReviewDecision.ExceptionGranted || ExceptionExpiresAt?.Date >= DateTime.Today)
@@ -183,6 +208,13 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
     {
         IsLoading = true;
         ErrorMessage = null;
+        _governanceReport = null;
+        _eligibleOwners = Array.Empty<string>();
+        OnPropertyChanged(nameof(EligibleOwners));
+        OnPropertyChanged(nameof(GovernanceGroups));
+        OnPropertyChanged(nameof(GovernanceWork));
+        OnPropertyChanged(nameof(GovernanceHistory));
+        OnPropertyChanged(nameof(GovernanceReportStatus));
         try
         {
             var sharedReviewers = await _store.GetEligibleReviewerEmailsAsync();
@@ -197,16 +229,28 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
             var remindersDue = 0;
             foreach (var campaign in campaigns)
             {
-                var reevaluated = _governance.ReevaluateCampaign(campaign);
+                var reevaluated = _isSharedStore ? campaign : _governance.ReevaluateCampaign(campaign);
                 remindersDue += reevaluated.Items.Sum(item => item.ReminderCount)
                     - campaign.Items.Sum(item => item.ReminderCount);
-                if (HasLifecycleChanges(campaign, reevaluated)) await _store.SaveAsync(reevaluated);
+                if (!_isSharedStore && HasLifecycleChanges(campaign, reevaluated)) await _store.SaveAsync(reevaluated);
                 reviewed.Add(reevaluated);
             }
-            ReminderMessage = remindersDue == 0
+            ReminderMessage = _isSharedStore
+                ? "The server evaluates reminders, expiry and escalation independently of this workspace (approximately every minute)."
+                : remindersDue == 0
                 ? "Reviewer reminders are surfaced when this workspace is refreshed."
                 : $"{remindersDue} reviewer reminder(s) are due; see pending items and their assigned reviewers.";
             _campaigns = reviewed.OrderByDescending(item => item.CreatedAt).ToArray();
+            if (_store is SharedAccessReviewStore { SupportsGovernance: true } shared)
+            {
+                _governanceReport = await shared.GetGovernanceReportAsync();
+                _eligibleOwners = (await shared.GetGovernanceAssigneesAsync()).Owners;
+                OnPropertyChanged(nameof(EligibleOwners));
+                OnPropertyChanged(nameof(GovernanceGroups));
+                OnPropertyChanged(nameof(GovernanceWork));
+                OnPropertyChanged(nameof(GovernanceHistory));
+                OnPropertyChanged(nameof(GovernanceReportStatus));
+            }
             if (SelectedCampaign is not null)
                 SelectedCampaign = _campaigns.FirstOrDefault(item => item.Id == SelectedCampaign.Id);
             else
@@ -271,8 +315,16 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
         if (!CanAssignReviewer || SelectedCampaign is null || SelectedItem is null || ItemDueAt is null) return;
         try
         {
-            var campaign = _governance.AssignReviewer(SelectedCampaign, SelectedItem.Id, AssignedReviewerName, EndOfSelectedDayUtc(ItemDueAt.Value), ActionActor);
-            await _store.SaveAsync(campaign);
+            var campaign = SelectedCampaign;
+            if (_store is SharedAccessReviewStore shared)
+                campaign = await shared.ReassignAsync(campaign.Id, SelectedItem.Id,
+                    new ReassignReviewItemRequest(SelectedItem.AssignmentVersion, AssignedOwner, AssignedReviewerName,
+                        AssignmentTeam, AssignmentAccount, EndOfSelectedDayUtc(ItemDueAt.Value), AssignmentReason));
+            else
+            {
+                campaign = _governance.AssignReviewer(campaign, SelectedItem.Id, AssignedReviewerName, EndOfSelectedDayUtc(ItemDueAt.Value), ActionActor);
+                await _store.SaveAsync(campaign);
+            }
             await RefreshAsync();
             var selectedItemId = SelectedItem.Id;
             SelectedCampaign = _campaigns.FirstOrDefault(item => item.Id == campaign.Id);
@@ -349,7 +401,8 @@ public sealed class AccessReviewViewModel : WorkspaceViewModel
                 var owner = principal?.OwnerIds.FirstOrDefault();
                 var evidence = $"Provider={item.Provider}; Account={item.AccountId ?? "not reported"}; Principal={item.Principal}; Role={item.Role}; Scope={item.Scope}; Source={item.Source}; Owner={owner ?? "not reported"}; LastUsed={item.LastUsedAt?.ToString("O") ?? "not reported"}; LastChanged={item.LastChangedAt?.ToString("O") ?? "not reported"}; LastChangedBy={item.LastChangedBy ?? "not reported"}";
                 return new AccessReviewCandidate(principalId, accessId, null, provider, summary, evidence, owner,
-                    principal?.IdentityType ?? IdentityType.Unknown, item.IsPrivileged || principal?.IsPrivileged == true, principal?.IsExternal == true);
+                    principal?.IdentityType ?? IdentityType.Unknown, item.IsPrivileged || principal?.IsPrivileged == true, principal?.IsExternal == true)
+                    { ExternalAccountId = item.AccountId };
             }).ToArray();
     }
 

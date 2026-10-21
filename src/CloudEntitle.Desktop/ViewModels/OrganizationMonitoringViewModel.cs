@@ -13,6 +13,21 @@ public sealed partial class OrganizationViewModel
     private IReadOnlyList<SharedDeliveryAttemptDto> _deliveryAttempts = Array.Empty<SharedDeliveryAttemptDto>();
     private SharedNotificationRuleDto? _selectedNotificationRule;
     private SharedDeliveryDto? _selectedDelivery;
+    private SharedDriftEventDto? _selectedOperationalEvent;
+    private IReadOnlyList<ConnectorHealthDto> _connectorHealth = Array.Empty<ConnectorHealthDto>();
+    private string _connectorKind = "SignedWebhook", _operationalTypes = "", _ticketChannel = "jira";
+    private bool _automaticTickets;
+    private AsyncRelayCommand? _requestTicketCommand;
+    public AsyncRelayCommand RequestOperationalTicketCommand => _requestTicketCommand ??= new(RequestOperationalTicketAsync);
+    public IReadOnlyList<string> ConnectorKinds { get; } = new[] { "SignedWebhook", "Jira" };
+    public IReadOnlyList<ConnectorHealthDto> ConnectorHealth { get => _connectorHealth; private set => SetProperty(ref _connectorHealth, value); }
+    public string NotificationConnectorKind { get => _connectorKind; set => SetProperty(ref _connectorKind, value); }
+    public string OperationalTypes { get => _operationalTypes; set => SetProperty(ref _operationalTypes, value); }
+    public bool AllowAutomaticTickets { get => _automaticTickets; set => SetProperty(ref _automaticTickets, value); }
+    public string TicketChannel { get => _ticketChannel; set => SetProperty(ref _ticketChannel, value); }
+    public SharedDriftEventDto? SelectedOperationalEvent { get => _selectedOperationalEvent; set { if (SetProperty(ref _selectedOperationalEvent, value)) OnPropertyChanged(nameof(CanRequestOperationalTicket)); } }
+    public bool CanRequestOperationalTicket => CanReadMonitoring && _sharedMonitoringApi is ISharedOperationalApi
+        && IsAllowed(OrganizationAction.ManageRemediations) && SelectedOperationalEvent is not null;
     private string _monitoringStatus = "Central drift and alerts require shared organization mode.";
     private string _notificationRuleName = "Important access and risk changes";
     private string _notificationChannel = "security";
@@ -62,6 +77,9 @@ public sealed partial class OrganizationViewModel
             AlertOnAdded = value.Added;
             AlertOnRemoved = value.Removed;
             AlertOnChanged = value.Changed;
+            NotificationConnectorKind = value.ConnectorKind;
+            AllowAutomaticTickets = value.AllowAutomaticTickets;
+            OperationalTypes = string.Join(", ", value.EventTypes);
         }
     }
 
@@ -69,6 +87,9 @@ public sealed partial class OrganizationViewModel
     {
         NotificationRuleName = "Important access and risk changes";
         NotificationChannel = "security";
+        NotificationConnectorKind = "SignedWebhook";
+        AllowAutomaticTickets = false;
+        OperationalTypes = "";
         AlertMinimumSeverity = SharedAlertSeverity.High;
         NotificationEnabled = AlertOnFindings = AlertOnAccess = AlertOnAdded = AlertOnRemoved = AlertOnChanged = true;
     }
@@ -81,6 +102,8 @@ public sealed partial class OrganizationViewModel
         DeliveryAttempts = Array.Empty<SharedDeliveryAttemptDto>();
         SelectedNotificationRule = null;
         SelectedDelivery = null;
+        SelectedOperationalEvent = null;
+        ConnectorHealth = Array.Empty<ConnectorHealthDto>();
         ResetNotificationEditor();
         MonitoringStatus = "Central drift and alerts require a shared organization and inventory/finding permissions.";
     }
@@ -99,10 +122,14 @@ public sealed partial class OrganizationViewModel
             var rules = await _sharedMonitoringApi.GetNotificationRulesAsync(organization.Id);
             var events = await _sharedMonitoringApi.GetDriftEventsAsync(organization.Id);
             var deliveries = await _sharedMonitoringApi.GetNotificationDeliveriesAsync(organization.Id);
+            var health = _sharedMonitoringApi is ISharedOperationalApi operations
+                ? await operations.GetConnectorHealthAsync(organization.Id) : Array.Empty<ConnectorHealthDto>();
             if (SelectedOrganization != organization || _identity != identity) return;
             NotificationRules = rules;
             DriftEvents = events;
             NotificationDeliveries = deliveries;
+            ConnectorHealth = health;
+            SelectedOperationalEvent = null;
             SelectedDelivery = null;
             MonitoringStatus = $"{events.Count} recent drift event(s); {deliveries.Count(item => item.Status == "Failed")} failed and {deliveries.Count(item => item.Status is "Pending" or "Sending")} pending/sending deliveries. First complete scans establish a baseline.";
         }
@@ -127,7 +154,12 @@ public sealed partial class OrganizationViewModel
         {
             var rule = new SharedNotificationRuleDto(SelectedNotificationRule?.RuleId ?? Guid.NewGuid(),
                 NotificationRuleName.Trim(), NotificationEnabled, AlertMinimumSeverity, AlertOnFindings, AlertOnAccess,
-                AlertOnAdded, AlertOnRemoved, AlertOnChanged, NotificationChannel.Trim());
+                AlertOnAdded, AlertOnRemoved, AlertOnChanged, NotificationChannel.Trim())
+            {
+                ConnectorKind = NotificationConnectorKind,
+                AllowAutomaticTickets = AllowAutomaticTickets,
+                EventTypes = OperationalTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).ToArray()
+            };
             var saved = await _sharedMonitoringApi.SaveNotificationRuleAsync(organization.Id, rule);
             if (SelectedOrganization != organization || _identity != identity) return;
             await RefreshMonitoringAsync();
@@ -137,6 +169,31 @@ public sealed partial class OrganizationViewModel
         {
             if (SelectedOrganization == organization && _identity == identity)
                 MonitoringStatus = $"Notification rule save failed: {exception.Message}";
+        }
+    }
+
+    public async Task RequestOperationalTicketAsync()
+    {
+        if (!CanRequestOperationalTicket || SelectedOrganization is null || SelectedOperationalEvent is null
+            || _sharedMonitoringApi is not ISharedOperationalApi operations)
+        {
+            MonitoringStatus = "Select an event; shared mode and ManageRemediations are required to request a ticket.";
+            return;
+        }
+        var organization = SelectedOrganization;
+        var identity = _identity;
+        var eventId = SelectedOperationalEvent.EventId;
+        try
+        {
+            var status = await operations.RequestOperationalTicketAsync(organization.Id, eventId, TicketChannel.Trim());
+            if (SelectedOrganization != organization || _identity != identity) return;
+            await RefreshMonitoringAsync();
+            MonitoringStatus = $"Jira delivery {status.Delivery.DeliveryId:D}: {status.Delivery.Status}. Repeated requests are deduplicated; dead letters require reconciliation.";
+        }
+        catch (Exception exception)
+        {
+            if (SelectedOrganization == organization && _identity == identity)
+                MonitoringStatus = $"Ticket request failed: {exception.Message}";
         }
     }
 

@@ -9,7 +9,7 @@ using Xunit;
 
 namespace CloudEntitle.Desktop.Tests;
 
-public sealed class AccessReviewViewModelTests
+public sealed partial class AccessReviewViewModelTests
 {
     [Fact]
     public async Task ViewModel_ShouldCreateAssignDecideAndPersistReviewWithEvidence()

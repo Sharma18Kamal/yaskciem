@@ -859,6 +859,11 @@
                                     </DataGrid.Columns>
                                 </DataGrid>
                                 <StackPanel IsEnabled="{Binding CanManageNotificationRules}">
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <ComboBox ItemsSource="{Binding ConnectorKinds}" SelectedItem="{Binding NotificationConnectorKind, Mode=TwoWay}" MinWidth="130" ToolTip="Choose SignedWebhook for monitoring or Jira for ticket creation. The server channel kind must match."/>
+                                        <CheckBox Content="Policy: auto-create Jira tickets" IsChecked="{Binding AllowAutomaticTickets}" Margin="8,0,0,0" ToolTip="Explicit organization policy opt-in. Jira automatic tickets require a nonempty event type allowlist."/>
+                                    </WrapPanel>
+                                    <TextBox Text="{Binding OperationalTypes, UpdateSourceTrigger=PropertyChanged}" Margin="0,8,0,0" ToolTip="Comma-separated event types: finding.created, finding.resolved, finding.updated, access.added, access.removed, access.changed, review.overdue, scan.failed. Nonempty overrides legacy source/change checkboxes; minimum severity still applies. Blank preserves legacy drift filtering."/>
                                     <Grid Margin="0,8,0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                         <TextBox Text="{Binding NotificationRuleName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Notification rule name"/>
@@ -875,8 +880,9 @@
                                     </WrapPanel>
                                     <Button Content="Save notification rule" Command="{Binding SaveNotificationRuleCommand}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Save the selected rule or create a new rule; ManagePolicies permission is required"/>
                                 </StackPanel>
-                                <DataGrid ItemsSource="{Binding DriftEvents}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="60" MaxHeight="160" Margin="0,12,0,0">
+                                <DataGrid ItemsSource="{Binding DriftEvents}" SelectedItem="{Binding SelectedOperationalEvent, Mode=TwoWay}" SelectionMode="Single" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="60" MaxHeight="160" Margin="0,12,0,0">
                                     <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Event type" Binding="{Binding EventType}" Width="150"/>
                                         <DataGridTextColumn Header="Detected (UTC)" Binding="{Binding DetectedAtUtc, StringFormat=g}" Width="140"/>
                                         <DataGridTextColumn Header="Account" Binding="{Binding ExternalAccountId}" Width="*"/>
                                         <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="120"/>
@@ -885,8 +891,30 @@
                                         <DataGridTextColumn Header="Event ID" Binding="{Binding EventId}" Width="240"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <TextBox Text="{Binding TicketChannel, UpdateSourceTrigger=PropertyChanged}" MinWidth="120" ToolTip="Organization-specific Jira channel alias configured on the server; never enter a URL or token."/>
+                                    <Button Content="Request Jira ticket for selected event" Command="{Binding RequestOperationalTicketCommand}" IsEnabled="{Binding CanRequestOperationalTicket}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Explicitly queue a ticket for the selected event. Requires ManageRemediations and inventory/finding read access. Repeated requests are deduplicated; no automatic retry of ambiguous Jira sends."/>
+                                </StackPanel>
+                                <DataGrid ItemsSource="{Binding ConnectorHealth}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Channel" Binding="{Binding Channel}"/>
+                                        <DataGridTextColumn Header="Connector" Binding="{Binding ConnectorKind}"/>
+                                        <DataGridTextColumn Header="Config" Binding="{Binding ConfigurationStatus}"/>
+                                        <DataGridTextColumn Header="Passive health" Binding="{Binding Health}"/>
+                                        <DataGridTextColumn Header="Pending" Binding="{Binding Pending}"/>
+                                        <DataGridTextColumn Header="Sending" Binding="{Binding Sending}"/>
+                                        <DataGridTextColumn Header="Retrying" Binding="{Binding Retrying}"/>
+                                        <DataGridTextColumn Header="Dead letters" Binding="{Binding DeadLettered}"/>
+                                        <DataGridTextColumn Header="Delivered" Binding="{Binding Delivered}"/>
+                                        <DataGridTextColumn Header="Mean latency (ms)" Binding="{Binding AverageLatencyMilliseconds}"/>
+                                        <DataGridTextColumn Header="Last attempt" Binding="{Binding LastAttemptAtUtc}"/>
+                                        <DataGridTextColumn Header="Last success" Binding="{Binding LastSuccessAtUtc}"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
                                 <DataGrid ItemsSource="{Binding NotificationDeliveries}" SelectedItem="{Binding SelectedDelivery, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="60" MaxHeight="160" Margin="0,12,0,0">
                                     <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Connector" Binding="{Binding ConnectorKind}" Width="100"/>
+                                        <DataGridCheckBoxColumn Header="Dead letter" Binding="{Binding DeadLettered}" Width="80"/>
                                         <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="100"/>
                                         <DataGridTextColumn Header="State" Binding="{Binding Status}" Width="90"/>
                                         <DataGridTextColumn Header="Attempts" Binding="{Binding AttemptCount}" Width="70"/>
@@ -898,6 +926,7 @@
                                 <Button Content="Inspect delivery attempts" Command="{Binding LoadDeliveryAttemptsCommand}" IsEnabled="{Binding CanReadMonitoring}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Read the selected delivery's attempts, HTTP status codes, and safe failure codes"/>
                                 <DataGrid ItemsSource="{Binding DeliveryAttempts}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="40" MaxHeight="120" Margin="0,8,0,0">
                                     <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Latency (ms)" Binding="{Binding LatencyMilliseconds}" Width="100"/>
                                         <DataGridTextColumn Header="Attempt" Binding="{Binding AttemptNumber}" Width="70"/>
                                         <DataGridTextColumn Header="Started (UTC)" Binding="{Binding StartedAtUtc, StringFormat=g}" Width="140"/>
                                         <DataGridTextColumn Header="Completed (UTC)" Binding="{Binding CompletedAtUtc, StringFormat=g}" Width="140"/>
@@ -1004,7 +1033,7 @@
                 <TextBlock Text="{Binding CoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
                 <UniformGrid Columns="3" Margin="0,0,0,8">
                     <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="OPEN CAMPAIGNS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding OpenCampaigns}" Style="{StaticResource CardValue}"/></StackPanel></Border>
-                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="PENDING ITEMS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding PendingItems}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="UNRESOLVED ITEMS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding PendingItems}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                     <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="ESCALATED ITEMS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding EscalatedItems}" Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 </UniformGrid>
                 <Border Style="{StaticResource SectionCard}">
@@ -1050,9 +1079,11 @@
                                 <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80"/>
                                 <DataGridTextColumn Header="Access" Binding="{Binding AccessSummary}" Width="*"/>
                                 <DataGridTextColumn Header="Assigned reviewer" Binding="{Binding AssignedReviewer}" Width="130"/>
-                                <DataGridTextColumn Header="Owner" Binding="{Binding OwnerSnapshot}" Width="130"/>
+                                <DataGridTextColumn Header="Current owner" Binding="{Binding AssignedOwner}" Width="130"/>
+                                <DataGridTextColumn Header="Account" Binding="{Binding ExternalAccountId}" Width="130"/>
+                                <DataGridTextColumn Header="Team" Binding="{Binding Team}" Width="100"/>
                                 <DataGridTextColumn Header="Decision" Binding="{Binding Decision}" Width="115"/>
-                                <DataGridTextColumn Header="Due" Binding="{Binding DueAt, StringFormat=d}" Width="90"/>
+                                <DataGridTextColumn Header="Workflow due" Binding="{Binding WorkflowDeadline, StringFormat=d}" Width="90"/>
                                 <DataGridTextColumn Header="Reminders" Binding="{Binding ReminderCount}" Width="75"/>
                                 <DataGridTextColumn Header="Status" Binding="{Binding EscalationReason}" Width="120"/>
                             </DataGrid.Columns>
@@ -1075,10 +1106,16 @@
                                     <TextBox Grid.Column="2" Text="{Binding ActionActor, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding IsSharedStore}" ToolTip="Shared mode records the authenticated organization identity; local mode records this actor label." Margin="3,0"/>
                                     <ComboBox Grid.Column="3" ItemsSource="{Binding Decisions}" SelectedItem="{Binding SelectedDecision, Mode=TwoWay}" Margin="6,0,0,0" ToolTip="Choose the review decision for the selected access item."/>
                                 </Grid>
+                                <WrapPanel IsEnabled="{Binding IsSharedStore}" Margin="0,8,0,0">
+                                    <ComboBox ItemsSource="{Binding EligibleOwners}" SelectedItem="{Binding AssignedOwner, Mode=TwoWay}" IsEditable="True" Text="{Binding AssignedOwner, UpdateSourceTrigger=PropertyChanged}" MinWidth="160" ToolTip="Current owner: active organization member with inventory access. Captured owner evidence is unchanged."/>
+                                    <TextBox Text="{Binding AssignmentTeam, UpdateSourceTrigger=PropertyChanged}" MinWidth="100" Margin="6,0,0,0" ToolTip="Governed team label (up to 120 characters); not inferred from cloud groups."/>
+                                    <TextBox Text="{Binding AssignmentAccount, UpdateSourceTrigger=PropertyChanged}" MinWidth="140" Margin="6,0,0,0" ToolTip="External account ID, which must be bound to this organization and provider. Blank retains unknown attribution."/>
+                                </WrapPanel>
+                                <TextBox Text="{Binding AssignmentReason, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding IsSharedStore}" ToolTip="Required reason for shared reassignment; audit records the actor, old/new assignment, labels and deadline." Margin="0,8,0,0"/>
                                 <TextBox Text="{Binding ReviewComment, UpdateSourceTrigger=PropertyChanged}" ToolTip="Decision rationale; required for exception, rejection, or investigation" Margin="0,8,0,0"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                     <DatePicker SelectedDate="{Binding ExceptionExpiresAt, Mode=TwoWay}" ToolTip="Exception expiration date; required for exception decision"/>
-                                    <Button Content="Assign reviewer" Command="{Binding AssignReviewerCommand}" IsEnabled="{Binding CanAssignReviewer}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Assign the eligible reviewer and deadline to the selected item."/>
+                                    <Button Content="Update assignment" Command="{Binding AssignReviewerCommand}" IsEnabled="{Binding CanAssignReviewer}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Assign reviewer and deadline; shared mode also updates current owner/account/team with a required audited reason and concurrency check."/>
                                     <Button Content="Record decision" Command="{Binding RecordDecisionCommand}" IsEnabled="{Binding CanRecordDecision}" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" ToolTip="Record the decision and create an evidence-hashed attestation. Non-certified decisions need a comment."/>
                                 </StackPanel>
                                 <TextBlock Text="AUDIT HISTORY" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
@@ -1089,6 +1126,61 @@
                         </Border>
                     </StackPanel>
                 </Grid>
+                <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
+                    <StackPanel>
+                        <TextBlock Text="ORGANIZATION GOVERNANCE" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="{Binding GovernanceReportStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6"/>
+                        <DataGrid ItemsSource="{Binding GovernanceGroups}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="260">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}"/>
+                                <DataGridTextColumn Header="Account" Binding="{Binding Account}"/>
+                                <DataGridTextColumn Header="Team" Binding="{Binding Team}"/>
+                                <DataGridTextColumn Header="Total" Binding="{Binding Total}"/>
+                                <DataGridTextColumn Header="Completed" Binding="{Binding Completed}"/>
+                                <DataGridTextColumn Header="Complete %" Binding="{Binding CompletionPercent}"/>
+                                <DataGridTextColumn Header="Unresolved" Binding="{Binding Unresolved}"/>
+                                <DataGridTextColumn Header="Overdue" Binding="{Binding Overdue}"/>
+                                <DataGridTextColumn Header="Active exceptions" Binding="{Binding ActiveExceptions}"/>
+                                <DataGridTextColumn Header="Expired exceptions" Binding="{Binding ExpiredExceptions}"/>
+                                <DataGridTextColumn Header="Age &lt;30d" Binding="{Binding ExceptionsUnder30Days}"/>
+                                <DataGridTextColumn Header="Age 30-89d" Binding="{Binding Exceptions30To89Days}"/>
+                                <DataGridTextColumn Header="Age 90+d" Binding="{Binding Exceptions90DaysOrOlder}"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <Expander Header="Deadlines and overdue work" Margin="0,8,0,0" ToolTip="Inspect all organization review deadlines, overdue flags, temporary exception ages, reminders and escalation state.">
+                            <DataGrid ItemsSource="{Binding GovernanceWork}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="300">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Campaign" Binding="{Binding Campaign}"/>
+                                    <DataGridTextColumn Header="Account" Binding="{Binding Account}"/>
+                                    <DataGridTextColumn Header="Team" Binding="{Binding Team}"/>
+                                    <DataGridTextColumn Header="Owner" Binding="{Binding Owner}"/>
+                                    <DataGridTextColumn Header="Reviewer" Binding="{Binding Reviewer}"/>
+                                    <DataGridTextColumn Header="Decision" Binding="{Binding Decision}"/>
+                                    <DataGridTextColumn Header="Deadline (UTC)" Binding="{Binding DueAtUtc, StringFormat=u}"/>
+                                    <DataGridCheckBoxColumn Header="Overdue" Binding="{Binding Overdue}"/>
+                                    <DataGridTextColumn Header="Exception expires (UTC)" Binding="{Binding ExceptionExpiresAtUtc, StringFormat=u}"/>
+                                    <DataGridTextColumn Header="Exception age (days)" Binding="{Binding ExceptionAgeDays}"/>
+                                    <DataGridTextColumn Header="Review reminders" Binding="{Binding Reminders}"/>
+                                    <DataGridTextColumn Header="Expiry reminders" Binding="{Binding ExceptionReminders}"/>
+                                    <DataGridTextColumn Header="Escalated (UTC)" Binding="{Binding EscalatedAtUtc, StringFormat=u}"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Expander>
+                        <Expander Header="Organization escalation and audit history" Margin="0,8,0,0" ToolTip="Inspect the latest 500 central governance audit events, including escalation, expiry and reassignment history.">
+                            <DataGrid ItemsSource="{Binding GovernanceHistory}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="300">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="UTC" Binding="{Binding Event.Timestamp, StringFormat=u}"/>
+                                    <DataGridTextColumn Header="Campaign" Binding="{Binding Campaign}"/>
+                                    <DataGridTextColumn Header="Item" Binding="{Binding ItemId}"/>
+                                    <DataGridTextColumn Header="Actor" Binding="{Binding Event.Actor}"/>
+                                    <DataGridTextColumn Header="Action" Binding="{Binding Event.Action}"/>
+                                    <DataGridTextColumn Header="Details" Binding="{Binding Event.Details}" Width="*"/>
+                                    <DataGridTextColumn Header="Correlation" Binding="{Binding Event.CorrelationIdText}"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Expander>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ScanHistoryViewModel}">

@@ -80,6 +80,7 @@ builder.Services.AddSingleton<IScanJobExecutor, CloudProviderScanJobExecutor>();
 builder.Services.AddHostedService<ScanOrchestrationWorker>();
 builder.Services.AddSingleton<ICentralNotificationTransport, CentralWebhookTransport>();
 builder.Services.AddHostedService<CentralNotificationWorker>();
+builder.Services.AddHostedService<GovernanceDeadlineWorker>();
 
 var auditArchiveConfiguration = builder.Configuration.GetSection("AuditArchive");
 var archiveCredentialError = string.Empty;

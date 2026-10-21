@@ -45,8 +45,23 @@ public sealed class OrganizationViewModelTests
             viewModel.SelectedDelivery = Assert.Single(viewModel.NotificationDeliveries);
             await viewModel.LoadDeliveryAttemptsAsync();
             Assert.Equal(503, Assert.Single(viewModel.DeliveryAttempts).HttpStatus);
+            Assert.Single(viewModel.ConnectorHealth);
+            viewModel.SelectedOperationalEvent = Assert.Single(viewModel.DriftEvents);
+            Assert.Equal(canEdit, viewModel.CanRequestOperationalTicket);
+            viewModel.TicketChannel = "jira";
+            await viewModel.RequestOperationalTicketAsync();
+            Assert.Equal(canEdit ? 1 : 0, monitor.TicketRequests);
+            viewModel.NotificationConnectorKind = "Jira";
+            viewModel.AllowAutomaticTickets = true;
+            viewModel.OperationalTypes = "review.overdue, scan.failed";
             await viewModel.SaveNotificationRuleAsync();
             Assert.Equal(canEdit ? 1 : 0, monitor.Saves);
+            if (canEdit)
+            {
+                Assert.Equal("Jira", monitor.LastRule!.ConnectorKind);
+                Assert.True(monitor.LastRule.AllowAutomaticTickets);
+                Assert.Equal(new[] { "review.overdue", "scan.failed" }, monitor.LastRule.EventTypes);
+            }
 
             monitor.PendingRefresh = new TaskCompletionSource<IReadOnlyList<SharedNotificationRuleDto>>(TaskCreationOptions.RunContinuationsAsynchronously);
             var inFlight = viewModel.RefreshMonitoringAsync();
@@ -55,6 +70,8 @@ public sealed class OrganizationViewModelTests
             await inFlight;
             Assert.Empty(viewModel.NotificationDeliveries);
             Assert.Empty(viewModel.DeliveryAttempts);
+            Assert.Empty(viewModel.ConnectorHealth);
+            Assert.Null(viewModel.SelectedOperationalEvent);
             Assert.False(viewModel.CanReadMonitoring);
         }
         finally
@@ -121,8 +138,18 @@ public sealed class OrganizationViewModelTests
             => Task.FromResult(identity);
     }
 
-    private sealed class TestMonitoringApi : ISharedMonitoringApi
+    private sealed class TestMonitoringApi : ISharedMonitoringApi, ISharedOperationalApi
     {
+        public int TicketRequests { get; private set; }
+        public SharedNotificationRuleDto? LastRule { get; private set; }
+        public Task<IReadOnlyList<ConnectorHealthDto>> GetConnectorHealthAsync(Guid organizationId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ConnectorHealthDto>>(new[]
+                { new ConnectorHealthDto("jira", "Jira", "Configured", "Degraded", 0, 0, 0, 1, 0, DateTimeOffset.UtcNow, null, 25) });
+        public Task<SharedDeliveryStatusDto> RequestOperationalTicketAsync(Guid organizationId, Guid eventId, string channel, CancellationToken cancellationToken = default)
+        {
+            TicketRequests++;
+            return Task.FromResult(new SharedDeliveryStatusDto(_delivery with { Channel = channel, ConnectorKind = "Jira" }, Array.Empty<SharedDeliveryAttemptDto>()));
+        }
         private readonly SharedDeliveryDto _delivery = new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "security",
             "Failed", 5, DateTime.UtcNow, null, DateTime.UtcNow, "http_rejected");
         public int Saves { get; private set; }
@@ -132,10 +159,12 @@ public sealed class OrganizationViewModelTests
         public Task<SharedNotificationRuleDto> SaveNotificationRuleAsync(Guid organizationId, SharedNotificationRuleDto rule, CancellationToken cancellationToken = default)
         {
             Saves++;
+            LastRule = rule;
             return Task.FromResult(rule);
         }
         public Task<IReadOnlyList<SharedDriftEventDto>> GetDriftEventsAsync(Guid organizationId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<SharedDriftEventDto>>(Array.Empty<SharedDriftEventDto>());
+            => Task.FromResult<IReadOnlyList<SharedDriftEventDto>>(new[] { new SharedDriftEventDto(Guid.NewGuid(), Guid.Empty, Guid.Empty,
+                CloudProvider.Aws, "123456789012", "review", "Changed", "review-item", SharedAlertSeverity.High, null, null, DateTime.UtcNow) });
         public Task<IReadOnlyList<SharedDeliveryDto>> GetNotificationDeliveriesAsync(Guid organizationId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<SharedDeliveryDto>>(new[] { _delivery });
         public Task<SharedDeliveryStatusDto> GetNotificationDeliveryStatusAsync(Guid organizationId, Guid deliveryId, CancellationToken cancellationToken = default)

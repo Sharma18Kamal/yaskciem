@@ -45,8 +45,38 @@ public interface ISharedMonitoringApi
     Task<SharedDeliveryStatusDto> GetNotificationDeliveryStatusAsync(Guid organizationId, Guid deliveryId, CancellationToken cancellationToken = default);
 }
 
-public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi
+public interface ISharedGovernanceApi
 {
+    Task<GovernanceReportDto> GetGovernanceReportAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<GovernanceAssigneesDto> GetGovernanceAssigneesAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<AccessReviewCampaign> ReassignReviewItemAsync(Guid organizationId, Guid campaignId, Guid itemId,
+        ReassignReviewItemRequest request, CancellationToken cancellationToken = default);
+}
+
+public interface ISharedOperationalApi
+{
+    Task<IReadOnlyList<ConnectorHealthDto>> GetConnectorHealthAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<SharedDeliveryStatusDto> RequestOperationalTicketAsync(Guid organizationId, Guid eventId, string channel, CancellationToken cancellationToken = default);
+}
+
+public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi, ISharedGovernanceApi, ISharedOperationalApi
+{
+    public async Task<IReadOnlyList<ConnectorHealthDto>> GetConnectorHealthAsync(Guid organizationId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetConnectorHealthAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<SharedDeliveryStatusDto> RequestOperationalTicketAsync(Guid organizationId, Guid eventId, string channel, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.RequestOperationalTicketAsync(organizationId, eventId, new(channel), await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<GovernanceReportDto> GetGovernanceReportAsync(Guid organizationId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetGovernanceReportAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<GovernanceAssigneesDto> GetGovernanceAssigneesAsync(Guid organizationId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetGovernanceAssigneesAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<AccessReviewCampaign> ReassignReviewItemAsync(Guid organizationId, Guid campaignId, Guid itemId,
+        ReassignReviewItemRequest request, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.ReassignReviewItemAsync(organizationId, campaignId, itemId, request, await TokenAsync(cancellationToken), cancellationToken));
+
     public async Task<IReadOnlyList<SharedNotificationRuleDto>> GetNotificationRulesAsync(Guid organizationId, CancellationToken cancellationToken = default)
         => await RequireDataAsync(client.GetNotificationRulesAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
 

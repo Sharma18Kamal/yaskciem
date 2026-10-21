@@ -22,7 +22,7 @@ using Xunit;
 
 namespace CloudEntitle.Integration.Tests;
 
-public sealed class SharedWorkspaceEndpointTests
+public sealed partial class SharedWorkspaceEndpointTests
 {
     [PostgreSqlFact]
     public async Task CentralMonitoringEndpoints_ShouldEnforcePermissionsAndExposeSharedDeliveryAttempts()
@@ -71,7 +71,8 @@ public sealed class SharedWorkspaceEndpointTests
             rule with { Channel = "https://secret.invalid" });
         Assert.Equal(HttpStatusCode.BadRequest, invalidRule.StatusCode);
         using var readRule = await Send(HttpMethod.Get, $"{prefix}/notification-rules", viewer);
-        Assert.Equal(rule, Assert.Single((await readRule.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SharedNotificationRuleDto>>>())!.Data));
+        var readBack = Assert.Single((await readRule.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SharedNotificationRuleDto>>>())!.Data);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(rule), System.Text.Json.JsonSerializer.Serialize(readBack));
 
         var now = DateTime.UtcNow.AddMinutes(-2);
         var scan = new UploadSharedScanSummaryRequest(Guid.NewGuid(), now.AddSeconds(-1), now, "Aws",

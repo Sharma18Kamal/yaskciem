@@ -11,6 +11,46 @@ namespace CloudEntitle.IdentityGovernance.Tests;
 public sealed class IdentityGovernanceTests
 {
     [Fact]
+    public void InvestigationAndRenewedExceptions_ShouldUseCurrentDeadlineAndPreserveHistory()
+    {
+        var now = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var service = new IdentityGovernanceService();
+        var candidate = new AccessReviewCandidate(Guid.NewGuid(), Guid.NewGuid(), null, CloudProvider.Aws,
+            "Admin access", "Immutable evidence", "owner") { ExternalAccountId = "123", Team = "Platform" };
+        var campaign = service.CreateCampaign("Review", new[] { candidate }, TimeSpan.FromDays(2), asOf: now);
+        var id = campaign.Items[0].Id;
+        campaign = service.RecordDecision(campaign, id, ReviewDecision.NeedsInvestigation, "reviewer", "Investigate", asOf: now);
+        Assert.Equal(CampaignStatus.Open, campaign.Status);
+        campaign = service.ReevaluateCampaign(campaign, now.AddDays(2));
+        Assert.Equal(CampaignStatus.Escalated, campaign.Status);
+        campaign = service.RecordDecision(campaign, id, ReviewDecision.ExceptionGranted, "reviewer", "Approved",
+            now.AddDays(10), now.AddDays(3));
+        var active = Assert.Single(campaign.Items);
+        Assert.Equal(now.AddDays(2), active.DueAt);
+        Assert.Null(active.EscalatedAt);
+        Assert.Equal("123", active.ExternalAccountId);
+        Assert.Equal("Platform", active.Team);
+        campaign = service.ReevaluateCampaign(campaign, now.AddDays(7));
+        Assert.Equal(1, campaign.Items[0].ExceptionReminderCount);
+        Assert.Null(campaign.Items[0].EscalatedAt);
+        Assert.Equal(1, service.ReevaluateCampaign(campaign, now.AddDays(7).AddHours(1)).Items[0].ExceptionReminderCount);
+        campaign = service.ReevaluateCampaign(campaign, now.AddDays(10));
+        Assert.Equal(CampaignStatus.Escalated, campaign.Status);
+        Assert.NotNull(campaign.Items[0].ExceptionExpiredAt);
+        campaign = service.RecordDecision(campaign, id, ReviewDecision.ExceptionGranted, "reviewer", "Renewed",
+            now.AddDays(30), now.AddDays(11));
+        var renewed = Assert.Single(campaign.Items);
+        Assert.Equal(CampaignStatus.Completed, campaign.Status);
+        Assert.Null(renewed.ExceptionExpiredAt);
+        Assert.Null(renewed.EscalatedAt);
+        Assert.Equal(0, renewed.ExceptionReminderCount);
+        Assert.Contains(renewed.AuditTrail, entry => entry.Action == "ExceptionExpired");
+        Assert.Equal(3, renewed.Attestations.Count);
+        var cancelled = campaign with { Status = CampaignStatus.Cancelled };
+        Assert.Same(cancelled, service.ReevaluateCampaign(cancelled, now.AddDays(40)));
+    }
+
+    [Fact]
     public void PrivilegedInactiveIdentity_ShouldBeClassifiedDormantWithEvidence()
     {
         var principal = new CloudPrincipal { Id = Guid.NewGuid(), AccountId = Guid.NewGuid(), Name = "Dormant Admin", IdentityType = IdentityType.User, IsActive = true, IsPrivileged = true, LastActivityAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
@@ -144,7 +184,8 @@ public sealed class IdentityGovernanceTests
         var expiry = now.AddDays(2);
         var approved = service.RecordDecision(campaign, item.Id, ReviewDecision.ExceptionGranted, "reviewer", "Approved temporary exception", expiry, now);
         Assert.Equal(CampaignStatus.Completed, approved.Status);
-        Assert.Equal(expiry, Assert.Single(approved.Items).DueAt);
+        Assert.Equal(item.DueAt, Assert.Single(approved.Items).DueAt);
+        Assert.Equal(expiry, IdentityGovernanceService.EffectiveDeadline(approved.Items[0], approved));
 
         var expired = service.ReevaluateCampaign(approved, expiry.AddMinutes(1));
         var expiredItem = Assert.Single(expired.Items);

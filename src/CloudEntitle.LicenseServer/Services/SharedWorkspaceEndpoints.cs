@@ -18,6 +18,8 @@ public static partial class SharedWorkspaceEndpoints
     public static void MapSharedWorkspaceEndpoints(this WebApplication app, SharedWorkspaceStore store)
     {
     app.MapCentralMonitoringEndpoints(store);
+    app.MapOperationalIntegrationEndpoints(store);
+    app.MapGovernanceEndpoints(store);
         app.MapGet("/api/v1/organizations", (ClaimsPrincipal principal) => GetOrganizations(principal, store))
             .RequireAuthorization("CiemApiAccess");
         app.MapPost("/api/v1/organizations", (ClaimsPrincipal principal, CreateOrganizationRequest request) => CreateOrganization(principal, request, store))
@@ -565,10 +567,23 @@ public static partial class SharedWorkspaceEndpoints
         var now = DateTime.UtcNow;
         if (campaign.DueAt <= now) throw new ArgumentException("A shared review campaign requires a future due date.");
         ValidateReviewerAssignments(campaign, null, identity, service, organizationId);
+        var owners = service.GetMembersAuthorizedForAction(organizationId, identity, OrganizationAction.ManageRemediations, OrganizationAction.ViewInventory)
+            .Select(member => member.Email).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in campaign.Items)
+        {
+            ValidateGovernanceLabels(item, null, service, organizationId, identity);
+            if (NormalizeLabel(item.AssignedOwner) is { } owner && !owners.Contains(owner))
+                throw new ArgumentException("The owner must be an active organization member with inventory access.");
+            if (item.DueAt.HasValue && item.DueAt <= now) throw new ArgumentException("Review item deadlines must be in the future.");
+        }
         var items = campaign.Items.Select(item => item with
         {
             AssignedReviewer = item.AssignedReviewer?.Trim(),
             OwnerSnapshot = item.OwnerSnapshot?.Trim(),
+            AssignedOwner = NormalizeLabel(item.AssignedOwner),
+            Team = NormalizeLabel(item.Team),
+            ExternalAccountId = NormalizeLabel(item.ExternalAccountId),
+            AssignmentVersion = 0,
             Decision = ReviewDecision.Pending,
             Reviewer = null,
             ReviewComment = null,
@@ -578,6 +593,8 @@ public static partial class SharedWorkspaceEndpoints
             Attestations = Array.Empty<AccessReviewAttestation>(),
             ExceptionExpiresAt = null,
             ExceptionExpiredAt = null,
+            ExceptionReminderCount = 0,
+            LastExceptionReminderAt = null,
             EscalatedAt = null,
             EscalationReason = null,
             AuditTrail = new[] { CreateReviewAuditEntry(now, identity.Email, "ItemCreated", "Review item created by the shared service.", correlationId, item.Id, actorUserId: identity.UserId) }
@@ -600,7 +617,8 @@ public static partial class SharedWorkspaceEndpoints
         OrganizationIdentity identity,
         OrganizationManagementService service,
         Guid organizationId,
-        Guid correlationId)
+        Guid correlationId,
+        string assignmentReason = "Shared review assignment update")
     {
         var now = DateTime.UtcNow;
         if (!existing.Items.Select(item => item.Id).OrderBy(id => id).SequenceEqual(incoming.Items.Select(item => item.Id).OrderBy(id => id)))
@@ -620,10 +638,31 @@ public static partial class SharedWorkspaceEndpoints
             var itemAudit = previous.AuditTrail.ToList();
             var assignedReviewer = submitted.AssignedReviewer?.Trim();
             var itemDueAt = submitted.DueAt?.ToUniversalTime();
-            if (!string.Equals(previous.AssignedReviewer, assignedReviewer, StringComparison.OrdinalIgnoreCase) || previous.DueAt != itemDueAt)
+            var assignmentChanged = !string.Equals(previous.AssignedReviewer, assignedReviewer, StringComparison.OrdinalIgnoreCase)
+                || previous.DueAt != itemDueAt || NormalizeLabel(submitted.AssignedOwner) != previous.AssignedOwner
+                || NormalizeLabel(submitted.Team) != previous.Team || NormalizeLabel(submitted.ExternalAccountId) != previous.ExternalAccountId;
+            var decisionChanged = submitted.Decision != previous.Decision
+                || submitted.Decision == ReviewDecision.ExceptionGranted && submitted.ExceptionExpiresAt?.ToUniversalTime() != previous.ExceptionExpiresAt;
+            if (submitted.AssignmentVersion != previous.AssignmentVersion && (assignmentChanged || decisionChanged))
+                throw new InvalidOperationException("The assignment changed since this item was loaded. Refresh before updating it.");
+            if (assignmentChanged)
             {
-                itemAudit.Add(CreateReviewAuditEntry(now, identity.Email, "ReviewerAssigned", $"Assigned reviewer: {assignedReviewer ?? "unassigned"}; due: {itemDueAt:O}.", correlationId, previous.Id, actorUserId: identity.UserId));
-                audit.Add(CreateReviewAuditEntry(now, identity.Email, "ReviewerAssigned", $"Item {previous.Id:D}; reviewer {assignedReviewer ?? "unassigned"}.", correlationId, previous.Id, actorUserId: identity.UserId));
+                if (itemDueAt.HasValue && itemDueAt <= now) throw new ArgumentException("The review deadline must be in the future.");
+                ValidateGovernanceLabels(submitted, previous, service, organizationId, identity);
+                if (NormalizeLabel(submitted.AssignedOwner) is { } owner
+                    && !service.GetMembersAuthorizedForAction(organizationId, identity, OrganizationAction.ManageRemediations, OrganizationAction.ViewInventory)
+                        .Any(member => member.Email.Equals(owner, StringComparison.OrdinalIgnoreCase)))
+                    throw new ArgumentException("The owner must be an active organization member with inventory access.");
+                var details = JsonSerializer.Serialize(new
+                {
+                    Before = new { previous.AssignedOwner, previous.AssignedReviewer, previous.Team, previous.ExternalAccountId, previous.DueAt },
+                    After = new { AssignedOwner = NormalizeLabel(submitted.AssignedOwner), AssignedReviewer = assignedReviewer,
+                        Team = NormalizeLabel(submitted.Team), ExternalAccountId = NormalizeLabel(submitted.ExternalAccountId), DueAt = itemDueAt },
+                    Reason = CloudEntitle.Security.Services.SensitiveDataRedactor.RedactText(assignmentReason.Trim())
+                });
+                var entry = CreateReviewAuditEntry(now, identity.Email, "AssignmentChanged", details, correlationId, previous.Id, actorUserId: identity.UserId);
+                itemAudit.Add(entry);
+                audit.Add(entry);
             }
 
             var decision = previous.Decision;
@@ -632,7 +671,7 @@ public static partial class SharedWorkspaceEndpoints
             var decidedAt = previous.DecidedAt;
             var exceptionExpiresAt = previous.ExceptionExpiresAt;
             var attestations = previous.Attestations;
-            if (submitted.Decision != previous.Decision)
+            if (decisionChanged)
             {
                 if (submitted.Decision == ReviewDecision.Pending) throw new InvalidOperationException("A recorded access-review decision cannot be reset to Pending.");
                 if (string.IsNullOrWhiteSpace(previous.AssignedReviewer)
@@ -666,6 +705,10 @@ public static partial class SharedWorkspaceEndpoints
             updatedItems.Add(previous with
             {
                 AssignedReviewer = assignedReviewer,
+                AssignedOwner = NormalizeLabel(submitted.AssignedOwner),
+                Team = NormalizeLabel(submitted.Team),
+                ExternalAccountId = NormalizeLabel(submitted.ExternalAccountId),
+                AssignmentVersion = previous.AssignmentVersion + (assignmentChanged ? 1 : 0),
                 DueAt = itemDueAt,
                 Decision = decision,
                 Reviewer = reviewer,
@@ -673,9 +716,12 @@ public static partial class SharedWorkspaceEndpoints
                 DecidedAt = decidedAt,
                 Attestations = attestations,
                 ExceptionExpiresAt = exceptionExpiresAt,
-                ExceptionExpiredAt = previous.ExceptionExpiredAt,
-                EscalatedAt = previous.EscalatedAt,
-                EscalationReason = previous.EscalationReason,
+                ExceptionExpiredAt = decisionChanged ? null : previous.ExceptionExpiredAt,
+                ExceptionReminderCount = decisionChanged ? 0 : previous.ExceptionReminderCount,
+                LastExceptionReminderAt = decisionChanged ? null : previous.LastExceptionReminderAt,
+                LastReminderAt = assignmentChanged || decisionChanged ? null : previous.LastReminderAt,
+                EscalatedAt = decisionChanged || assignmentChanged ? null : previous.EscalatedAt,
+                EscalationReason = decisionChanged || assignmentChanged ? null : previous.EscalationReason,
                 AuditTrail = itemAudit
             });
         }
@@ -685,7 +731,23 @@ public static partial class SharedWorkspaceEndpoints
         if (name != existing.Name || dueAt != existing.DueAt)
             audit.Add(CreateReviewAuditEntry(now, identity.Email, "CampaignUpdated", $"Name={name}; DueAt={dueAt:O}.", correlationId, actorUserId: identity.UserId));
         var status = updatedItems.All(item => item.Decision != ReviewDecision.Pending) ? CampaignStatus.Completed : CampaignStatus.Open;
-        return existing with { Name = name, DueAt = dueAt, Status = status, Items = updatedItems, AuditTrail = audit };
+        return existing with { Name = name, DueAt = dueAt,
+            Status = existing.Status is CampaignStatus.Cancelled or CampaignStatus.Draft ? existing.Status : status,
+            Items = updatedItems, AuditTrail = audit };
+    }
+
+    private static string? NormalizeLabel(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static void ValidateGovernanceLabels(AccessReviewItem item, AccessReviewItem? previous,
+        OrganizationManagementService service, Guid organizationId, OrganizationIdentity identity)
+    {
+        if (item.Team?.Length > 120 || item.ExternalAccountId?.Length > 512 || item.AssignedOwner?.Length > 320
+            || item.AssignedReviewer?.Length > 320) throw new ArgumentException("Governance labels exceed the supported length.");
+        var account = NormalizeLabel(item.ExternalAccountId);
+        if (account is not null && (previous is null || previous.ExternalAccountId != account)
+            && !service.GetTenantBindings(organizationId, identity).Any(binding => binding.Provider == item.Provider
+                && binding.ExternalTenantId.Equals(account, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("The account must be bound to this organization and provider.");
     }
 
     private static void ValidateReviewerAssignments(
@@ -733,16 +795,22 @@ public static partial class SharedWorkspaceEndpoints
             EvidenceSha256 = evidenceSha256
         };
 
-    private static AccessReviewCampaign EnsureAuditMetadata(AccessReviewCampaign campaign, Guid correlationId)
+    internal static AccessReviewCampaign EnsureAuditMetadata(AccessReviewCampaign campaign, Guid correlationId)
     {
+        var stamped = new Dictionary<AccessReviewAuditEntry, AccessReviewAuditEntry>();
         AccessReviewAuditEntry EnsureEntry(AccessReviewAuditEntry entry)
-            => entry.EventId != Guid.Empty && entry.CorrelationId != Guid.Empty
+        {
+            if (stamped.TryGetValue(entry, out var existing)) return existing;
+            var result = entry.EventId != Guid.Empty && entry.CorrelationId != Guid.Empty
                 ? entry
                 : entry with
                 {
                     EventId = entry.EventId == Guid.Empty ? Guid.NewGuid() : entry.EventId,
                     CorrelationId = entry.CorrelationId == Guid.Empty ? correlationId : entry.CorrelationId
                 };
+            stamped[entry] = result;
+            return result;
+        }
 
         return campaign with
         {

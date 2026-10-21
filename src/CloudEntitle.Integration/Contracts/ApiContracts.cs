@@ -84,17 +84,34 @@ public sealed record SharedScanSummaryDto(
 public enum SharedAlertSeverity { Informational, Low, Medium, High, Critical }
 public sealed record SharedNotificationRuleDto(
     Guid RuleId, string Name, bool Enabled, SharedAlertSeverity MinimumSeverity,
-    bool Findings, bool EffectiveAccess, bool Added, bool Removed, bool Changed, string Channel);
+    bool Findings, bool EffectiveAccess, bool Added, bool Removed, bool Changed, string Channel)
+{
+    public string ConnectorKind { get; init; } = "SignedWebhook";
+    public bool AllowAutomaticTickets { get; init; }
+    public IReadOnlyList<string> EventTypes { get; init; } = Array.Empty<string>();
+}
 public sealed record SharedDriftEventDto(
     Guid EventId, Guid ScanId, Guid PreviousScanId, CloudProvider Provider, string ExternalAccountId,
     string Kind, string Change, string EntityKey, SharedAlertSeverity Severity,
-    string? PreviousStateHash, string? CurrentStateHash, DateTime DetectedAtUtc);
+    string? PreviousStateHash, string? CurrentStateHash, DateTime DetectedAtUtc)
+{
+    public string EventType { get; init; } = OperationalEventTypes.ForDrift(Kind, Change);
+    public Guid? SubjectId { get; init; }
+}
 public sealed record SharedDeliveryDto(
     Guid DeliveryId, Guid EventId, Guid RuleId, string Channel, string Status, int AttemptCount,
-    DateTime CreatedAtUtc, DateTime? NextAttemptAtUtc, DateTime? CompletedAtUtc, string? FailureCode);
+    DateTime CreatedAtUtc, DateTime? NextAttemptAtUtc, DateTime? CompletedAtUtc, string? FailureCode)
+{
+    public string ConnectorKind { get; init; } = "SignedWebhook";
+    public Guid? RequestedBy { get; init; }
+    public bool DeadLettered => Status == "Failed";
+}
 public sealed record SharedDeliveryAttemptDto(
     Guid AttemptId, int AttemptNumber, DateTime StartedAtUtc, DateTime? CompletedAtUtc,
-    int? HttpStatus, string? FailureCode);
+    int? HttpStatus, string? FailureCode)
+{
+    public double? LatencyMilliseconds => CompletedAtUtc.HasValue ? Math.Max(0, (CompletedAtUtc.Value - StartedAtUtc).TotalMilliseconds) : null;
+}
 public sealed record SharedDeliveryStatusDto(SharedDeliveryDto Delivery, IReadOnlyList<SharedDeliveryAttemptDto> Attempts);
 public sealed record CreateScanScheduleRequest(CloudProvider Provider, string ExternalAccountId, string DisplayName, int IntervalMinutes, int MaxRetries = 2);
 public sealed record UpdateScanScheduleRequest(bool Enabled, int IntervalMinutes, int MaxRetries);

@@ -186,6 +186,16 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         using var schemaReader = new StreamReader(monitoringSchema);
         await using var monitoringCommand = new NpgsqlCommand(await schemaReader.ReadToEndAsync(cancellationToken), connection);
         await monitoringCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var governanceSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.GovernanceSchema.sql")
+            ?? throw new InvalidOperationException("The governance schema resource is missing.");
+        using var governanceReader = new StreamReader(governanceSchema);
+        await using var governanceCommand = new NpgsqlCommand(await governanceReader.ReadToEndAsync(cancellationToken), connection);
+        await governanceCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var operationsSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.OperationsSchema.sql")
+            ?? throw new InvalidOperationException("The operations schema resource is missing.");
+        using var operationsReader = new StreamReader(operationsSchema);
+        await using var operationsCommand = new NpgsqlCommand(await operationsReader.ReadToEndAsync(cancellationToken), connection);
+        await operationsCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
@@ -197,6 +207,8 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                      SELECT to_regclass('sharedorganizationdirectories') IS NOT NULL
                          AND to_regclass('sharedaccountbindings') IS NOT NULL
                          AND to_regclass('sharedaccessreviewcampaigns') IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharedaccessreviewcampaigns')
+                             AND attname='nextgovernancecheckatutc' AND NOT attisdropped)
                          AND to_regclass('sharedaccessreviewauditevents') IS NOT NULL
                          AND EXISTS (
                              SELECT 1 FROM pg_attribute
@@ -227,6 +239,10 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                          AND to_regclass('shareddriftevents') IS NOT NULL
                          AND to_regclass('sharednotificationdeliveries') IS NOT NULL
                          AND to_regclass('sharednotificationattempts') IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharednotificationdeliveries')
+                             AND attname='connectorkind' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharednotificationdeliveries')
+                             AND attname='requestedby' AND NOT attisdropped)
                 """, connection);
             return (bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false);
         }
@@ -324,19 +340,37 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         AccessReviewCampaign campaign,
         CancellationToken cancellationToken)
     {
+        AccessReviewCampaign? previous;
+        await using (var read = new NpgsqlCommand("""
+            SELECT PayloadJson FROM SharedAccessReviewCampaigns
+            WHERE TenantId=@tenant AND OrganizationId=@organization AND CampaignId=@campaign;
+            """, connection, transaction))
+        {
+            read.Parameters.AddWithValue("tenant", tenantId);
+            read.Parameters.AddWithValue("organization", organizationId);
+            read.Parameters.AddWithValue("campaign", campaign.Id);
+            var payload = await read.ExecuteScalarAsync(cancellationToken) as string;
+            previous = payload is null ? null : JsonSerializer.Deserialize<AccessReviewCampaign>(payload, JsonOptions)
+                ?? throw new InvalidOperationException("The stored governance campaign is invalid.");
+        }
         await using var command = new NpgsqlCommand("""
-            INSERT INTO SharedAccessReviewCampaigns (TenantId, OrganizationId, CampaignId, CreatedAtUtc, PayloadJson)
-            VALUES (@tenant, @organization, @campaign, @created, @payload)
+            INSERT INTO SharedAccessReviewCampaigns (TenantId, OrganizationId, CampaignId, CreatedAtUtc, PayloadJson, NextGovernanceCheckAtUtc)
+            VALUES (@tenant, @organization, @campaign, @created, @payload, @nextCheck)
             ON CONFLICT (TenantId, OrganizationId, CampaignId) DO UPDATE SET
-                CreatedAtUtc=excluded.CreatedAtUtc, PayloadJson=excluded.PayloadJson;
+                CreatedAtUtc=excluded.CreatedAtUtc, PayloadJson=excluded.PayloadJson, NextGovernanceCheckAtUtc=excluded.NextGovernanceCheckAtUtc;
             """, connection, transaction);
         command.Parameters.AddWithValue("tenant", tenantId);
         command.Parameters.AddWithValue("organization", organizationId);
         command.Parameters.AddWithValue("campaign", campaign.Id);
         command.Parameters.AddWithValue("created", campaign.CreatedAt.ToUniversalTime());
         command.Parameters.AddWithValue("payload", JsonSerializer.Serialize(campaign, JsonOptions));
+        command.Parameters.Add("nextCheck", NpgsqlDbType.TimestampTz).Value =
+            campaign.Status is not (CampaignStatus.Cancelled or CampaignStatus.Draft)
+                && campaign.Items.Any(item => item.Decision is ReviewDecision.Pending or ReviewDecision.NeedsInvestigation or ReviewDecision.ExceptionGranted)
+                    ? DateTime.UtcNow.AddMinutes(1) : DBNull.Value;
         await command.ExecuteNonQueryAsync(cancellationToken);
 
+        await RecordReviewOverdueEventsAsync(connection, transaction, tenantId, organizationId, previous, campaign, cancellationToken);
         foreach (var entry in campaign.AuditTrail.Concat(campaign.Items.SelectMany(item => item.AuditTrail))
                      .Where(entry => entry.EventId != Guid.Empty && entry.CorrelationId != Guid.Empty))
         {

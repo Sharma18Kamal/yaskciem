@@ -24,5 +24,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="..\..\infra\postgres\002-central-monitoring.sql" LogicalName="CloudEntitle.LicenseServer.MonitoringSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\003-governance-deadlines.sql" LogicalName="CloudEntitle.LicenseServer.GovernanceSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\004-operational-integrations.sql" LogicalName="CloudEntitle.LicenseServer.OperationsSchema.sql" />
   </ItemGroup>
 </Project>

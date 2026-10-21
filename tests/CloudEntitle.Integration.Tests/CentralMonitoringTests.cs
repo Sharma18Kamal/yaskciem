@@ -10,7 +10,7 @@ using Xunit;
 
 namespace CloudEntitle.Integration.Tests;
 
-public sealed class CentralMonitoringTests
+public sealed partial class CentralMonitoringTests
 {
     [PostgreSqlFact]
     public async Task Drift_ShouldCompareStableStateDeduplicateAndIsolateOrganizations()

@@ -76,6 +76,8 @@ public sealed class IdentityGovernanceService
         {
             AssignedReviewer = string.IsNullOrWhiteSpace(assignedReviewer) ? null : assignedReviewer.Trim(),
             OwnerSnapshot = string.IsNullOrWhiteSpace(candidate.SuggestedReviewer) ? null : candidate.SuggestedReviewer.Trim(),
+            ExternalAccountId = candidate.ExternalAccountId,
+            Team = candidate.Team,
             DueAt = dueAt,
             EvidenceSnapshot = candidate.EvidenceSnapshot,
             AuditTrail = new[] { new AccessReviewAuditEntry(now, creator, "Created", "Evidence snapshot captured when the review campaign was created.") }
@@ -102,6 +104,10 @@ public sealed class IdentityGovernanceService
         {
             AssignedReviewer = reviewer.Trim(),
             DueAt = dueAt,
+            AssignmentVersion = item.AssignmentVersion + 1,
+            LastReminderAt = null,
+            EscalatedAt = null,
+            EscalationReason = null,
             AuditTrail = item.AuditTrail.Append(new AccessReviewAuditEntry(now, actor, "ReviewerAssigned", $"Assigned to {reviewer.Trim()}; due {dueAt:O}.")).ToArray()
         };
         return UpdateCampaign(campaign, updated, new AccessReviewAuditEntry(now, actor, "ReviewerAssigned", $"{reviewer.Trim()} assigned to review item {itemId}."), now);
@@ -127,9 +133,10 @@ public sealed class IdentityGovernanceService
             Reviewer = reviewer.Trim(),
             ReviewComment = commentText,
             DecidedAt = now,
-            DueAt = decision == ReviewDecision.ExceptionGranted ? exceptionExpiresAt : item.DueAt,
             ExceptionExpiresAt = decision == ReviewDecision.ExceptionGranted ? exceptionExpiresAt : null,
             ExceptionExpiredAt = null,
+            ExceptionReminderCount = 0,
+            LastExceptionReminderAt = null,
             EscalatedAt = null,
             EscalationReason = null,
             Attestations = item.Attestations.Append(attestation).ToArray(),
@@ -141,6 +148,7 @@ public sealed class IdentityGovernanceService
 
     public AccessReviewCampaign ReevaluateCampaign(AccessReviewCampaign campaign, DateTime? asOf = null)
     {
+        if (campaign.Status is CampaignStatus.Cancelled or CampaignStatus.Draft) return campaign;
         var now = asOf ?? DateTime.UtcNow;
         var items = campaign.Items.Select(item =>
         {
@@ -150,12 +158,26 @@ public sealed class IdentityGovernanceService
                 updated = updated with
                 {
                     ExceptionExpiredAt = now,
-                    AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "ExceptionExpired", $"Exception expired at {item.ExceptionExpiresAt:O}; access requires a new review decision.")).ToArray()
+                    AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "ExceptionExpired", $"Exception expired at {item.ExceptionExpiresAt:O}; access requires a new review decision.")
+                        { ItemId = item.Id }).ToArray()
                 };
             }
-            var unresolved = updated.Decision == ReviewDecision.Pending || updated.ExceptionExpiredAt.HasValue;
-            var dueAt = updated.DueAt ?? campaign.DueAt;
+            var unresolved = IsUnresolved(updated, now);
+            var dueAt = EffectiveDeadline(updated, campaign);
             var reminderAt = dueAt.AddDays(-campaign.ReminderLeadDays);
+            if (updated.Decision == ReviewDecision.ExceptionGranted && !updated.ExceptionExpiredAt.HasValue
+                && updated.ExceptionExpiresAt.HasValue && now >= reminderAt && now < dueAt
+                && (!updated.LastExceptionReminderAt.HasValue || now >= updated.LastExceptionReminderAt.Value.AddDays(campaign.ReminderIntervalDays)))
+            {
+                updated = updated with
+                {
+                    ExceptionReminderCount = updated.ExceptionReminderCount + 1,
+                    LastExceptionReminderAt = now,
+                    AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "ExceptionExpiryReminderDue",
+                        $"Temporary exception expires at {dueAt:O}; owner {updated.AssignedOwner ?? "unassigned"}; reviewer {updated.AssignedReviewer ?? "unassigned"}.")
+                        { ItemId = item.Id }).ToArray()
+                };
+            }
             if (unresolved && now >= reminderAt && now < dueAt
                 && (!updated.LastReminderAt.HasValue || now >= updated.LastReminderAt.Value.AddDays(campaign.ReminderIntervalDays)))
             {
@@ -164,30 +186,40 @@ public sealed class IdentityGovernanceService
                     ReminderCount = updated.ReminderCount + 1,
                     LastReminderAt = now,
                     AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "ReviewerReminderDue",
-                        $"Reminder {updated.ReminderCount + 1} is due for {updated.AssignedReviewer ?? "unassigned reviewer"}; item deadline is {dueAt:O}." )).ToArray()
+                        $"Reminder {updated.ReminderCount + 1} is due for {updated.AssignedReviewer ?? "unassigned reviewer"}; item deadline is {dueAt:O}." )
+                        { ItemId = item.Id }).ToArray()
                 };
             }
-            if (unresolved && dueAt <= now && !updated.EscalatedAt.HasValue)
+            if (unresolved && (dueAt <= now || updated.ExceptionExpiredAt.HasValue) && !updated.EscalatedAt.HasValue)
             {
                 updated = updated with
                 {
                     EscalatedAt = now,
                     EscalationReason = updated.ExceptionExpiredAt.HasValue ? "Expired exception has not been re-reviewed." : "Review deadline passed without a decision.",
-                    AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "Escalated", updated.ExceptionExpiredAt.HasValue ? "Expired exception has not been re-reviewed." : "Review deadline passed without a decision.")).ToArray()
+                    AuditTrail = updated.AuditTrail.Append(new AccessReviewAuditEntry(now, "System", "Escalated", updated.ExceptionExpiredAt.HasValue ? "Expired exception has not been re-reviewed." : "Review deadline passed without a decision.")
+                        { ItemId = item.Id }).ToArray()
                 };
             }
             return updated;
         }).ToArray();
-        var complete = items.All(item => item.Decision != ReviewDecision.Pending && !item.ExceptionExpiredAt.HasValue);
-        var escalated = items.Any(item => item.EscalatedAt.HasValue);
+        var complete = items.All(item => !IsUnresolved(item, now));
+        var escalated = items.Any(item => IsUnresolved(item, now) && item.EscalatedAt.HasValue);
         var status = complete ? CampaignStatus.Completed : escalated ? CampaignStatus.Escalated : CampaignStatus.Open;
         var audit = campaign.AuditTrail;
-        var reminderEntries = items.SelectMany(item => item.AuditTrail).Where(entry => entry.Action == "ReviewerReminderDue")
+        var reminderEntries = items.SelectMany(item => item.AuditTrail).Where(entry => entry.Action is "ReviewerReminderDue" or "ExceptionExpiryReminderDue")
             .Where(entry => !audit.Any(existing => existing.Timestamp == entry.Timestamp && existing.Details == entry.Details));
         audit = audit.Concat(reminderEntries).ToArray();
         if (status != campaign.Status) audit = audit.Append(new AccessReviewAuditEntry(now, "System", "CampaignStatusChanged", $"{campaign.Status} -> {status}.")).ToArray();
         return campaign with { Items = items, Status = status, AuditTrail = audit };
     }
+
+    public static bool IsUnresolved(AccessReviewItem item, DateTime now)
+        => item.Decision is ReviewDecision.Pending or ReviewDecision.NeedsInvestigation
+            || item.Decision == ReviewDecision.ExceptionGranted
+                && (!item.ExceptionExpiresAt.HasValue || item.ExceptionExpiresAt <= now || item.ExceptionExpiredAt.HasValue);
+
+    public static DateTime EffectiveDeadline(AccessReviewItem item, AccessReviewCampaign campaign)
+        => item.WorkflowDeadline ?? campaign.DueAt;
 
     private AccessReviewCampaign UpdateCampaign(AccessReviewCampaign campaign, AccessReviewItem updatedItem, AccessReviewAuditEntry auditEntry, DateTime now)
     {
