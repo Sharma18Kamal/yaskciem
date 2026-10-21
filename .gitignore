@@ -26,6 +26,7 @@ Logs/
 secrets.json
 appsettings.Development.json
 .env
+/artifacts/msix/AWS User Access key*and url.txt
 
 # Installer outputs
 *.exe
