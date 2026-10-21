@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     public MainWindow(MainWindowViewModel viewModel)
     {
         InitializeComponent();
+        FitStartupWindowToWorkArea(this, SystemParameters.WorkArea);
         _viewModel = viewModel;
         DataContext = viewModel;
         _idleTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = SessionIdleTimeout };
@@ -37,6 +38,17 @@ public partial class MainWindow : Window
         PreviewMouseWheel += UserActivity;
         PreviewKeyDown += UserActivity;
         PreviewTouchDown += UserActivity;
+    }
+
+    internal static void FitStartupWindowToWorkArea(Window window, Rect workArea)
+    {
+        window.MinWidth = Math.Min(window.MinWidth, workArea.Width);
+        window.MinHeight = Math.Min(window.MinHeight, workArea.Height);
+        window.Width = Math.Min(window.Width, workArea.Width);
+        window.Height = Math.Min(window.Height, workArea.Height);
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Left = workArea.Left + (workArea.Width - window.Width) / 2;
+        window.Top = workArea.Top + (workArea.Height - window.Height) / 2;
     }
 
     private void WindowHeader_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

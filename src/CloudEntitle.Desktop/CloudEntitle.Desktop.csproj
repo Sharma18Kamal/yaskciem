@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CloudEntitle.Desktop.Tests" />
     <ProjectReference Include="..\CloudEntitle.Application\CloudEntitle.Application.csproj" />
     <ProjectReference Include="..\CloudEntitle.Domain\CloudEntitle.Domain.csproj" />
     <ProjectReference Include="..\CloudEntitle.Infrastructure\CloudEntitle.Infrastructure.csproj" />

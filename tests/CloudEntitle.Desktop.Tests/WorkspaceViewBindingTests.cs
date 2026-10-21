@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using System.Xml.Linq;
 using Xunit;
 
@@ -6,6 +7,45 @@ namespace CloudEntitle.Desktop.Tests;
 
 public sealed class WorkspaceViewBindingTests
 {
+    [Theory]
+    [InlineData(2560, 1600, 2.0)]
+    [InlineData(1920, 1080, 2.0)]
+    [InlineData(1920, 1080, 1.5)]
+    [InlineData(1920, 1080, 1.25)]
+    [InlineData(1920, 1080, 1.0)]
+    public void StartupWindow_ShouldFitScaledWorkArea(double pixelWidth, double pixelHeight, double scale)
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var window = new Window { Width = 1440, Height = 900, MinWidth = 900, MinHeight = 600 };
+                var workArea = new Rect(20, 30, pixelWidth / scale, pixelHeight / scale - 48);
+
+                MainWindow.FitStartupWindowToWorkArea(window, workArea);
+
+                Assert.Equal(Math.Min(1440, workArea.Width), window.Width);
+                Assert.Equal(Math.Min(900, workArea.Height), window.Height);
+                Assert.True(window.MinWidth <= window.Width);
+                Assert.True(window.MinHeight <= window.Height);
+                Assert.True(workArea.Contains(new Rect(window.Left, window.Top, window.Width, window.Height)));
+                Assert.Equal(workArea.Left + (workArea.Width - window.Width) / 2, window.Left);
+                Assert.Equal(workArea.Top + (workArea.Height - window.Height) / 2, window.Top);
+                Assert.Equal(WindowStartupLocation.Manual, window.WindowStartupLocation);
+                window.Close();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
     [Fact]
     public void Navigation_ShouldScrollWhenWindowHeightIsLimited()
     {

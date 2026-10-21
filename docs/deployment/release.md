@@ -1,5 +1,13 @@
 # Release checklist
 
+## Local build 1.0.0.62
+
+- Fits and centers the initial window inside the Windows work area in device-independent units, including taskbar space, instead of always requesting 1440x900. Minimum dimensions are reduced only when the work area is smaller.
+- Adds vertical sidebar scrolling so every navigation item is reachable in shorter windows. Dashboard commands wrap onto additional rows with spacing instead of crowding a single row.
+- Focused workspace checks: 16 passed, including actual WPF window sizing at 2560x1600 / 200% and 1920x1080 / 100%, 125%, 150%, and 200%, using simulated logical work areas. These tests do not change Windows display settings or provide visual acceptance.
+- Full desktop Release suite: 160 passed, 0 failed. Native MSI and MSI-launching Setup EXE were built in `artifacts/native-installers-1.0.0.62`; both have valid local development-certificate signatures. The published desktop DLL and Setup EXE report file version 1.0.0.62. Native packages still require .NET 9 Desktop Runtime x64 and ASP.NET Core Runtime 9 x64.
+- Before Store resubmission, visually verify startup, restored/maximized windows, sidebar scrolling, and dashboard commands at the reviewer's 2560x1600 / 200% settings. Installation, upgrade acceptance, and Store submission are separate validation steps.
+
 ## Local build 1.0.0.61
 
 - Native MSI and its MSI-launching Setup EXE were also built and signed. The MSI was copied into `artifacts/installer-1.0.0.61` alongside the existing MSIX-based setup without replacing it. Verified MSI ProductVersion is 1.0.61, app version is 1.0.0.61, and install scope is per-machine. Native packages require the .NET 9 Desktop Runtime x64 and administrator installation; no installer was executed.
