@@ -81,15 +81,20 @@ public sealed class CloudProviderScanJobExecutor(
 
             var completedAt = DateTime.UtcNow;
             var scanAccounts = new[] { new SharedScanAccountDto(job.Provider, job.ExternalAccountId, job.DisplayName) };
+            var monitoringScopes = coverages.Any(item => item.DataSource == "Effective access" && item.Status is "Collected" or "NoData")
+                && failures.Count == 0
+                ? new[] { new SharedMonitoringScopeDto(job.Provider, job.ExternalAccountId, "effective-access", "effective-access-v1") }
+                : Array.Empty<SharedMonitoringScopeDto>();
             var request = new UploadSharedScanSummaryRequest(scanId, startedAt, completedAt, job.Provider.ToString(), scanAccounts,
                 identities.Count, resources.Count, roles.Count, permissions.Count, effectiveAccess.Count, 0, 0, 0, coverages)
             {
-                Records = recordBuffer.Records
+                Records = recordBuffer.Records,
+                MonitoringScopes = monitoringScopes
             };
             var hash = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(request, JsonOptions))).ToLowerInvariant();
             var summary = new SharedScanSummaryDto(scanId, job.OrganizationId, job.TenantId, Guid.Empty, startedAt, completedAt,
                 job.Provider.ToString(), scanAccounts, identities.Count, resources.Count, roles.Count, permissions.Count,
-                effectiveAccess.Count, 0, 0, 0, coverages);
+                effectiveAccess.Count, 0, 0, 0, coverages) { MonitoringScopes = monitoringScopes };
             await store.SaveCiemScanAsync(summary, recordBuffer.Records, hash, cancellationToken, lease);
             var partial = failedSources > 0 || failures.Count > 0;
             return new ScanJobExecutionResult(partial ? "Partial" : "Succeeded", scanId,

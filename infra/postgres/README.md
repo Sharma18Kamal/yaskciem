@@ -4,7 +4,7 @@ The License Server uses one PostgreSQL database for shared workspace data and ce
 
 ## Schema and Runtime Role
 
-As a PostgreSQL administrator, apply `001-schema.sql` to the target database. It creates the required tables, indexes, append-only audit trigger, forced row-level security policies for audit events and tenant heads, and separate `yask_ciem_runtime` and `yask_ciem_archiver` NOLOGIN roles. Each audit transaction sets a transaction-local tenant ID; missing context matches no tenant. The archiver role can read audit rows across tenants and insert archive ledger rows, but cannot mutate audit events. Create separate login roles for the API and archive worker; do not run either service as the schema owner.
+As a PostgreSQL administrator, apply `001-schema.sql` then `002-central-monitoring.sql` to the target database. The base schema creates the required tables, indexes, append-only audit trigger, forced row-level security policies for audit events and tenant heads, and separate `yask_ciem_runtime` and `yask_ciem_archiver` NOLOGIN roles. The monitoring migration adds shared comparable-scan baselines, drift events, notification rules, deliveries, attempts, indexes, and runtime grants. Each audit transaction sets a transaction-local tenant ID; missing context matches no tenant. The archiver role can read audit rows across tenants and insert archive ledger rows, but cannot mutate audit events. Create separate login roles for the API and archive worker; do not run either service as the schema owner.
 
 For example, after applying the schema, create a login using your organization's authentication policy and grant membership:
 
@@ -27,9 +27,11 @@ Configure:
 - `AuditRetention__IntegrityKey` with a Base64-encoded, cryptographically random key of at least 32 bytes for the initial legacy key, or `AuditRetention__IntegrityKeys__<key-id>` values plus `AuditRetention__IntegrityKeyId` for versioned keys.
 - The existing Entra settings required by the License Server.
 
-Production startup does not create or migrate tables. `/api/v1/readiness` returns HTTP 503 until the database, shared workspace tables (including shared review audit, scan record, schedule, job, attempt, and checkpoint tables), and required audit schemas are accessible. Keep application credentials separate from the DBA migration identity.
+Production startup does not create or migrate tables. `/api/v1/readiness` returns HTTP 503 until the database, shared workspace tables (including shared review audit, scan record, schedule, job, checkpoint, monitoring baseline, drift event, notification rule, delivery, and attempt tables), and required audit schemas are accessible. Keep application credentials separate from the DBA migration identity.
 
 The scan worker runs as part of the License Server process and uses that process identity's cloud CLI authentication. Install/configure the Azure CLI, AWS CLI, and/or Google Cloud CLI required by scheduled accounts under the service identity, and grant only the approved read permissions. The worker doesn't reuse a Desktop user's credentials. Schedule intervals are 5 minutes to 7 days; retry count is capped at four. Failed scans use bounded exponential retry, partial scans persist their source coverage and are terminal outcomes, and cancellation is stored durably for the worker to observe. Incremental scans/checkpoints are not used to resume cloud collection; checkpoints report source progress for job visibility only.
+
+The central notification worker consumes the shared PostgreSQL outbox independently of the Desktop. Configure organization-scoped HTTPS webhook channel secrets on the server as described in [alerting and notification](../../docs/architecture/alerting-notification.md#server-channel-configuration), then create rules in the Organizations workspace or API. Rules reference aliases, never URLs. Keep response-body/credential capture disabled in external HTTP diagnostics as well. The worker retries transient failures up to five attempts, records only safe failure codes/HTTP status, and leaves exhausted deliveries visibly failed. Delivery leases recover across restarts; preserve baselines, events, deliveries, and attempts together in backups. Monitoring history has no automatic retention purge in this release; plan database capacity/retention with the data owner.
 
 ## WORM Archive
 

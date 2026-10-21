@@ -1,0 +1,44 @@
+# Replace placeholders with the deployed HTTPS URL, organization ID, and delegated API token.
+@baseUrl = https://license.example.invalid
+@organizationId = 00000000-0000-0000-0000-000000000000
+@ruleId = 11111111-1111-1111-1111-111111111111
+@deliveryId = 22222222-2222-2222-2222-222222222222
+@token = replace-with-delegated-api-token
+
+### List central notification rules (ViewInventory + ViewFindings)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/notification-rules
+Authorization: Bearer {{token}}
+
+### Create or replace a rule (ManagePolicies); severity 3 = High
+PUT {{baseUrl}}/api/v1/organizations/{{organizationId}}/notification-rules/{{ruleId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "ruleId": "{{ruleId}}",
+  "name": "Important access and risk changes",
+  "enabled": true,
+  "minimumSeverity": 3,
+  "findings": true,
+  "effectiveAccess": true,
+  "added": true,
+  "removed": true,
+  "changed": true,
+  "channel": "security"
+}
+
+### Recent comparable-scan changes
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/drift-events?limit=100
+Authorization: Bearer {{token}}
+
+### Recent delivery/retry states
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/notification-deliveries?limit=100
+Authorization: Bearer {{token}}
+
+### Individual delivery and attempts (404 for an unknown delivery)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/notification-deliveries/{{deliveryId}}
+Authorization: Bearer {{token}}
+
+### Invalid page size (400)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/drift-events?limit=501
+Authorization: Bearer {{token}}

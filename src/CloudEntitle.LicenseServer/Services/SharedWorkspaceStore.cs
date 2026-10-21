@@ -181,6 +181,11 @@ public sealed partial class SharedWorkspaceStore : IDisposable
             );
             """, connection);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        using var monitoringSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.MonitoringSchema.sql")
+            ?? throw new InvalidOperationException("The central monitoring schema resource is missing.");
+        using var schemaReader = new StreamReader(monitoringSchema);
+        await using var monitoringCommand = new NpgsqlCommand(await schemaReader.ReadToEndAsync(cancellationToken), connection);
+        await monitoringCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
@@ -217,6 +222,11 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                          AND to_regclass('sharedscanjobs') IS NOT NULL
                          AND to_regclass('sharedscanjobattempts') IS NOT NULL
                          AND to_regclass('sharedscanjobcheckpoints') IS NOT NULL
+                         AND to_regclass('sharedmonitoringbaselines') IS NOT NULL
+                         AND to_regclass('sharednotificationrules') IS NOT NULL
+                         AND to_regclass('shareddriftevents') IS NOT NULL
+                         AND to_regclass('sharednotificationdeliveries') IS NOT NULL
+                         AND to_regclass('sharednotificationattempts') IS NOT NULL
                 """, connection);
             return (bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false);
         }
@@ -381,8 +391,10 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         CancellationToken cancellationToken = default,
         ScanJobLease? lease = null)
     {
+        ValidateMonitoringScopes(summary, records);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        await LockMonitoringOrganizationAsync(connection, transaction, summary.TenantId, summary.OrganizationId, cancellationToken);
         if (lease is not null)
         {
             await using var ownership = new NpgsqlCommand("""
@@ -494,6 +506,7 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                 insertRecords.Parameters.AddWithValue("records", recordsJson);
                 await insertRecords.ExecuteNonQueryAsync(cancellationToken);
             }
+            await RecordCentralDriftAsync(connection, transaction, summary, records, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return (summary, true);
         }

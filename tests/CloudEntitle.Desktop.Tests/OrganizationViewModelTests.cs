@@ -4,6 +4,7 @@ using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.Integration.Contracts;
 using CloudEntitle.OrganizationManagement.Models;
 using CloudEntitle.OrganizationManagement.Services;
 using Xunit;
@@ -13,6 +14,55 @@ namespace CloudEntitle.Desktop.Tests;
 
 public sealed class OrganizationViewModelTests
 {
+    [Theory]
+    [InlineData(OrganizationMemberRole.OrganizationAdmin, true)]
+    [InlineData(OrganizationMemberRole.Viewer, false)]
+    public async Task CentralMonitoring_ShouldShowFailuresGuardRuleEditsAndClearStateOnSignOut(OrganizationMemberRole role, bool canEdit)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "YaskCiemMonitoringViewModelTests", Guid.NewGuid().ToString("N"));
+        var tenantId = Guid.NewGuid().ToString();
+        var owner = new OrganizationIdentity(Guid.NewGuid(), "owner", tenantId, "owner@example.invalid");
+        var identity = role == OrganizationMemberRole.OrganizationAdmin ? owner
+            : new OrganizationIdentity(Guid.NewGuid(), "viewer", tenantId, "viewer@example.invalid");
+        var service = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        var organization = service.CreateOrganization("Shared", "shared", tenantId, owner);
+        if (identity != owner)
+        {
+            service.AddMember(organization.Id, owner, identity.Email, role);
+            service.AcceptInvitation(organization.Id, identity);
+        }
+        try
+        {
+            var monitor = new TestMonitoringApi();
+            var viewModel = new OrganizationViewModel(new TestDemoDataService(), service, new TestSsoService(identity),
+                new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(),
+                sharedMonitoringApi: monitor);
+            await viewModel.SignInAsync();
+            await viewModel.RefreshMonitoringAsync();
+            Assert.True(viewModel.CanReadMonitoring);
+            Assert.Equal(canEdit, viewModel.CanManageNotificationRules);
+            Assert.Contains("1 failed", viewModel.MonitoringStatus);
+            viewModel.SelectedDelivery = Assert.Single(viewModel.NotificationDeliveries);
+            await viewModel.LoadDeliveryAttemptsAsync();
+            Assert.Equal(503, Assert.Single(viewModel.DeliveryAttempts).HttpStatus);
+            await viewModel.SaveNotificationRuleAsync();
+            Assert.Equal(canEdit ? 1 : 0, monitor.Saves);
+
+            monitor.PendingRefresh = new TaskCompletionSource<IReadOnlyList<SharedNotificationRuleDto>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var inFlight = viewModel.RefreshMonitoringAsync();
+            await viewModel.SignOutAsync();
+            monitor.PendingRefresh.SetResult(Array.Empty<SharedNotificationRuleDto>());
+            await inFlight;
+            Assert.Empty(viewModel.NotificationDeliveries);
+            Assert.Empty(viewModel.DeliveryAttempts);
+            Assert.False(viewModel.CanReadMonitoring);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task TenantSummary_ShouldOnlyIncludeBoundAccountsFromLiveScan()
     {
@@ -69,6 +119,28 @@ public sealed class OrganizationViewModelTests
     {
         public Task<OrganizationIdentity> SignInAsync(string tenantId, CancellationToken cancellationToken = default)
             => Task.FromResult(identity);
+    }
+
+    private sealed class TestMonitoringApi : ISharedMonitoringApi
+    {
+        private readonly SharedDeliveryDto _delivery = new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "security",
+            "Failed", 5, DateTime.UtcNow, null, DateTime.UtcNow, "http_rejected");
+        public int Saves { get; private set; }
+        public TaskCompletionSource<IReadOnlyList<SharedNotificationRuleDto>>? PendingRefresh { get; set; }
+        public Task<IReadOnlyList<SharedNotificationRuleDto>> GetNotificationRulesAsync(Guid organizationId, CancellationToken cancellationToken = default)
+            => PendingRefresh?.Task ?? Task.FromResult<IReadOnlyList<SharedNotificationRuleDto>>(Array.Empty<SharedNotificationRuleDto>());
+        public Task<SharedNotificationRuleDto> SaveNotificationRuleAsync(Guid organizationId, SharedNotificationRuleDto rule, CancellationToken cancellationToken = default)
+        {
+            Saves++;
+            return Task.FromResult(rule);
+        }
+        public Task<IReadOnlyList<SharedDriftEventDto>> GetDriftEventsAsync(Guid organizationId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<SharedDriftEventDto>>(Array.Empty<SharedDriftEventDto>());
+        public Task<IReadOnlyList<SharedDeliveryDto>> GetNotificationDeliveriesAsync(Guid organizationId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<SharedDeliveryDto>>(new[] { _delivery });
+        public Task<SharedDeliveryStatusDto> GetNotificationDeliveryStatusAsync(Guid organizationId, Guid deliveryId, CancellationToken cancellationToken = default)
+            => Task.FromResult(new SharedDeliveryStatusDto(_delivery, new[] { new SharedDeliveryAttemptDto(Guid.NewGuid(), 5,
+                DateTime.UtcNow.AddSeconds(-1), DateTime.UtcNow, 503, "http_rejected") }));
     }
 
     private sealed class TestLiveCloudScanService(LiveCloudScanResult result) : ILiveCloudScanService

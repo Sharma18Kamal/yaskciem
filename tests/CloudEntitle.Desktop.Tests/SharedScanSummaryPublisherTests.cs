@@ -11,8 +11,10 @@ namespace CloudEntitle.Desktop.Tests;
 
 public sealed class SharedScanSummaryPublisherTests
 {
-    [Fact]
-    public async Task PublishCurrentAsync_ShouldIncludeOnlyScannedAccountsBoundToOrganization()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublishCurrentAsync_ShouldIncludeOnlyScannedAccountsBoundToOrganization(bool complete)
     {
         var organizationId = Guid.NewGuid();
         var boundAccountId = Guid.NewGuid();
@@ -20,7 +22,7 @@ public sealed class SharedScanSummaryPublisherTests
         var scan = new LiveCloudScanResult(2, 2, 3, 1, 2, 1,
             new[]
             {
-                new RiskFinding { Id = Guid.NewGuid(), CloudProvider = CloudProviderType.Aws, CloudAccountId = boundAccountId, Severity = RiskSeverity.Critical },
+                new RiskFinding { Id = Guid.NewGuid(), RuleId = Guid.NewGuid(), Title = "Admin risk", Principal = "admin", CloudProvider = CloudProviderType.Aws, CloudAccountId = boundAccountId, Severity = RiskSeverity.Critical },
                 new RiskFinding { Id = Guid.NewGuid(), CloudProvider = CloudProviderType.Azure, CloudAccountId = unrelatedAccountId, Severity = RiskSeverity.High }
             },
             DateTime.UtcNow, Array.Empty<string>(),
@@ -55,7 +57,8 @@ public sealed class SharedScanSummaryPublisherTests
         {
             Coverage = new[]
             {
-                new ScanCoverageRecord("Aws", "Resources", ScanCoverageStatus.Partial, 1, "Tagged resources"),
+                new ScanCoverageRecord("Aws", "Resources", complete ? ScanCoverageStatus.Collected : ScanCoverageStatus.Partial, 1, "Tagged resources"),
+                new ScanCoverageRecord("Aws", "Effective access", complete ? ScanCoverageStatus.Collected : ScanCoverageStatus.Partial, 1, "IAM access"),
                 new ScanCoverageRecord("Azure", "Resources", ScanCoverageStatus.Collected, 2, "Resource inventory")
             }
         };
@@ -80,6 +83,13 @@ public sealed class SharedScanSummaryPublisherTests
         Assert.Contains(sharedApi.UploadRequest.Records, record => record.Kind == "finding" && record.Provider == CloudProvider.Aws);
         Assert.Contains(sharedApi.UploadRequest.Records, record => record.Kind == "effective-access" && record.Provider == CloudProvider.Aws);
         Assert.DoesNotContain(sharedApi.UploadRequest.Records, record => record.ExternalAccountId == "unbound-subscription");
+        Assert.Equal(complete ? 3 : 0, sharedApi.UploadRequest.MonitoringScopes.Count);
+        if (complete)
+        {
+            Assert.All(sharedApi.UploadRequest.MonitoringScopes, scope => Assert.Equal("123456789012", scope.ExternalAccountId));
+            var finding = Assert.Single(SharedMonitoringProjection.Project(sharedApi.UploadRequest.Records, "finding"));
+            Assert.Equal(SharedAlertSeverity.Critical, finding.Severity);
+        }
     }
 
     private sealed class FakeLiveScanService : ILiveCloudScanService

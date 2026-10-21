@@ -36,8 +36,32 @@ public interface ISharedScanScheduleApi
     Task CancelScanJobAsync(Guid organizationId, Guid jobId, CancellationToken cancellationToken = default);
 }
 
-public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi
+public interface ISharedMonitoringApi
 {
+    Task<IReadOnlyList<SharedNotificationRuleDto>> GetNotificationRulesAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<SharedNotificationRuleDto> SaveNotificationRuleAsync(Guid organizationId, SharedNotificationRuleDto rule, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SharedDriftEventDto>> GetDriftEventsAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SharedDeliveryDto>> GetNotificationDeliveriesAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<SharedDeliveryStatusDto> GetNotificationDeliveryStatusAsync(Guid organizationId, Guid deliveryId, CancellationToken cancellationToken = default);
+}
+
+public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi
+{
+    public async Task<IReadOnlyList<SharedNotificationRuleDto>> GetNotificationRulesAsync(Guid organizationId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetNotificationRulesAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<SharedNotificationRuleDto> SaveNotificationRuleAsync(Guid organizationId, SharedNotificationRuleDto rule, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.SaveNotificationRuleAsync(organizationId, rule, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<IReadOnlyList<SharedDriftEventDto>> GetDriftEventsAsync(Guid organizationId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetDriftEventsAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<IReadOnlyList<SharedDeliveryDto>> GetNotificationDeliveriesAsync(Guid organizationId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetNotificationDeliveriesAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<SharedDeliveryStatusDto> GetNotificationDeliveryStatusAsync(Guid organizationId, Guid deliveryId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetNotificationDeliveryStatusAsync(organizationId, deliveryId, await TokenAsync(cancellationToken), cancellationToken));
+
     public async Task<IReadOnlyList<OrganizationProfile>> GetOrganizationsAsync(CancellationToken cancellationToken = default)
         => await RequireDataAsync(client.GetOrganizationsAsync(await TokenAsync(cancellationToken), cancellationToken));
 

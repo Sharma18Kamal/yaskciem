@@ -13,10 +13,11 @@ using Microsoft.AspNetCore.Http;
 
 namespace CloudEntitle.LicenseServer.Services;
 
-public static class SharedWorkspaceEndpoints
+public static partial class SharedWorkspaceEndpoints
 {
     public static void MapSharedWorkspaceEndpoints(this WebApplication app, SharedWorkspaceStore store)
     {
+    app.MapCentralMonitoringEndpoints(store);
         app.MapGet("/api/v1/organizations", (ClaimsPrincipal principal) => GetOrganizations(principal, store))
             .RequireAuthorization("CiemApiAccess");
         app.MapPost("/api/v1/organizations", (ClaimsPrincipal principal, CreateOrganizationRequest request) => CreateOrganization(principal, request, store))
@@ -208,7 +209,7 @@ public static class SharedWorkspaceEndpoints
     private static async Task<IResult> UploadScanSummary(ClaimsPrincipal principal, Guid organizationId, UploadSharedScanSummaryRequest request, SharedWorkspaceStore store, CancellationToken cancellationToken)
     {
         if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
-        if (request is null || request.Accounts is null || request.Coverage is null || request.Records is null)
+        if (request is null || request.Accounts is null || request.Coverage is null || request.Records is null || request.MonitoringScopes is null)
             return BadRequest("invalid_scan_summary", "Scan summary account, coverage, and record lists are required.");
         OrganizationManagementService service;
         try
@@ -267,7 +268,12 @@ public static class SharedWorkspaceEndpoints
         var summary = new SharedScanSummaryDto(request.ScanId, organizationId, Guid.Parse(identity.TenantId), identity.UserId,
             request.StartedAtUtc.ToUniversalTime(), request.CompletedAtUtc.ToUniversalTime(), providerLabel,
             request.Accounts, request.Identities, request.Resources, request.Roles, request.Permissions, request.EffectiveAccess,
-            request.Findings, request.CriticalFindings, request.HighFindings, request.Coverage);
+            request.Findings, request.CriticalFindings, request.HighFindings, request.Coverage)
+        {
+            MonitoringScopes = request.MonitoringScopes
+        };
+        try { SharedWorkspaceStore.ValidateMonitoringScopes(summary, request.Records); }
+        catch (ArgumentException exception) { return BadRequest("invalid_monitoring_scope", exception.Message); }
         var canonicalRequest = request with
         {
             Accounts = request.Accounts.OrderBy(account => account.Provider).ThenBy(account => account.ExternalAccountId, StringComparer.OrdinalIgnoreCase).ToArray(),
@@ -275,7 +281,9 @@ public static class SharedWorkspaceEndpoints
             Records = request.Records.OrderBy(record => record.Kind, StringComparer.Ordinal)
                 .ThenBy(record => record.Provider)
                 .ThenBy(record => record.ExternalAccountId, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(record => record.RecordId, StringComparer.Ordinal).ToArray()
+                .ThenBy(record => record.RecordId, StringComparer.Ordinal).ToArray(),
+            MonitoringScopes = request.MonitoringScopes.OrderBy(scope => scope.Provider)
+                .ThenBy(scope => scope.ExternalAccountId, StringComparer.OrdinalIgnoreCase).ThenBy(scope => scope.Kind, StringComparer.Ordinal).ToArray()
         };
         var requestHash = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(canonicalRequest, new JsonSerializerOptions(JsonSerializerDefaults.Web))))
             .ToLowerInvariant();
@@ -287,6 +295,7 @@ public static class SharedWorkspaceEndpoints
                 : Results.Ok(Envelope(saved));
         }
         catch (InvalidOperationException exception) { return Results.Conflict(Error("scan_conflict", exception.Message)); }
+        catch (UnauthorizedAccessException) { return Results.Forbid(); }
     }
 
     private static async Task<IResult> GetCiemScanRecords(ClaimsPrincipal principal, Guid organizationId, Guid scanId, string? kind,

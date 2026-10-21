@@ -22,4 +22,7 @@
     <ProjectReference Include="..\CloudEntitle.Cloud.Gcp\CloudEntitle.Cloud.Gcp.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\infra\postgres\002-central-monitoring.sql" LogicalName="CloudEntitle.LicenseServer.MonitoringSchema.sql" />
+  </ItemGroup>
 </Project>

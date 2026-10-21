@@ -8,6 +8,7 @@ using CloudEntitle.Integration.Contracts;
 using CloudEntitle.IdentityGovernance.Models;
 using CloudEntitle.LicenseServer.Services;
 using CloudEntitle.OrganizationManagement.Models;
+using CloudEntitle.OrganizationManagement.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -23,6 +24,99 @@ namespace CloudEntitle.Integration.Tests;
 
 public sealed class SharedWorkspaceEndpointTests
 {
+    [PostgreSqlFact]
+    public async Task CentralMonitoringEndpoints_ShouldEnforcePermissionsAndExposeSharedDeliveryAttempts()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
+        await store.InitializeAsync();
+        var tenant = Guid.NewGuid();
+        var owner = new OrganizationIdentity(Guid.NewGuid(), "owner", tenant.ToString(), "owner@example.invalid");
+        var viewer = new OrganizationIdentity(Guid.NewGuid(), "viewer", tenant.ToString(), "viewer@example.invalid");
+        var service = new OrganizationManagementService(store.CreateOrganizationStore(tenant));
+        var organization = service.CreateOrganization("Monitoring", "monitoring", tenant.ToString(), owner);
+        service.BindCloudAccount(organization.Id, owner, CloudProvider.Aws, Guid.NewGuid(), "123456789012", "AWS");
+        service.AddMember(organization.Id, owner, viewer.Email, OrganizationMemberRole.Viewer);
+        service.AcceptInvitation(organization.Id, viewer);
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddAuthentication(TestAuthenticationHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(TestAuthenticationHandler.SchemeName, _ => { });
+        builder.Services.AddAuthorization(options => options.AddPolicy("CiemApiAccess", policy => policy
+            .RequireAuthenticatedUser().RequireClaim("tid").RequireClaim("oid")
+            .RequireAssertion(context => context.User.FindFirst("scp")?.Value.Split(' ').Contains("access_as_user") == true)));
+        builder.Services.AddSingleton(store);
+        await using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapSharedWorkspaceEndpoints(store);
+        await app.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri(app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()!.Addresses.Single()) };
+        var prefix = $"/api/v1/organizations/{organization.Id:D}";
+        async Task<HttpResponseMessage> Send(HttpMethod method, string path, OrganizationIdentity identity, object? body = null)
+        {
+            using var request = new HttpRequestMessage(method, path);
+            if (body is not null) request.Content = JsonContent.Create(body);
+            SetIdentityHeaders(request, Guid.Parse(identity.TenantId), identity.UserId, identity.Email);
+            return await client.SendAsync(request);
+        }
+        var rule = new SharedNotificationRuleDto(Guid.NewGuid(), "High access changes", true, SharedAlertSeverity.High,
+            true, true, true, true, true, "security");
+        using var saveRule = await Send(HttpMethod.Put, $"{prefix}/notification-rules/{rule.RuleId}", owner, rule);
+        Assert.Equal(HttpStatusCode.OK, saveRule.StatusCode);
+        using var deniedWrite = await Send(HttpMethod.Put, $"{prefix}/notification-rules/{rule.RuleId}", viewer, rule);
+        Assert.Equal(HttpStatusCode.Forbidden, deniedWrite.StatusCode);
+        using var invalidRule = await Send(HttpMethod.Put, $"{prefix}/notification-rules/{rule.RuleId}", owner,
+            rule with { Channel = "https://secret.invalid" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidRule.StatusCode);
+        using var readRule = await Send(HttpMethod.Get, $"{prefix}/notification-rules", viewer);
+        Assert.Equal(rule, Assert.Single((await readRule.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SharedNotificationRuleDto>>>())!.Data));
+
+        var now = DateTime.UtcNow.AddMinutes(-2);
+        var scan = new UploadSharedScanSummaryRequest(Guid.NewGuid(), now.AddSeconds(-1), now, "Aws",
+            new[] { new SharedScanAccountDto(CloudProvider.Aws, "123456789012", "AWS") }, 0, 0, 0, 0, 0, 0, 0, 0,
+            new[] { new SharedScanCoverageDto("Aws", "Effective access", "NoData", 0, "") })
+        {
+            MonitoringScopes = new[] { new SharedMonitoringScopeDto(CloudProvider.Aws, "123456789012", "effective-access", "effective-access-v1") }
+        };
+        using var baseline = await Send(HttpMethod.Post, $"{prefix}/scan-summaries", owner, scan);
+        Assert.Equal(HttpStatusCode.Created, baseline.StatusCode);
+        var next = scan with
+        {
+            ScanId = Guid.NewGuid(), StartedAtUtc = now, CompletedAtUtc = now.AddMinutes(1), EffectiveAccess = 1,
+            Coverage = new[] { new SharedScanCoverageDto("Aws", "Effective access", "Collected", 1, "") },
+            Records = new[] { new SharedCiemRecordDto(CloudProvider.Aws, "effective-access", "one", "123456789012",
+                """{"principal":"admin","role":"Administrator","scope":"*","source":"IAM","isPrivileged":true}""") }
+        };
+        using var upload = await Send(HttpMethod.Post, $"{prefix}/scan-summaries", owner, next);
+        Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
+        using var replay = await Send(HttpMethod.Post, $"{prefix}/scan-summaries", owner, next);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        using var readDrift = await Send(HttpMethod.Get, $"{prefix}/drift-events", viewer);
+        var drift = Assert.Single((await readDrift.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SharedDriftEventDto>>>())!.Data);
+        using var readDeliveries = await Send(HttpMethod.Get, $"{prefix}/notification-deliveries", viewer);
+        var delivery = Assert.Single((await readDeliveries.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SharedDeliveryDto>>>())!.Data);
+        Assert.Equal(drift.EventId, delivery.EventId);
+        var lease = Assert.IsType<NotificationDeliveryLease>(await store.ClaimNotificationDeliveryAsync());
+        await store.CompleteNotificationDeliveryAsync(lease, new(false, true, 503, "http_rejected"));
+        using var readStatus = await Send(HttpMethod.Get, $"{prefix}/notification-deliveries/{delivery.DeliveryId}", viewer);
+        var status = (await readStatus.Content.ReadFromJsonAsync<ApiEnvelope<SharedDeliveryStatusDto>>())!.Data;
+        Assert.Equal("Pending", status.Delivery.Status);
+        Assert.Equal(503, Assert.Single(status.Attempts).HttpStatus);
+        Assert.NotNull(status.Delivery.NextAttemptAtUtc);
+        using var invalidLimit = await Send(HttpMethod.Get, $"{prefix}/drift-events?limit=501", owner);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidLimit.StatusCode);
+        foreach (var route in new[] { "/drift-events", "/notification-rules", "/notification-deliveries", $"/notification-deliveries/{delivery.DeliveryId}" })
+        {
+            using var crossTenant = await Send(HttpMethod.Get, prefix + route, owner with { TenantId = Guid.NewGuid().ToString() });
+            Assert.Equal(HttpStatusCode.NotFound, crossTenant.StatusCode);
+            using var nonMember = await Send(HttpMethod.Get, prefix + route, owner with { UserId = Guid.NewGuid() });
+            Assert.Equal(HttpStatusCode.Forbidden, nonMember.StatusCode);
+        }
+        await app.StopAsync();
+    }
+
     [PostgreSqlFact]
     public async Task OrganizationEndpoints_ShouldDeriveTenantFromAuthenticatedClaimsAndIsolateDirectories()
     {

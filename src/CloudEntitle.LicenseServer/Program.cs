@@ -78,6 +78,8 @@ builder.Services.AddSingleton<SharedWorkspaceStore>(_ => sharedWorkspaceStore);
 builder.Services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 builder.Services.AddSingleton<IScanJobExecutor, CloudProviderScanJobExecutor>();
 builder.Services.AddHostedService<ScanOrchestrationWorker>();
+builder.Services.AddSingleton<ICentralNotificationTransport, CentralWebhookTransport>();
+builder.Services.AddHostedService<CentralNotificationWorker>();
 
 var auditArchiveConfiguration = builder.Configuration.GetSection("AuditArchive");
 var archiveCredentialError = string.Empty;

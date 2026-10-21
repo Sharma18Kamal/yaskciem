@@ -68,6 +68,28 @@ public sealed class SharedScanSummaryPublisher(
             records.Add(new SharedCiemRecordDto(Enum.Parse<CloudProvider>(access.Provider, true), "effective-access", StableRecordId(access), accountId,
                 JsonSerializer.Serialize(access)));
         }
+        var coverage = scan.Coverage.Where(item => providers.Contains(item.Provider))
+            .Select(item => new SharedScanCoverageDto(item.Provider, item.DataSource, item.Status.ToString(), item.Records, item.Details)).ToList();
+        var monitoringScopes = new List<SharedMonitoringScopeDto>();
+        foreach (var account in scannedAccounts)
+        {
+            var providerCoverage = coverage.Where(item => item.Provider.Equals(account.Provider, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var accessCoverage = providerCoverage.Where(item => item.DataSource.EndsWith("Effective access", StringComparison.OrdinalIgnoreCase)).ToArray();
+            var provider = Enum.Parse<CloudProvider>(account.Provider, true);
+            if (accessCoverage.Length > 0 && accessCoverage.All(item => item.Status is "Collected" or "NoData"))
+                monitoringScopes.Add(new SharedMonitoringScopeDto(provider, account.AccountId, "effective-access", "effective-access-v1"));
+            if (providerCoverage.Length > 0 && providerCoverage.All(item => item.Status is "Collected" or "NoData" or "Unsupported"))
+            {
+                monitoringScopes.Add(new SharedMonitoringScopeDto(provider, account.AccountId, "finding", "desktop-risk-v1"));
+                if (scan.ResourceRiskFindings.Where(finding => finding.CloudAccountId == account.CloudAccountId)
+                    .All(finding => !string.IsNullOrWhiteSpace(finding.Fingerprint)))
+                    monitoringScopes.Add(new SharedMonitoringScopeDto(provider, account.AccountId, "resource-finding", "desktop-resource-risk-v1"));
+                if (!coverage.Any(item => item.Provider.Equals(account.Provider, StringComparison.OrdinalIgnoreCase) && item.DataSource == "Risk findings"))
+                    coverage.Add(new SharedScanCoverageDto(account.Provider, "Risk findings", "Collected",
+                        scan.Findings.Count(finding => finding.CloudProvider.ToString().Equals(account.Provider, StringComparison.OrdinalIgnoreCase)),
+                        "Desktop risk evaluation completed with complete supported source coverage."));
+            }
+        }
         var request = new UploadSharedScanSummaryRequest(scanId, scan.StartedAt.ToUniversalTime(), scan.CompletedAt.ToUniversalTime(), providerName,
             scannedAccounts.Select(account => new SharedScanAccountDto(Enum.Parse<CloudProvider>(account.Provider, true), account.AccountId, account.AccountName)).ToArray(),
             scan.IdentityRecords.Count(identity => accountIds.Contains(identity.AccountId)),
@@ -78,8 +100,9 @@ public sealed class SharedScanSummaryPublisher(
             scan.Findings.Count(finding => accountIds.Contains(finding.CloudAccountId)),
             scan.Findings.Count(finding => accountIds.Contains(finding.CloudAccountId) && finding.Severity == RiskSeverity.Critical),
             scan.Findings.Count(finding => accountIds.Contains(finding.CloudAccountId) && finding.Severity == RiskSeverity.High),
-            scan.Coverage.Where(item => providers.Contains(item.Provider)).Select(item => new SharedScanCoverageDto(item.Provider, item.DataSource, item.Status.ToString(), item.Records, item.Details)).ToArray())
+            coverage)
         {
+            MonitoringScopes = monitoringScopes,
             Records = records.OrderBy(record => record.Kind, StringComparer.Ordinal)
                 .ThenBy(record => record.ExternalAccountId, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(record => record.RecordId, StringComparer.Ordinal).ToArray()

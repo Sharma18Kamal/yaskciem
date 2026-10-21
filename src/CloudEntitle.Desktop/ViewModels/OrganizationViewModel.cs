@@ -8,7 +8,7 @@ using CloudEntitle.OrganizationManagement.Services;
 
 namespace CloudEntitle.Desktop.ViewModels;
 
-public sealed class OrganizationViewModel : WorkspaceViewModel
+public sealed partial class OrganizationViewModel : WorkspaceViewModel
 {
     private readonly OrganizationManagementService _organizationsService;
     private readonly IOrganizationSsoService _ssoService;
@@ -77,7 +77,8 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         ICentralAuditSyncService? centralAuditSyncService = null,
         ISharedOrganizationApi? sharedOrganizationApi = null,
         ISharedScanSummaryPublisher? sharedScanSummaryPublisher = null,
-        ISharedScanScheduleApi? sharedScanScheduleApi = null) : base(demoData)
+        ISharedScanScheduleApi? sharedScanScheduleApi = null,
+        ISharedMonitoringApi? sharedMonitoringApi = null) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
@@ -87,6 +88,11 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
         _sharedOrganizationApi = sharedOrganizationApi;
         _sharedScanScheduleApi = sharedScanScheduleApi;
         _sharedScanSummaryPublisher = sharedScanSummaryPublisher;
+        _sharedMonitoringApi = sharedMonitoringApi;
+        RefreshMonitoringCommand = new AsyncRelayCommand(RefreshMonitoringAsync);
+        SaveNotificationRuleCommand = new AsyncRelayCommand(SaveNotificationRuleAsync);
+        NewNotificationRuleCommand = new AsyncRelayCommand(() => { SelectedNotificationRule = null; ResetNotificationEditor(); return Task.CompletedTask; });
+        LoadDeliveryAttemptsCommand = new AsyncRelayCommand(LoadDeliveryAttemptsAsync);
         CreateOrganizationCommand = new AsyncRelayCommand(CreateOrganizationAsync);
         SignInCommand = new AsyncRelayCommand(SignInAsync);
         SignOutCommand = new AsyncRelayCommand(SignOutAsync);
@@ -147,6 +153,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
             }
             _authenticatedContext.Set(_identity, value?.Id);
             _sharedWorkspace = null;
+            ResetMonitoring();
             SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
             SharedFindings = Array.Empty<SharedCiemRecordDto>();
             ScanSchedules = Array.Empty<ScanScheduleDto>();
@@ -365,6 +372,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
                     SharedScanSummaries = await _sharedOrganizationApi.GetScanSummariesAsync(SelectedOrganization.Id, 20);
                     if (IsAllowed(OrganizationAction.ViewFindings))
                         SharedFindings = await _sharedOrganizationApi.GetFindingsAsync(SelectedOrganization.Id, summary.ScanId, 200);
+                    await RefreshMonitoringAsync();
                 }
                 catch (Exception exception)
                 {
@@ -382,6 +390,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     {
         _identity = null;
         _sharedWorkspace = null;
+        ResetMonitoring();
         SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
         SharedFindings = Array.Empty<SharedCiemRecordDto>();
         _authenticatedContext.Set(null, null);
@@ -723,6 +732,7 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
     {
         if (_sharedOrganizationApi is null || _identity is null || SelectedOrganization is null)
         {
+            ResetMonitoring();
             _sharedWorkspace = null;
             SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
             SharedFindings = Array.Empty<SharedCiemRecordDto>();
@@ -756,11 +766,13 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
             SharedScanSummaryStatus = SharedScanSummaries.Count == 0
                 ? "No shared scan summaries are available for this organization."
                 : $"Loaded {SharedScanSummaries.Count} shared scan summaries and {SharedFindings.Count} findings.";
+            await RefreshMonitoringAsync();
             RefreshTenantView();
             NotifyAuthorization();
         }
         catch (Exception exception)
         {
+            ResetMonitoring();
             _sharedWorkspace = null;
             SharedScanSummaries = Array.Empty<SharedScanSummaryDto>();
             SharedFindings = Array.Empty<SharedCiemRecordDto>();
@@ -818,6 +830,8 @@ public sealed class OrganizationViewModel : WorkspaceViewModel
 
     private void NotifyAuthorization()
     {
+        OnPropertyChanged(nameof(CanReadMonitoring));
+        OnPropertyChanged(nameof(CanManageNotificationRules));
         foreach (var property in new[] { nameof(SignedInAs), nameof(CurrentRole), nameof(CanCreateOrganization), nameof(CanSignIn), nameof(CanManageMembers), nameof(CanManageConnections), nameof(CanViewTenant), nameof(CanPublishSharedScanSummary), nameof(CanAddMember), nameof(CanChangeMemberRole), nameof(CanToggleMember), nameof(CanBindAccount), nameof(CanSaveCustomRole), nameof(CanDeleteCustomRole), nameof(CanCreateScanSchedule), nameof(CanRunScheduledScan), nameof(CanToggleScanSchedule), nameof(CanCancelScanJob), nameof(Identity) })
             OnPropertyChanged(property);
     }

@@ -39,6 +39,7 @@ public sealed record OrganizationWorkspaceDto(
     IReadOnlyList<OrganizationAuditEntry> AuditTrail);
 public sealed record SharedScanAccountDto(CloudProvider Provider, string ExternalAccountId, string DisplayName);
 public sealed record SharedScanCoverageDto(string Provider, string DataSource, string Status, int Records, string Details);
+public sealed record SharedMonitoringScopeDto(CloudProvider Provider, string ExternalAccountId, string Kind, string Profile);
 public sealed record UploadSharedScanSummaryRequest(
     Guid ScanId,
     DateTime StartedAtUtc,
@@ -56,6 +57,7 @@ public sealed record UploadSharedScanSummaryRequest(
     IReadOnlyList<SharedScanCoverageDto> Coverage)
 {
     public IReadOnlyList<SharedCiemRecordDto> Records { get; init; } = Array.Empty<SharedCiemRecordDto>();
+    public IReadOnlyList<SharedMonitoringScopeDto> MonitoringScopes { get; init; } = Array.Empty<SharedMonitoringScopeDto>();
 }
 public sealed record SharedCiemRecordDto(CloudProvider Provider, string Kind, string RecordId, string ExternalAccountId, string PayloadJson);
 public sealed record SharedScanSummaryDto(
@@ -75,7 +77,25 @@ public sealed record SharedScanSummaryDto(
     int Findings,
     int CriticalFindings,
     int HighFindings,
-    IReadOnlyList<SharedScanCoverageDto> Coverage);
+    IReadOnlyList<SharedScanCoverageDto> Coverage)
+{
+    public IReadOnlyList<SharedMonitoringScopeDto> MonitoringScopes { get; init; } = Array.Empty<SharedMonitoringScopeDto>();
+}
+public enum SharedAlertSeverity { Informational, Low, Medium, High, Critical }
+public sealed record SharedNotificationRuleDto(
+    Guid RuleId, string Name, bool Enabled, SharedAlertSeverity MinimumSeverity,
+    bool Findings, bool EffectiveAccess, bool Added, bool Removed, bool Changed, string Channel);
+public sealed record SharedDriftEventDto(
+    Guid EventId, Guid ScanId, Guid PreviousScanId, CloudProvider Provider, string ExternalAccountId,
+    string Kind, string Change, string EntityKey, SharedAlertSeverity Severity,
+    string? PreviousStateHash, string? CurrentStateHash, DateTime DetectedAtUtc);
+public sealed record SharedDeliveryDto(
+    Guid DeliveryId, Guid EventId, Guid RuleId, string Channel, string Status, int AttemptCount,
+    DateTime CreatedAtUtc, DateTime? NextAttemptAtUtc, DateTime? CompletedAtUtc, string? FailureCode);
+public sealed record SharedDeliveryAttemptDto(
+    Guid AttemptId, int AttemptNumber, DateTime StartedAtUtc, DateTime? CompletedAtUtc,
+    int? HttpStatus, string? FailureCode);
+public sealed record SharedDeliveryStatusDto(SharedDeliveryDto Delivery, IReadOnlyList<SharedDeliveryAttemptDto> Attempts);
 public sealed record CreateScanScheduleRequest(CloudProvider Provider, string ExternalAccountId, string DisplayName, int IntervalMinutes, int MaxRetries = 2);
 public sealed record UpdateScanScheduleRequest(bool Enabled, int IntervalMinutes, int MaxRetries);
 public sealed record ScanScheduleDto(

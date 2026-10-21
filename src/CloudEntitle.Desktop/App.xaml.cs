@@ -102,6 +102,7 @@ public partial class App : System.Windows.Application
 				services.AddSingleton<ICentralAuditSyncService, CentralAuditSyncService>();
 				services.AddSingleton<ISharedOrganizationApi, SharedOrganizationApi>();
 				services.AddSingleton<ISharedScanScheduleApi>(provider => (ISharedScanScheduleApi)provider.GetRequiredService<ISharedOrganizationApi>());
+				services.AddSingleton<ISharedMonitoringApi>(provider => (ISharedMonitoringApi)provider.GetRequiredService<ISharedOrganizationApi>());
 				services.AddSingleton<ISharedScanSummaryPublisher, SharedScanSummaryPublisher>();
 				services.AddSingleton<IAccessReviewStore, SharedAccessReviewStore>();
 				sharedWorkspaceConfigured = true;

@@ -12,6 +12,31 @@ public sealed class CiemApiClient
 
     public CiemApiClient(HttpClient httpClient) => _httpClient = httpClient;
 
+    public Task<ApiEnvelope<IReadOnlyList<SharedNotificationRuleDto>>?> GetNotificationRulesAsync(Guid organizationId,
+        string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<SharedNotificationRuleDto>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/notification-rules", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<SharedNotificationRuleDto>?> SaveNotificationRuleAsync(Guid organizationId,
+        SharedNotificationRuleDto rule, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<SharedNotificationRuleDto>(HttpMethod.Put,
+            $"api/v1/organizations/{organizationId:D}/notification-rules/{rule.RuleId:D}", accessToken, rule, cancellationToken);
+
+    public Task<ApiEnvelope<IReadOnlyList<SharedDriftEventDto>>?> GetDriftEventsAsync(Guid organizationId,
+        string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<SharedDriftEventDto>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/drift-events?limit=100", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<IReadOnlyList<SharedDeliveryDto>>?> GetNotificationDeliveriesAsync(Guid organizationId,
+        string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<SharedDeliveryDto>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/notification-deliveries?limit=100", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<SharedDeliveryStatusDto>?> GetNotificationDeliveryStatusAsync(Guid organizationId,
+        Guid deliveryId, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<SharedDeliveryStatusDto>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/notification-deliveries/{deliveryId:D}", accessToken, cancellationToken: cancellationToken);
+
     public async Task<ApiHealthResponse?> GetHealthAsync(CancellationToken cancellationToken = default) =>
         await _httpClient.GetFromJsonAsync<ApiHealthResponse>("api/v1/health", cancellationToken);
 

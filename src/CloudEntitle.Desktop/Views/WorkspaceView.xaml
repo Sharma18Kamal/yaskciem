@@ -843,6 +843,72 @@
                         </Border>
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
+                                <TextBlock Text="CENTRAL DRIFT AND ALERT DELIVERY" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="Compare complete scans centrally. Channel aliases reference organization-specific secrets configured on the server; never enter webhook URLs here." Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Content="Refresh alerts" Command="{Binding RefreshMonitoringCommand}" IsEnabled="{Binding CanReadMonitoring}" Style="{StaticResource QuietButton}" ToolTip="Refresh shared drift events, rules, and notification delivery state"/>
+                                    <Button Content="New rule" Command="{Binding NewNotificationRuleCommand}" IsEnabled="{Binding CanManageNotificationRules}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Clear the rule editor to create another notification rule"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding MonitoringStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                <DataGrid ItemsSource="{Binding NotificationRules}" SelectedItem="{Binding SelectedNotificationRule, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="50" MaxHeight="130" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Rule" Binding="{Binding Name}" Width="*"/>
+                                        <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70"/>
+                                        <DataGridTextColumn Header="Minimum severity" Binding="{Binding MinimumSeverity}" Width="130"/>
+                                        <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="130"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <StackPanel IsEnabled="{Binding CanManageNotificationRules}">
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <TextBox Text="{Binding NotificationRuleName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Notification rule name"/>
+                                        <TextBox Grid.Column="1" Text="{Binding NotificationChannel, UpdateSourceTrigger=PropertyChanged}" Margin="8,0,0,0" ToolTip="Server-configured channel alias, not a webhook URL"/>
+                                        <ComboBox Grid.Column="2" ItemsSource="{Binding AlertSeverities}" SelectedItem="{Binding AlertMinimumSeverity, Mode=TwoWay}" Margin="8,0,0,0" ToolTip="Minimum event severity eligible for notification"/>
+                                    </Grid>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <CheckBox Content="Enabled" IsChecked="{Binding NotificationEnabled}" ToolTip="Enable delivery for matching events" Margin="0,0,12,0"/>
+                                        <CheckBox Content="Findings" IsChecked="{Binding AlertOnFindings}" ToolTip="Notify on risk finding drift" Margin="0,0,12,0"/>
+                                        <CheckBox Content="Effective access" IsChecked="{Binding AlertOnAccess}" ToolTip="Notify on effective access drift" Margin="0,0,12,0"/>
+                                        <CheckBox Content="Added" IsChecked="{Binding AlertOnAdded}" ToolTip="Notify when access or findings are added" Margin="0,0,12,0"/>
+                                        <CheckBox Content="Removed" IsChecked="{Binding AlertOnRemoved}" ToolTip="Notify when access or findings are removed from a complete scan" Margin="0,0,12,0"/>
+                                        <CheckBox Content="Changed" IsChecked="{Binding AlertOnChanged}" ToolTip="Notify on meaningful access or finding state changes"/>
+                                    </WrapPanel>
+                                    <Button Content="Save notification rule" Command="{Binding SaveNotificationRuleCommand}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Save the selected rule or create a new rule; ManagePolicies permission is required"/>
+                                </StackPanel>
+                                <DataGrid ItemsSource="{Binding DriftEvents}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="60" MaxHeight="160" Margin="0,12,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Detected (UTC)" Binding="{Binding DetectedAtUtc, StringFormat=g}" Width="140"/>
+                                        <DataGridTextColumn Header="Account" Binding="{Binding ExternalAccountId}" Width="*"/>
+                                        <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="120"/>
+                                        <DataGridTextColumn Header="Change" Binding="{Binding Change}" Width="80"/>
+                                        <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="80"/>
+                                        <DataGridTextColumn Header="Event ID" Binding="{Binding EventId}" Width="240"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <DataGrid ItemsSource="{Binding NotificationDeliveries}" SelectedItem="{Binding SelectedDelivery, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="60" MaxHeight="160" Margin="0,12,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="100"/>
+                                        <DataGridTextColumn Header="State" Binding="{Binding Status}" Width="90"/>
+                                        <DataGridTextColumn Header="Attempts" Binding="{Binding AttemptCount}" Width="70"/>
+                                        <DataGridTextColumn Header="Next retry (UTC)" Binding="{Binding NextAttemptAtUtc, StringFormat=g}" Width="140"/>
+                                        <DataGridTextColumn Header="Failure code" Binding="{Binding FailureCode}" Width="*"/>
+                                        <DataGridTextColumn Header="Event ID" Binding="{Binding EventId}" Width="240"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <Button Content="Inspect delivery attempts" Command="{Binding LoadDeliveryAttemptsCommand}" IsEnabled="{Binding CanReadMonitoring}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Read the selected delivery's attempts, HTTP status codes, and safe failure codes"/>
+                                <DataGrid ItemsSource="{Binding DeliveryAttempts}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="40" MaxHeight="120" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Attempt" Binding="{Binding AttemptNumber}" Width="70"/>
+                                        <DataGridTextColumn Header="Started (UTC)" Binding="{Binding StartedAtUtc, StringFormat=g}" Width="140"/>
+                                        <DataGridTextColumn Header="Completed (UTC)" Binding="{Binding CompletedAtUtc, StringFormat=g}" Width="140"/>
+                                        <DataGridTextColumn Header="HTTP status" Binding="{Binding HttpStatus}" Width="100"/>
+                                        <DataGridTextColumn Header="Failure code" Binding="{Binding FailureCode}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
                                 <TextBlock Text="CLOUD ACCOUNT BINDINGS" Style="{StaticResource CardLabel}"/>
                                 <Grid Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
