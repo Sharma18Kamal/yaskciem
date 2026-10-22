@@ -121,6 +121,9 @@ try {
     $validationLevel = if ($Phase -eq 'Preview') { 'ProviderNoRbac' } else { 'Provider' }
     $preview = Get-AzSubscriptionDeploymentWhatIfResult -Location centralus -TemplateFile $TemplateFile `
         -TemplateParameterObject $parameters -ValidationLevel $validationLevel -ErrorAction Stop
+    $result.whatIfResponseTypes = @($preview | ForEach-Object { $_.GetType().FullName })
+    $result.whatIfResponseProperties = @($preview.PSObject.Properties.Name)
+    $result.whatIfStatus = if ([string]$preview.Status -match '^[A-Za-z]{1,40}$') { [string]$preview.Status } else { 'Unknown' }
     if ($preview.Status -ne 'Succeeded') {
         if ($preview.PSObject.Properties['Error']) {
             $result.armErrorCodes = @(Get-SafeArmErrorCodes $preview.Error | Sort-Object -Unique)
@@ -170,6 +173,8 @@ try {
 catch {
     $result.failureStage = $stage
     $result.failureType = $_.Exception.GetType().FullName
+    $result.failureSourceLine = $_.InvocationInfo.ScriptLineNumber
+    $result.failureCategory = [string]$_.CategoryInfo.Category
     if (-not $result.Contains('armErrorCodes')) {
         $errorText = $_.Exception.Message
         if ($null -ne $_.ErrorDetails) { $errorText += $_.ErrorDetails.Message }
