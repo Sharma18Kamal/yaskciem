@@ -40,7 +40,7 @@ for build, configuration and the 72-hour freshness policy.
 
 - Windows 10/11
 - .NET 10 SDK is the production target from the project brief
-- The current local environment only has .NET 9.0.318 installed, so the repo scaffold was aligned to `net9.0-windows` for a compile-ready local build until .NET 10 is installed
+- The current projects target .NET 9. [global.json](global.json) selects the latest installed stable .NET 9 feature band, preventing newer preinstalled SDKs from silently changing compiler and LINQ binding behavior in local or CI builds. Moving to .NET 10 requires a separately tested upgrade.
 - Git
 - Azure CLI, AWS CLI, and GCP SDK or equivalent auth tooling
 - Visual Studio 2022 or VS Build Tools with .NET desktop development workloads
