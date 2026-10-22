@@ -143,16 +143,32 @@ public static class ConnectorConfiguration
     }
 }
 
-public sealed class CentralNotificationWorker(SharedWorkspaceStore store, ICentralNotificationTransport transport,
-    ILogger<CentralNotificationWorker> logger) : BackgroundService
+public sealed class CentralNotificationWorker : BackgroundService
 {
+    private readonly SharedWorkspaceStore _store;
+    private readonly ICentralNotificationTransport _transport;
+    private readonly ILogger<CentralNotificationWorker> _logger;
+    private readonly WorkerHealthRegistry _workers;
+    private readonly OperationsMetrics _metrics;
+
+    public CentralNotificationWorker(SharedWorkspaceStore store, ICentralNotificationTransport transport,
+        ILogger<CentralNotificationWorker> logger, WorkerHealthRegistry? workers = null, OperationsMetrics? metrics = null)
+    {
+        _store = store;
+        _transport = transport;
+        _logger = logger;
+        _workers = workers ?? new WorkerHealthRegistry();
+        _metrics = metrics ?? new OperationsMetrics();
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var lease = await store.ClaimNotificationDeliveryAsync(stoppingToken);
+                var lease = await _store.ClaimNotificationDeliveryAsync(stoppingToken);
+                _workers.Heartbeat("notifications", success: true);
                 if (lease is null)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
@@ -161,8 +177,8 @@ public sealed class CentralNotificationWorker(SharedWorkspaceStore store, ICentr
                 NotificationSendResult result;
                 try
                 {
-                    result = await store.IsNotificationEnabledAsync(lease, stoppingToken)
-                        ? await transport.SendAsync(lease, stoppingToken)
+                    result = await _store.IsNotificationEnabledAsync(lease, stoppingToken)
+                        ? await _transport.SendAsync(lease, stoppingToken)
                         : new(false, false, null, "rule_disabled", Suppressed: true);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -170,15 +186,20 @@ public sealed class CentralNotificationWorker(SharedWorkspaceStore store, ICentr
                     result = new(false, true, null, "worker_shutdown");
                 }
                 using var completionTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await store.CompleteNotificationDeliveryAsync(lease, result, completionTimeout.Token);
+                await _store.CompleteNotificationDeliveryAsync(lease, result, completionTimeout.Token);
                 if (!result.Delivered)
-                    logger.LogWarning("Central notification delivery {DeliveryId} returned {FailureCode}; HTTP status {Status}.",
+                {
+                    _metrics.RecordConnectorFailure(lease.Delivery.ConnectorKind, result.FailureCode);
+                    _logger.LogWarning("Central notification delivery {DeliveryId} returned {FailureCode}; HTTP status {Status}.",
                         lease.Delivery.DeliveryId, result.FailureCode, result.HttpStatus);
+                }
+                _workers.Heartbeat("notifications", success: true);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
-                logger.LogError("Central notification queue failed ({ErrorType}); delivery leases will recover automatically.", exception.GetType().Name);
+                _workers.Heartbeat("notifications", failed: true);
+                _logger.LogError("Central notification queue failed ({ErrorType}); delivery leases will recover automatically.", exception.GetType().Name);
                 try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             }

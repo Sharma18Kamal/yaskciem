@@ -34,11 +34,11 @@ $backupPath = Join-Path $directory "yask-ciem-postgres-$timestamp.dump"
 $temporaryPath = "$backupPath.partial"
 
 try {
-    & $PgDumpPath --format=custom --no-owner --no-privileges --file $temporaryPath
+    & $PgDumpPath --no-password --format=custom --no-owner --no-privileges --file $temporaryPath
     if ($LASTEXITCODE -ne 0) { throw "pg_dump failed with exit code $LASTEXITCODE." }
     if (-not (Test-Path $temporaryPath) -or (Get-Item $temporaryPath).Length -eq 0) { throw 'pg_dump produced an empty backup.' }
 
-    & $PgRestorePath --list $temporaryPath *> $null
+    & $PgRestorePath --no-password --list $temporaryPath *> $null
     if ($LASTEXITCODE -ne 0) { throw 'pg_restore could not read the generated backup archive.' }
 
     Move-Item -LiteralPath $temporaryPath -Destination $backupPath

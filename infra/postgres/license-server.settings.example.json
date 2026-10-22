@@ -16,6 +16,19 @@
       "<active-key-id>": "<base64-32-or-more-random-bytes>"
     }
   },
+  "Operations": {
+    "RetentionDays": 90,
+    "RetentionBatchSize": 500,
+    "RetentionMaxBatchesPerRun": 20,
+    "Limits": {
+      "MaxScanSchedulesPerTenant": 100,
+      "MaxActiveScanJobsPerTenant": 25
+    },
+    "Readiness": {
+      "MaxQueueDepth": 1000,
+      "MaxQueueAgeSeconds": 3600
+    }
+  },
   "AuditArchive": {
     "Provider": "S3ObjectLock",
     "Endpoint": "https://<object-store-host>:<port>",

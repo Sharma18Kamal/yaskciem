@@ -373,6 +373,7 @@ public static partial class SharedWorkspaceEndpoints
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
         catch (UnauthorizedAccessException) { return Results.Forbid(); }
+        catch (TenantResourceLimitException exception) { return Results.Json(Error("tenant_scan_limit", exception.Message), statusCode: StatusCodes.Status429TooManyRequests); }
     }
 
     private static async Task<IResult> GetScanSchedules(
@@ -415,6 +416,7 @@ public static partial class SharedWorkspaceEndpoints
             return job is null ? Results.NotFound() : Results.Accepted($"/api/v1/organizations/{organizationId:D}/scan-jobs/{job.JobId:D}", Envelope(job));
         }
         catch (KeyNotFoundException) { return Results.NotFound(); }
+        catch (TenantResourceLimitException exception) { return Results.Json(Error("tenant_scan_limit", exception.Message), statusCode: StatusCodes.Status429TooManyRequests); }
     }
 
     private static async Task<IResult> GetScanJobs(

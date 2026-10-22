@@ -12,6 +12,9 @@ public static class ApiContractVersion
 public sealed record ApiHealthResponse(string Status, string Version, DateTime UtcTime);
 public sealed record ApiReadinessResponse(string Status, bool DatabaseReady, bool ConfigurationReady, string Version)
 {
+    public bool OperationsReady { get; init; }
+    public bool QueueReady { get; init; }
+    public bool WorkersReady { get; init; }
     public bool AuditStorageReady { get; init; }
     public bool ProductionReady { get; init; }
     public string AuditStorageDetails { get; init; } = string.Empty;

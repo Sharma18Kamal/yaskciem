@@ -57,6 +57,15 @@ try {
         Send-MaintenanceAlert 'success' "Backup completed and retention applied ($RetentionDays days)."
     }
     else {
+        $restoreUser = $env:YASK_CIEM_RESTORE_PGUSER
+        $restorePassfile = $env:YASK_CIEM_RESTORE_PGPASSFILE
+        if ([string]::IsNullOrWhiteSpace($restoreUser) -or [string]::IsNullOrWhiteSpace($restorePassfile)) {
+            throw 'Configure YASK_CIEM_RESTORE_PGUSER and protected YASK_CIEM_RESTORE_PGPASSFILE for the quarterly restore drill.'
+        }
+        if (-not (Test-Path -LiteralPath $restorePassfile -PathType Leaf)) {
+            throw 'The configured quarterly restore-drill PGPASSFILE does not exist.'
+        }
+
         $backup = Get-ChildItem -LiteralPath $BackupDirectory -Filter 'yask-ciem-postgres-*.dump' -File |
             Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
         if (-not $backup) { throw 'No PostgreSQL backup archive is available for the restore drill.' }
@@ -69,7 +78,11 @@ try {
         if ($DropdbPath) { $restoreParameters.DropdbPath = $DropdbPath }
         if ($PsqlPath) { $restoreParameters.PsqlPath = $PsqlPath }
         $previousRestoreFlag = $env:YASK_CIEM_ALLOW_RESTORE_TEST
+        $previousPgUser = $env:PGUSER
+        $previousPgPassfile = $env:PGPASSFILE
         $env:YASK_CIEM_ALLOW_RESTORE_TEST = 'YES'
+        $env:PGUSER = $restoreUser
+        $env:PGPASSFILE = $restorePassfile
         try {
             & $restoreScript @restoreParameters
             if ($LASTEXITCODE -ne 0) { throw 'The PostgreSQL restore drill failed.' }
@@ -77,6 +90,10 @@ try {
         finally {
             if ($null -eq $previousRestoreFlag) { Remove-Item Env:YASK_CIEM_ALLOW_RESTORE_TEST -ErrorAction SilentlyContinue }
             else { $env:YASK_CIEM_ALLOW_RESTORE_TEST = $previousRestoreFlag }
+            if ($null -eq $previousPgUser) { Remove-Item Env:PGUSER -ErrorAction SilentlyContinue }
+            else { $env:PGUSER = $previousPgUser }
+            if ($null -eq $previousPgPassfile) { Remove-Item Env:PGPASSFILE -ErrorAction SilentlyContinue }
+            else { $env:PGPASSFILE = $previousPgPassfile }
         }
         Send-MaintenanceAlert 'success' 'Restore drill completed: backup checksum, archive restore, schemas, and audit counts verified.'
     }

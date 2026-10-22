@@ -17,22 +17,38 @@ public sealed partial class SharedWorkspaceStore : IDisposable
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
     private readonly NpgsqlDataSource _dataSource;
     private readonly bool _ownsDataSource;
+    private readonly int _maxSchedulesPerTenant;
+    private readonly int _maxActiveScanJobsPerTenant;
 
     public SharedWorkspaceStore(string connectionString)
-        : this(new NpgsqlDataSourceBuilder(connectionString).Build(), ownsDataSource: true)
+        : this(new NpgsqlDataSourceBuilder(connectionString).Build(), ownsDataSource: true, maxSchedulesPerTenant: 100, maxActiveScanJobsPerTenant: 25)
     {
     }
 
-    public SharedWorkspaceStore(NpgsqlDataSource dataSource)
-        : this(dataSource, ownsDataSource: false)
+    public SharedWorkspaceStore(
+        string connectionString,
+        int maxSchedulesPerTenant,
+        int maxActiveScanJobsPerTenant)
+        : this(new NpgsqlDataSourceBuilder(connectionString).Build(), ownsDataSource: true,
+            maxSchedulesPerTenant: maxSchedulesPerTenant, maxActiveScanJobsPerTenant: maxActiveScanJobsPerTenant)
     {
     }
 
-    private SharedWorkspaceStore(NpgsqlDataSource dataSource, bool ownsDataSource)
+    public SharedWorkspaceStore(NpgsqlDataSource dataSource, int maxSchedulesPerTenant = 100, int maxActiveScanJobsPerTenant = 25)
+        : this(dataSource, ownsDataSource: false, maxSchedulesPerTenant: maxSchedulesPerTenant,
+            maxActiveScanJobsPerTenant: maxActiveScanJobsPerTenant)
+    {
+    }
+
+    private SharedWorkspaceStore(NpgsqlDataSource dataSource, bool ownsDataSource, int maxSchedulesPerTenant, int maxActiveScanJobsPerTenant)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
+        if (maxSchedulesPerTenant is < 1 or > 10000) throw new ArgumentOutOfRangeException(nameof(maxSchedulesPerTenant));
+        if (maxActiveScanJobsPerTenant is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(maxActiveScanJobsPerTenant));
         _dataSource = dataSource;
         _ownsDataSource = ownsDataSource;
+        _maxSchedulesPerTenant = maxSchedulesPerTenant;
+        _maxActiveScanJobsPerTenant = maxActiveScanJobsPerTenant;
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -196,6 +212,11 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         using var operationsReader = new StreamReader(operationsSchema);
         await using var operationsCommand = new NpgsqlCommand(await operationsReader.ReadToEndAsync(cancellationToken), connection);
         await operationsCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var scaleSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.ScaleSchema.sql")
+            ?? throw new InvalidOperationException("The operations scale schema resource is missing.");
+        using var scaleReader = new StreamReader(scaleSchema);
+        await using var scaleCommand = new NpgsqlCommand(await scaleReader.ReadToEndAsync(cancellationToken), connection);
+        await scaleCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
@@ -243,6 +264,12 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                              AND attname='connectorkind' AND NOT attisdropped)
                          AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharednotificationdeliveries')
                              AND attname='requestedby' AND NOT attisdropped)
+                         AND to_regclass('ix_sharedscanjobs_retention') IS NOT NULL
+                         AND to_regclass('ix_sharednotificationattempts_retention') IS NOT NULL
+                         AND to_regclass('ix_sharednotificationattempts_failuretime') IS NOT NULL
+                         AND to_regprocedure('yask_prune_operational_history(timestamp with time zone,integer)') IS NOT NULL
+                         AND has_function_privilege(current_user,
+                             'yask_prune_operational_history(timestamp with time zone,integer)', 'EXECUTE')
                 """, connection);
             return (bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false);
         }

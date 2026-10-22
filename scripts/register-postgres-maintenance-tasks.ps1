@@ -9,7 +9,7 @@ param(
     [ValidatePattern('^([01]?\d|2[0-3]):[0-5]\d$')]
     [string]$RestoreTime = '03:00',
     [string]$BackupTaskName = 'YASK-CIEM PostgreSQL Daily Backup',
-    [string]$RestoreTaskName = 'YASK-CIEM PostgreSQL Weekly Restore Drill'
+    [string]$RestoreTaskName = 'YASK-CIEM PostgreSQL Quarterly Restore Drill'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +29,7 @@ function New-MaintenanceAction([string]$Mode) {
 $backupAt = [DateTime]::Today.Add([TimeSpan]::Parse($BackupTime))
 $restoreAt = [DateTime]::Today.Add([TimeSpan]::Parse($RestoreTime))
 $backupTrigger = New-ScheduledTaskTrigger -Daily -At $backupAt
-$restoreTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At $restoreAt
+$restoreTrigger = New-ScheduledTaskTrigger -Monthly -DaysOfMonth 1 -MonthsOfYear January, April, July, October -At $restoreAt
 $principal = New-ScheduledTaskPrincipal -UserId $credential.UserName -LogonType Password -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 4) -MultipleInstances IgnoreNew
 
@@ -46,5 +46,5 @@ finally {
 }
 
 Write-Output "Registered daily backup task '$BackupTaskName' at $BackupTime."
-Write-Output "Registered weekly restore-drill task '$RestoreTaskName' on Sunday at $RestoreTime."
-Write-Warning 'Ensure the task account has PGHOST/PGDATABASE/PGUSER, an ACL-protected PGPASSFILE (or approved SSPI mapping), YASK_CIEM_ALERT_WEBHOOK_URL, and access to the backup directory in its user environment.'
+Write-Output "Registered quarterly restore-drill task '$RestoreTaskName' on the first day of January, April, July and October at $RestoreTime."
+Write-Warning 'Ensure the task account has PGHOST/PGDATABASE, backup-role PGUSER/PGPASSFILE, YASK_CIEM_RESTORE_PGUSER/YASK_CIEM_RESTORE_PGPASSFILE for quarterly drills, YASK_CIEM_ALERT_WEBHOOK_URL, and access to the backup directory and both passfiles.'

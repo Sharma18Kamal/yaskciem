@@ -38,7 +38,7 @@ jobs:
       - name: Validate release PowerShell syntax
         shell: pwsh
         run: |
-          $scripts = @('scripts/publish-windows.ps1', 'scripts/package-windows-zip.ps1', 'scripts/package-msix.ps1', 'scripts/install-windows-user.ps1')
+          $scripts = @('scripts/publish-windows.ps1', 'scripts/package-windows-zip.ps1', 'scripts/package-msix.ps1', 'scripts/install-windows-user.ps1', 'scripts/backup-postgres.ps1', 'scripts/test-postgres-restore.ps1', 'scripts/check-postgres-operations.ps1', 'scripts/run-postgres-maintenance.ps1', 'scripts/register-postgres-maintenance-tasks.ps1')
           foreach ($script in $scripts) {
             $tokens = $null
             $parseErrors = $null

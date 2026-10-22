@@ -6,7 +6,8 @@ using Npgsql;
 
 namespace CloudEntitle.LicenseServer.Services;
 
-public sealed class GovernanceDeadlineWorker(SharedWorkspaceStore store, ILogger<GovernanceDeadlineWorker> logger) : BackgroundService
+public sealed class GovernanceDeadlineWorker(
+    SharedWorkspaceStore store, ILogger<GovernanceDeadlineWorker> logger, WorkerHealthRegistry workers) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -15,11 +16,13 @@ public sealed class GovernanceDeadlineWorker(SharedWorkspaceStore store, ILogger
             try
             {
                 var processed = await store.ProcessGovernanceDeadlinesAsync(DateTime.UtcNow, stoppingToken);
+                workers.Heartbeat("governance", success: true);
                 if (processed < 50) await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
+                workers.Heartbeat("governance", failed: true);
                 logger.LogError(exception, "Central governance deadline evaluation failed; work remains queued.");
                 try { await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }

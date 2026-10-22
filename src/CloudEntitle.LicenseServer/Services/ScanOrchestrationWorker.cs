@@ -5,7 +5,9 @@ namespace CloudEntitle.LicenseServer.Services;
 public sealed class ScanOrchestrationWorker(
     SharedWorkspaceStore store,
     IScanJobExecutor executor,
-    ILogger<ScanOrchestrationWorker> logger) : BackgroundService
+    ILogger<ScanOrchestrationWorker> logger,
+    WorkerHealthRegistry workers,
+    OperationsMetrics metrics) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -15,6 +17,7 @@ public sealed class ScanOrchestrationWorker(
             {
                 await store.EnqueueDueScanSchedulesAsync(stoppingToken);
                 var lease = await store.ClaimNextScanJobAsync(stoppingToken);
+                workers.Heartbeat("scan", success: true);
                 if (lease is null)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
@@ -30,6 +33,7 @@ public sealed class ScanOrchestrationWorker(
             catch (Exception exception)
             {
                 logger.LogError(exception, "The scheduled scan queue worker encountered an error.");
+                workers.Heartbeat("scan", failed: true);
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
@@ -45,6 +49,7 @@ public sealed class ScanOrchestrationWorker(
             while (!execution.IsCompleted)
             {
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                workers.Heartbeat("scan", success: true);
                 if (await store.IsScanJobCancellationRequestedAsync(lease.Job, stoppingToken))
                 {
                     jobCancellation.Cancel();
@@ -104,5 +109,7 @@ public sealed class ScanOrchestrationWorker(
 
         result ??= new ScanJobExecutionResult("Failed", null, "Worker execution ended without a result.");
         await store.CompleteScanJobAttemptAsync(lease, result.Outcome, result.Error, result.ScanId, CancellationToken.None);
+        metrics.RecordScanOutcome(lease.Job.Provider.ToString(), result.Outcome);
+        workers.Heartbeat("scan", success: true);
     }
 }

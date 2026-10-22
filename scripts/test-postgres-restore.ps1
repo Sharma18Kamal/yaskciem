@@ -42,31 +42,59 @@ $CreatedbPath = Resolve-Executable $CreatedbPath 'createdb.exe'
 $DropdbPath = Resolve-Executable $DropdbPath 'dropdb.exe'
 $PsqlPath = Resolve-Executable $PsqlPath 'psql.exe'
 
-& $PgRestorePath --list $backupPath *> $null
+& $PgRestorePath --no-password --list $backupPath *> $null
 if ($LASTEXITCODE -ne 0) { throw 'pg_restore could not read the backup archive.' }
 
 $databaseCreated = $false
 try {
-    & $CreatedbPath --maintenance-db=postgres $RestoreDatabaseName
+    & $CreatedbPath --no-password --maintenance-db=postgres $RestoreDatabaseName
     if ($LASTEXITCODE -ne 0) { throw "Could not create disposable restore database '$RestoreDatabaseName'. It may already exist; refusing to overwrite it." }
     $databaseCreated = $true
 
-    & $PgRestorePath --exit-on-error --no-owner --no-privileges --dbname=$RestoreDatabaseName $backupPath
+    & $PgRestorePath --no-password --exit-on-error --no-owner --no-privileges --dbname=$RestoreDatabaseName $backupPath
     if ($LASTEXITCODE -ne 0) { throw "pg_restore failed with exit code $LASTEXITCODE." }
 
-    $validationSql = "SELECT CASE WHEN to_regclass('public.sharedorganizationdirectories') IS NOT NULL AND to_regclass('public.sharedaccountbindings') IS NOT NULL AND to_regclass('public.ciem_audit_heads') IS NOT NULL AND to_regclass('public.ciem_audit_events') IS NOT NULL AND to_regclass('public.ciem_audit_archive_segments') IS NOT NULL THEN 'OK' ELSE 'MISSING_SCHEMA' END, (SELECT count(*) FROM ciem_audit_events), (SELECT count(*) FROM ciem_audit_heads), (SELECT count(*) FROM ciem_audit_archive_segments)"
-    $resultLine = (& $PsqlPath --no-psqlrc --set ON_ERROR_STOP=1 --tuples-only --no-align --field-separator='|' --dbname=$RestoreDatabaseName --command $validationSql | Out-String).Trim()
+    $validationSql = @"
+SELECT CASE WHEN
+    to_regclass('public.sharedorganizationdirectories') IS NOT NULL
+    AND to_regclass('public.sharedaccountbindings') IS NOT NULL
+    AND to_regclass('public.sharedaccessreviewauditevents') IS NOT NULL
+    AND to_regclass('public.sharedscansummaries') IS NOT NULL
+    AND to_regclass('public.sharedciemscanrecords') IS NOT NULL
+    AND to_regclass('public.sharedscanjobs') IS NOT NULL
+    AND to_regclass('public.sharedscanjobattempts') IS NOT NULL
+    AND to_regclass('public.sharednotificationdeliveries') IS NOT NULL
+    AND to_regclass('public.sharednotificationattempts') IS NOT NULL
+    AND to_regclass('public.ix_sharedscanjobs_queue') IS NOT NULL
+    AND to_regclass('public.ix_sharedscanjobs_retention') IS NOT NULL
+    AND to_regclass('public.ix_sharednotificationattempts_retention') IS NOT NULL
+    AND to_regclass('public.ix_sharednotificationattempts_failuretime') IS NOT NULL
+    AND to_regprocedure('public.yask_prune_operational_history(timestamp with time zone,integer)') IS NOT NULL
+    AND to_regclass('public.ciem_audit_heads') IS NOT NULL
+    AND to_regclass('public.ciem_audit_events') IS NOT NULL
+    AND to_regclass('public.ciem_audit_archive_segments') IS NOT NULL
+THEN 'OK' ELSE 'MISSING_SCHEMA_OR_OPERATIONS_INDEX' END,
+(SELECT count(*) FROM ciem_audit_events),
+(SELECT count(*) FROM ciem_audit_heads),
+(SELECT count(*) FROM ciem_audit_archive_segments),
+(SELECT count(*) FROM sharedscanjobs),
+(SELECT count(*) FROM sharednotificationdeliveries),
+(SELECT count(*) FROM sharedaccessreviewauditevents),
+(SELECT count(*) FROM sharedciemscanrecords)
+"@
+    $resultLine = (& $PsqlPath --no-psqlrc --no-password --set ON_ERROR_STOP=1 --tuples-only --no-align --field-separator='|' --dbname=$RestoreDatabaseName --command $validationSql | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw "Restore validation query failed with exit code $LASTEXITCODE." }
     $results = $resultLine -split '\|'
-    if ($results.Count -ne 4 -or $results[0].Trim() -ne 'OK') { throw 'Restored database is missing required audit/workspace schemas.' }
-    if ($results[1..3] | Where-Object { $_.Trim() -notmatch '^\d+$' }) { throw 'Restored audit/archive row counts could not be validated.' }
+    if ($results.Count -ne 8 -or $results[0].Trim() -ne 'OK') { throw 'Restored database is missing required audit/workspace/operations schemas or indexes.' }
+    if ($results[1..7] | Where-Object { $_.Trim() -notmatch '^\d+$' }) { throw 'Restored audit/archive/operations row counts could not be validated.' }
 
     Write-Output "Restore drill passed for '$RestoreDatabaseName'."
     Write-Output "Audit events: $($results[1].Trim()); tenant heads: $($results[2].Trim()); archived segments: $($results[3].Trim())."
+    Write-Output "Scan jobs: $($results[4].Trim()); notification deliveries: $($results[5].Trim()); review audit events: $($results[6].Trim()); retained scan records: $($results[7].Trim())."
 }
 finally {
     if ($databaseCreated) {
-        & $DropdbPath --maintenance-db=postgres $RestoreDatabaseName
+        & $DropdbPath --no-password --maintenance-db=postgres $RestoreDatabaseName
         if ($LASTEXITCODE -ne 0) { throw "Restore drill passed or failed, but disposable database cleanup failed: $RestoreDatabaseName" }
     }
 }

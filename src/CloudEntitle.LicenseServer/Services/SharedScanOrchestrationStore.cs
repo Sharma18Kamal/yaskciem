@@ -5,6 +5,8 @@ using Npgsql;
 namespace CloudEntitle.LicenseServer.Services;
 
 public sealed record ScanJobLease(ScanJobDto Job, Guid AttemptId);
+public sealed class TenantResourceLimitException(string resource)
+    : InvalidOperationException($"The organization's tenant has reached its configured {resource} limit.");
 
 public sealed partial class SharedWorkspaceStore
 {
@@ -19,6 +21,31 @@ public sealed partial class SharedWorkspaceStore
             request.ExternalAccountId.Trim(), request.DisplayName.Trim(), request.IntervalMinutes, request.MaxRetries,
             true, now.AddMinutes(request.IntervalMinutes), now, now, null);
         await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await LockScanQuotaAsync(connection, transaction, tenantId, cancellationToken);
+        await using (var existing = new NpgsqlCommand("""
+            SELECT 1 FROM SharedScanSchedules
+            WHERE TenantId=@tenant AND OrganizationId=@organization AND Provider=@provider AND ExternalAccountId=@account;
+            """, connection, transaction))
+        {
+            existing.Parameters.AddWithValue("tenant", tenantId);
+            existing.Parameters.AddWithValue("organization", organizationId);
+            existing.Parameters.AddWithValue("provider", request.Provider.ToString());
+            existing.Parameters.AddWithValue("account", request.ExternalAccountId.Trim());
+            if (await existing.ExecuteScalarAsync(cancellationToken) is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+                return null;
+            }
+        }
+        await using (var count = new NpgsqlCommand(
+            "SELECT count(*) FROM SharedScanSchedules WHERE TenantId=@tenant;", connection, transaction))
+        {
+            count.Parameters.AddWithValue("tenant", tenantId);
+            if (Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture)
+                >= _maxSchedulesPerTenant)
+                throw new TenantResourceLimitException("scan schedule");
+        }
         await using var command = new NpgsqlCommand("""
             INSERT INTO SharedScanSchedules
                 (TenantId, OrganizationId, ScheduleId, Provider, ExternalAccountId, DisplayName, IntervalMinutes,
@@ -26,9 +53,10 @@ public sealed partial class SharedWorkspaceStore
             VALUES (@tenant, @organization, @schedule, @provider, @account, @display, @interval, @retries,
                     true, @nextRun, @created, @updated)
             ON CONFLICT (TenantId, OrganizationId, Provider, ExternalAccountId) DO NOTHING;
-            """, connection);
+            """, connection, transaction);
         AddScheduleParameters(command, schedule);
         var inserted = await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return inserted == 1 ? schedule : null;
     }
 
@@ -84,6 +112,38 @@ public sealed partial class SharedWorkspaceStore
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await LockScanQuotaAsync(connection, transaction, tenantId, cancellationToken);
+        await using (var count = new NpgsqlCommand("""
+            SELECT count(*) FROM SharedScanJobs WHERE TenantId=@tenant AND Status IN ('Queued', 'Running');
+            """, connection, transaction))
+        {
+            count.Parameters.AddWithValue("tenant", tenantId);
+            if (Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture)
+                >= _maxActiveScanJobsPerTenant)
+            {
+                await using var existing = new NpgsqlCommand("""
+                    SELECT JobId, ScheduleId, TenantId, OrganizationId, Provider, ExternalAccountId, DisplayName, Status,
+                           AttemptCount, MaxRetries, QueuedAtUtc, StartedAtUtc, CompletedAtUtc, NextAttemptAtUtc,
+                           DurationMilliseconds, ScanId, CancellationRequested, LastError
+                    FROM SharedScanJobs
+                    WHERE TenantId=@tenant AND OrganizationId=@organization AND ScheduleId=@schedule
+                      AND Status IN ('Queued', 'Running')
+                    ORDER BY QueuedAtUtc DESC LIMIT 1;
+                    """, connection, transaction);
+                existing.Parameters.AddWithValue("tenant", tenantId);
+                existing.Parameters.AddWithValue("organization", organizationId);
+                existing.Parameters.AddWithValue("schedule", scheduleId);
+                await using var existingReader = await existing.ExecuteReaderAsync(cancellationToken);
+                if (await existingReader.ReadAsync(cancellationToken))
+                {
+                    var activeJob = ReadJob(existingReader);
+                    await existingReader.CloseAsync();
+                    await transaction.CommitAsync(cancellationToken);
+                    return activeJob;
+                }
+                throw new TenantResourceLimitException("active scan job");
+            }
+        }
         await using var enqueue = new NpgsqlCommand("""
             INSERT INTO SharedScanJobs
                 (TenantId, OrganizationId, JobId, ScheduleId, Provider, ExternalAccountId, DisplayName,
@@ -138,10 +198,25 @@ public sealed partial class SharedWorkspaceStore
             while (await reader.ReadAsync(cancellationToken)) dueSchedules.Add(ReadSchedule(reader));
         }
 
+        foreach (var tenant in dueSchedules.Select(schedule => schedule.TenantId).Distinct().Order())
+            await LockScanQuotaAsync(connection, transaction, tenant, cancellationToken);
+        var activeByTenant = new Dictionary<Guid, int>();
+        foreach (var tenant in dueSchedules.Select(schedule => schedule.TenantId).Distinct())
+        {
+            await using var count = new NpgsqlCommand(
+                "SELECT count(*) FROM SharedScanJobs WHERE TenantId=@tenant AND Status IN ('Queued', 'Running');",
+                connection, transaction);
+            count.Parameters.AddWithValue("tenant", tenant);
+            activeByTenant[tenant] = checked((int)Convert.ToInt64(
+                await count.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         var enqueued = 0;
         foreach (var schedule in dueSchedules)
         {
-            await using var insert = new NpgsqlCommand("""
+            if (activeByTenant[schedule.TenantId] < _maxActiveScanJobsPerTenant)
+            {
+                await using var insert = new NpgsqlCommand("""
                 INSERT INTO SharedScanJobs
                     (TenantId, OrganizationId, JobId, ScheduleId, Provider, ExternalAccountId, DisplayName,
                      Status, AttemptCount, MaxRetries, QueuedAtUtc)
@@ -149,15 +224,18 @@ public sealed partial class SharedWorkspaceStore
                         'Queued', 0, @retries, @now)
                 ON CONFLICT DO NOTHING;
                 """, connection, transaction);
-            insert.Parameters.AddWithValue("tenant", schedule.TenantId);
-            insert.Parameters.AddWithValue("organization", schedule.OrganizationId);
-            insert.Parameters.AddWithValue("schedule", schedule.ScheduleId);
-            insert.Parameters.AddWithValue("provider", schedule.Provider.ToString());
-            insert.Parameters.AddWithValue("account", schedule.ExternalAccountId);
-            insert.Parameters.AddWithValue("display", schedule.DisplayName);
-            insert.Parameters.AddWithValue("retries", schedule.MaxRetries);
-            insert.Parameters.AddWithValue("now", DateTime.UtcNow);
-            enqueued += await insert.ExecuteNonQueryAsync(cancellationToken);
+                insert.Parameters.AddWithValue("tenant", schedule.TenantId);
+                insert.Parameters.AddWithValue("organization", schedule.OrganizationId);
+                insert.Parameters.AddWithValue("schedule", schedule.ScheduleId);
+                insert.Parameters.AddWithValue("provider", schedule.Provider.ToString());
+                insert.Parameters.AddWithValue("account", schedule.ExternalAccountId);
+                insert.Parameters.AddWithValue("display", schedule.DisplayName);
+                insert.Parameters.AddWithValue("retries", schedule.MaxRetries);
+                insert.Parameters.AddWithValue("now", DateTime.UtcNow);
+                var inserted = await insert.ExecuteNonQueryAsync(cancellationToken);
+                enqueued += inserted;
+                activeByTenant[schedule.TenantId] += inserted;
+            }
 
             await using var update = new NpgsqlCommand("""
                 UPDATE SharedScanSchedules SET NextRunAtUtc=@nextRun, UpdatedAtUtc=@now
@@ -173,6 +251,15 @@ public sealed partial class SharedWorkspaceStore
         }
         await transaction.CommitAsync(cancellationToken);
         return enqueued;
+    }
+
+    private static async Task LockScanQuotaAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, Guid tenantId, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@tenant, 0));", connection, transaction);
+        command.Parameters.AddWithValue("tenant", tenantId.ToString("D"));
+        await command.ExecuteScalarAsync(cancellationToken);
     }
 
     public async Task<ScanJobLease?> ClaimNextScanJobAsync(CancellationToken cancellationToken = default)

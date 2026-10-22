@@ -11,7 +11,12 @@ using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+	.AddCheck<OperationsReadinessHealthCheck>("operations-ready", tags: ["ready"]);
+var operationsMetrics = new OperationsMetrics();
+builder.Services.AddSingleton(operationsMetrics);
+var workerHealth = new WorkerHealthRegistry();
+builder.Services.AddSingleton(workerHealth);
 var auditArchiveStatus = new AuditArchiveStatus();
 builder.Services.AddSingleton(auditArchiveStatus);
 var postgresConnectionString = builder.Configuration.GetConnectionString("Postgres");
@@ -42,6 +47,13 @@ builder.Services.AddAuthorization(options =>
 		.RequireAssertion(context =>
 			HasScope(context.User, "audit.read")
 			|| context.User.Claims.Any(claim => claim.Type == "roles" && claim.Value == "Ciem.Audit.Read")));
+	options.AddPolicy("CiemOperationsRead", policy => policy
+		.RequireAuthenticatedUser()
+		.RequireClaim("tid")
+		.RequireClaim("oid")
+		.RequireAssertion(context =>
+			HasScope(context.User, "operations.read")
+			|| context.User.Claims.Any(claim => claim.Type == "roles" && claim.Value == "Ciem.Operations.Read")));
 });
 
 var auditRetentionDays = builder.Configuration.GetValue("AuditRetention:MinimumRetentionDays", 2555);
@@ -73,14 +85,28 @@ else
 	auditStore = new UnavailableAuditRetentionStore("Production requires AuditRetention:Provider=Postgres and an initialized PostgreSQL audit schema; the local file store is development-only.");
 }
 builder.Services.AddSingleton<IAuditRetentionStore>(_ => auditStore);
-var sharedWorkspaceStore = new SharedWorkspaceStore(postgresDataSource);
+var maxSchedulesPerTenant = builder.Configuration.GetValue("Operations:Limits:MaxScanSchedulesPerTenant", 100);
+var maxActiveJobsPerTenant = builder.Configuration.GetValue("Operations:Limits:MaxActiveScanJobsPerTenant", 25);
+var sharedWorkspaceStore = new SharedWorkspaceStore(postgresDataSource, maxSchedulesPerTenant, maxActiveJobsPerTenant);
 builder.Services.AddSingleton<SharedWorkspaceStore>(_ => sharedWorkspaceStore);
 builder.Services.AddSingleton<ICloudCommandRunner, ProcessCloudCommandRunner>();
 builder.Services.AddSingleton<IScanJobExecutor, CloudProviderScanJobExecutor>();
-builder.Services.AddHostedService<ScanOrchestrationWorker>();
+builder.Services.AddHostedService(serviceProvider => new ScanOrchestrationWorker(
+	sharedWorkspaceStore, serviceProvider.GetRequiredService<IScanJobExecutor>(),
+	serviceProvider.GetRequiredService<ILogger<ScanOrchestrationWorker>>(),
+	serviceProvider.GetRequiredService<WorkerHealthRegistry>(),
+	serviceProvider.GetRequiredService<OperationsMetrics>()));
 builder.Services.AddSingleton<ICentralNotificationTransport, CentralWebhookTransport>();
-builder.Services.AddHostedService<CentralNotificationWorker>();
-builder.Services.AddHostedService<GovernanceDeadlineWorker>();
+builder.Services.AddHostedService(serviceProvider => new CentralNotificationWorker(
+	sharedWorkspaceStore, serviceProvider.GetRequiredService<ICentralNotificationTransport>(),
+	serviceProvider.GetRequiredService<ILogger<CentralNotificationWorker>>(),
+	serviceProvider.GetRequiredService<WorkerHealthRegistry>(),
+	serviceProvider.GetRequiredService<OperationsMetrics>()));
+builder.Services.AddHostedService(serviceProvider => new GovernanceDeadlineWorker(
+	sharedWorkspaceStore, serviceProvider.GetRequiredService<ILogger<GovernanceDeadlineWorker>>(),
+	serviceProvider.GetRequiredService<WorkerHealthRegistry>()));
+builder.Services.AddHostedService<OperationsTelemetrySampler>();
+builder.Services.AddHostedService<OperationsRetentionWorker>();
 
 var auditArchiveConfiguration = builder.Configuration.GetSection("AuditArchive");
 var archiveCredentialError = string.Empty;
@@ -164,11 +190,20 @@ app.Use(async (context, next) =>
 	SecurityHeaderPolicy.Apply(context.Response, useHsts);
 	await next();
 });
+app.UseMiddleware<ApiRequestMetricsMiddleware>();
 app.UseOperationsConsole();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapHealthChecks("/health");
+app.MapGet("/health/live", () => Results.Ok(new { status = "Healthy" })).AllowAnonymous();
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+	Predicate = check => check.Tags.Contains("ready")
+}).AllowAnonymous();
+app.MapGet("/metrics", (OperationsMetrics metrics) =>
+	Results.Text(metrics.ToPrometheusText(), "text/plain; version=0.0.4; charset=utf-8"))
+	.RequireAuthorization("CiemOperationsRead");
 
 app.MapGet("/api/v1/health", () => Results.Ok(new ApiHealthResponse("Healthy", ApiContractVersion.Current, DateTime.UtcNow))).AllowAnonymous();
 app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, SharedWorkspaceStore workspaceStore,
@@ -176,11 +211,26 @@ app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, Shar
 {
 	var audit = await retentionStore.CheckReadinessAsync(cancellationToken);
 	var workspaceReady = await workspaceStore.IsReadyAsync(cancellationToken);
+	var operationsReady = await workspaceStore.CheckOperationsReadinessAsync(cancellationToken);
+	var workerStatuses = workerHealth.Snapshot();
+	var workersReady = new[] { "scan", "notifications", "governance", "operations", "retention" }
+		.All(name => workerStatuses.TryGetValue(name, out var status)
+			&& DateTime.UtcNow - status.LastHeartbeatUtc <= TimeSpan.FromSeconds(90)
+			&& (name != "retention" || status.LastSuccessUtc is DateTime success
+				&& DateTime.UtcNow - success <= TimeSpan.FromHours(36)));
 	var archive = archiveStatus.Current;
-	var productionReady = audit.Ready && audit.ProductionReady && workspaceReady && archive.Ready;
-	var response = new ApiReadinessResponse(productionReady ? "Ready" : "NotReady", audit.Ready && workspaceReady, productionReady, ApiContractVersion.Current)
+	var snapshot = operationsMetrics.Current;
+	var queueReady = snapshot is not null
+		&& snapshot.OldestQueuedScanSeconds <= builder.Configuration.GetValue("Operations:Readiness:MaxQueueAgeSeconds", 3600)
+		&& snapshot.QueuedScanJobs <= builder.Configuration.GetValue("Operations:Readiness:MaxQueueDepth", 1000);
+	var productionReady = audit.Ready && audit.ProductionReady && workspaceReady && operationsReady && workersReady && queueReady && archive.Ready;
+	var response = new ApiReadinessResponse(productionReady ? "Ready" : "NotReady",
+		audit.Ready && workspaceReady && operationsReady, productionReady, ApiContractVersion.Current)
 	{
 		AuditStorageReady = audit.Ready && workspaceReady,
+		OperationsReady = operationsReady,
+		QueueReady = queueReady,
+		WorkersReady = workersReady,
 		ProductionReady = productionReady,
 		AuditStorageDetails = workspaceReady ? audit.Details : $"{audit.Details} PostgreSQL shared-workspace schema is unavailable.",
 		AuditArchiveReady = archive.Ready,
