@@ -52,6 +52,12 @@ jobs:
       - name: Build solution
         run: dotnet build CloudEntitle.sln --configuration Release --no-restore
 
+      - name: Test staging release safeguards offline
+        shell: pwsh
+        run: |
+          .\infra\scripts\Test-StagingInstaller.ps1
+          .\infra\scripts\Test-StagingPipeline.ps1
+
       - name: Run tests
         run: dotnet test CloudEntitle.sln --configuration Release --no-build --no-restore --logger "console;verbosity=normal"
 

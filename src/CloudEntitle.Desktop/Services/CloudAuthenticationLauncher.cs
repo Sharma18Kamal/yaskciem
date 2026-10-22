@@ -12,10 +12,16 @@ public interface ICloudAuthenticationLauncher
     void LaunchDisconnection(CloudProviderType provider);
     Task<bool> IsConnectedAsync(CloudProviderType provider, CancellationToken cancellationToken = default);
     Task DisconnectAsync(CloudProviderType provider, CancellationToken cancellationToken = default);
+    Task<CloudAccountVerification> VerifyAccountAsync(LiveScanAccountRecord account, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Account verification is unavailable for this authentication provider.");
 }
 
 public sealed class CloudAuthenticationLauncher : ICloudAuthenticationLauncher
 {
+    public Task<CloudAccountVerification> VerifyAccountAsync(LiveScanAccountRecord account, CancellationToken cancellationToken = default)
+        => _commandRunner is null
+            ? throw new InvalidOperationException("Cloud command execution is not configured.")
+            : CloudAccountVerifier.VerifyAsync(_commandRunner, account, cancellationToken);
     private readonly ICloudCommandRunner? _commandRunner;
     private readonly TimeSpan _connectionCheckTimeout;
 

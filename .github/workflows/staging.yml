@@ -35,6 +35,7 @@ jobs:
         run: |
           .\infra\scripts\Test-StagingArtifacts.ps1
           .\infra\scripts\Test-StagingPipeline.ps1
+          .\infra\scripts\Test-StagingInstaller.ps1
           .\infra\scripts\Build-StagingPackage.ps1 -Version "1.0.$($env:GITHUB_RUN_NUMBER).$($env:GITHUB_RUN_ATTEMPT)"
           az bicep build --file .\infra\main.bicep --outfile .\artifacts\staging-template.json
           if ($LASTEXITCODE -ne 0) { throw 'ARM compilation failed.' }

@@ -435,6 +435,7 @@
                                     <TextBlock Text="LEAST-PRIVILEGE SETUP" Style="{StaticResource CardLabel}" Margin="0,0,0,4"/>
                                     <TextBlock Text="{Binding PermissionGuidance}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" MinHeight="62" Margin="0,0,0,10"/>
                                     <TextBlock Text="{Binding AccessValidationText}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <TextBlock Text="{Binding LastSuccessfulScanText}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                     <StackPanel Orientation="Horizontal">
                                         <Button Content="Connect" Command="{Binding ConnectCommand}" IsEnabled="{Binding CanConnect}" Style="{StaticResource PrimaryButton}" ToolTip="Run the provider's interactive sign-in command"/>
                                         <Button Content="Disconnect" Command="{Binding DisconnectCommand}" IsEnabled="{Binding IsConnected}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Stop using this provider in YASK-CIEM; provider CLI credentials may remain available to other tools."/>
@@ -452,7 +453,7 @@
                             <TextBlock Text="{Binding DiscoveryStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                         <TextBlock Text="DISCOVERED ACCOUNTS AND PERMISSION SETS" Style="{StaticResource CardLabel}" Margin="0,4,0,10"/>
-                        <DataGrid ItemsSource="{Binding DiscoveredAccounts}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="320" CanUserSortColumns="True">
+                        <DataGrid ItemsSource="{Binding DiscoveredAccounts}" SelectedItem="{Binding SelectedVerificationAccount, Mode=TwoWay}" SelectionMode="Single" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="100" MaxHeight="320" CanUserSortColumns="True">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="100"/>
                                 <DataGridTextColumn Header="Account" Binding="{Binding AccountName}" Width="220"/>
@@ -462,6 +463,30 @@
                                 <DataGridTextColumn Header="Scan access" Binding="{Binding ScanAccess}" Width="*"/>
                             </DataGrid.Columns>
                         </DataGrid>
+                        <TextBlock Text="YOUR ADMINISTRATOR-APPROVED SCOPE" Style="{StaticResource CardLabel}" Margin="0,16,0,8"/>
+                        <TextBlock Text="Select a discovered row to fill the provider/account/profile, or enter your own approved scope below. Configure CLI authentication externally first. These are scope identifiers only: never enter passwords, tokens or access keys. Nothing is saved as an organization binding by this check." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Provider" Foreground="{StaticResource MutedBrush}"/>
+                                <ComboBox ItemsSource="{Binding VerificationProviders}" SelectedItem="{Binding VerificationProvider, Mode=TwoWay}" ToolTip="Choose the provider for your approved scope; this does not sign in or grant access."/>
+                                <TextBlock Text="Subscription / account / project ID" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding VerificationAccountId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Azure subscription GUID, AWS 12-digit account ID, or GCP project ID supplied by your administrator."/>
+                                <TextBlock Text="Expected Azure tenant ID (Azure only)" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding VerificationTenantId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Required for Azure: the administrator-approved tenant GUID. A different returned tenant fails verification."/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                <TextBlock Text="Existing AWS CLI profile (AWS only)" Foreground="{StaticResource MutedBrush}"/>
+                                <TextBox Text="{Binding VerificationProfile, UpdateSourceTrigger=PropertyChanged}" ToolTip="Required for AWS: an existing approved profile name, or default. Configure SSO/assumed-role access outside the application."/>
+                                <TextBlock Text="Expected active CLI account (GCP only)" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding VerificationIdentity, UpdateSourceTrigger=PropertyChanged}" ToolTip="Required for GCP: the expected active gcloud account. Impersonation and credential/token-file overrides are unsupported."/>
+                            </StackPanel>
+                        </Grid>
+                        <Button Content="Verify entered account identity" Command="{Binding VerifyEnteredAccountCommand}" Style="{StaticResource QuietButton}" HorizontalAlignment="Left" Margin="0,10,0,6" ToolTip="Run read-only identity/scope checks for the entered approved account. No scan, cloud permission change or organization binding is started."/>
+                        <TextBlock Text="{Binding VerificationStatus}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap"/>
+                        <Button Content="Scan verified account" Command="{Binding ScanVerifiedAccountCommand}" IsEnabled="{Binding CanScanVerifiedAccount}" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Margin="0,12,0,6" ToolTip="Recheck the verified identity and collect only that account/profile. Other providers, provider-wide directory/organization queries and Kubernetes contexts are excluded. No account binding or cloud permission change is made."/>
+                        <TextBlock Text="{Binding VerifiedScanStatus}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap"/>
+                        <TextBlock Text="Review source coverage below after collection. Provider scope discovery may list other accounts, but their inventory is not collected by Scan verified account. Broader directory/organization/cluster sources are intentionally skipped. Dashboard still has independent scan selection. Bind later in Organizations only when approved. Do not change CLI credentials while a scan runs; point-in-time identity checks cannot lock external CLI configuration. GCP impersonation and credential/token-file overrides are not supported by this check." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="An account listed here is visible to the current CLI identity; it is not proof that every inventory source is readable. AWS Organizations members are listed separately from accounts scanned through configured profiles. Prefer IAM Identity Center SSO profiles and configure access for each target account/permission set." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
@@ -956,16 +981,18 @@
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="ORGANIZATION MEMBERS" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="Invite by Entra sign-in email. Membership stays pending until the user signs in to this organization. No invitation email is sent automatically. For shared access reviews, assign an accepted, active member with Manage remediation permission from Access Reviews." TextWrapping="Wrap" Margin="0,8,0,0"/>
                                 <Grid Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" Text="{Binding NewMemberEmail, UpdateSourceTrigger=PropertyChanged}" ToolTip="Invite by Entra sign-in email" Margin="0,0,8,0"/>
                                     <ComboBox Grid.Column="1" ItemsSource="{Binding MemberRoles}" SelectedItem="{Binding NewMemberRoleOption, Mode=TwoWay}" DisplayMemberPath="Name" Margin="4,0" ToolTip="Choose the organization role to assign to the invited Entra user."/>
-                                    <Button Grid.Column="2" Content="Add member" Command="{Binding AddMemberCommand}" IsEnabled="{Binding CanAddMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Add the Entra user to the selected organization with the chosen role."/>
+                                    <Button Grid.Column="2" Content="Invite member" Command="{Binding AddMemberCommand}" IsEnabled="{Binding CanAddMember}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Create a pending invitation for the selected role. Ask the user to sign in; no email is sent automatically."/>
                                 </Grid>
                                 <DataGrid ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="80" MaxHeight="180" SelectionMode="Single" Margin="0,8,0,0">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Email" Binding="{Binding Email}" Width="*"/>
                                         <DataGridTextColumn Header="Role" Binding="{Binding AssignedRoleName}" Width="150"/>
+                                        <DataGridCheckBoxColumn Header="Pending sign-in" Binding="{Binding IsPending}" Width="110"/>
                                         <DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" Width="70"/>
                                     </DataGrid.Columns>
                                 </DataGrid>

@@ -952,7 +952,19 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
     private IReadOnlyList<LiveScanAccountRecord> _discoveredAccounts = Array.Empty<LiveScanAccountRecord>();
     private IReadOnlyList<ProviderSourceCoverageRow> _sourceCoverage = Array.Empty<ProviderSourceCoverageRow>();
     private string _discoveryStatus = "Discover accessible accounts after connecting a provider.";
+    private LiveScanAccountRecord? _selectedVerificationAccount;
+    private string _verificationStatus = "Select a discovered account and verify its CLI identity before binding or scanning. Verification does not grant permissions.";
     private DateTime? _lastCollectionAtUtc;
+    private string _verificationProvider = "Azure";
+    private string _verificationAccountId = string.Empty;
+    private string _verificationTenantId = string.Empty;
+    private string _verificationProfile = string.Empty;
+    private string _verificationIdentity = string.Empty;
+    private int _verificationRevision;
+    private LiveScanAccountRecord? _verifiedScanAccount;
+    private CloudAccountVerification? _verifiedScanIdentity;
+    private bool _isVerifiedScanRunning;
+    private string _verifiedScanStatus = "Verify an approved scope, then explicitly start its read-only scan. No account is bound automatically.";
 
     public CloudAccountsViewModel(IDemoDataService demoData, ICloudAuthenticationLauncher? authenticationLauncher = null, IDialogService? dialogService = null, CloudConnectionState? cloudConnectionState = null, ILiveCloudScanService? liveCloudScanService = null) : base(demoData)
     {
@@ -981,6 +993,9 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         ];
         RefreshConnectionsCommand = new AsyncRelayCommand(() => RefreshConnectionsAsync());
         DiscoverAccountsCommand = new AsyncRelayCommand(() => DiscoverAccountsAsync());
+        VerifyAccountCommand = new AsyncRelayCommand(VerifySelectedAccountAsync);
+        VerifyEnteredAccountCommand = new AsyncRelayCommand(VerifyEnteredAccountAsync);
+        ScanVerifiedAccountCommand = new AsyncRelayCommand(ScanVerifiedAccountAsync);
         foreach (var option in Providers.Where(option => !_cloudConnectionState.ConnectedProviders.Contains(option.Provider)))
         {
             _cloudConnectionState.DisconnectProvider(option.Provider);
@@ -1006,6 +1021,161 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         : "No read-only collection has been run in this app session.";
     public AsyncRelayCommand RefreshConnectionsCommand { get; }
     public AsyncRelayCommand DiscoverAccountsCommand { get; }
+    public AsyncRelayCommand VerifyAccountCommand { get; }
+    public AsyncRelayCommand VerifyEnteredAccountCommand { get; }
+    public AsyncRelayCommand ScanVerifiedAccountCommand { get; }
+    public bool CanScanVerifiedAccount => !_isVerifiedScanRunning && _verifiedScanAccount is not null
+        && _verifiedScanIdentity is not null && _liveCloudScanService is not null;
+    public string VerifiedScanStatus { get => _verifiedScanStatus; private set => SetProperty(ref _verifiedScanStatus, value); }
+    public IReadOnlyList<string> VerificationProviders { get; } = ["Azure", "Aws", "Gcp"];
+    public string VerificationProvider { get => _verificationProvider; set { if (SetProperty(ref _verificationProvider, value)) InvalidateVerification(); } }
+    public string VerificationAccountId { get => _verificationAccountId; set { if (SetProperty(ref _verificationAccountId, value)) InvalidateVerification(); } }
+    public string VerificationTenantId { get => _verificationTenantId; set { if (SetProperty(ref _verificationTenantId, value)) InvalidateVerification(); } }
+    public string VerificationProfile { get => _verificationProfile; set { if (SetProperty(ref _verificationProfile, value)) InvalidateVerification(); } }
+    public string VerificationIdentity { get => _verificationIdentity; set { if (SetProperty(ref _verificationIdentity, value)) InvalidateVerification(); } }
+    public string VerificationStatus { get => _verificationStatus; private set => SetProperty(ref _verificationStatus, value); }
+    public LiveScanAccountRecord? SelectedVerificationAccount
+    {
+        get => _selectedVerificationAccount;
+        set
+        {
+            if (SetProperty(ref _selectedVerificationAccount, value))
+            {
+                if (value is not null)
+                {
+                    VerificationProvider = value.Provider;
+                    VerificationAccountId = value.AccountId;
+                    VerificationProfile = value.Profile;
+                    VerificationTenantId = string.Empty;
+                    VerificationIdentity = string.Empty;
+                }
+                InvalidateVerification();
+            }
+        }
+    }
+
+    private void InvalidateVerification()
+    {
+        _verificationRevision++;
+        _verifiedScanAccount = null;
+        _verifiedScanIdentity = null;
+        OnPropertyChanged(nameof(CanScanVerifiedAccount));
+        VerificationStatus = "Account selection or expected scope changed. Verify again; previous verification is not evidence for this scope.";
+    }
+
+    public async Task VerifyEnteredAccountAsync()
+    {
+        InvalidateVerification();
+        var provider = VerificationProvider;
+        var accountId = VerificationAccountId.Trim();
+        var tenantId = VerificationTenantId.Trim();
+        var profile = VerificationProfile.Trim();
+        var identity = VerificationIdentity.Trim();
+        string? validationError = provider switch
+        {
+            "Azure" when !Guid.TryParse(accountId, out _) || !Guid.TryParse(tenantId, out _)
+                => "Enter the approved Azure subscription ID and expected tenant ID as GUIDs.",
+            "Aws" when accountId.Length != 12 || accountId.Any(character => character is < '0' or > '9')
+                => "Enter the approved 12-digit AWS account ID.",
+            "Aws" when string.IsNullOrWhiteSpace(profile) || profile.StartsWith('-') || profile.Any(char.IsControl)
+                => "Enter the approved existing AWS CLI profile name, including 'default' if intended.",
+            "Gcp" when accountId.Length is < 6 or > 30 || accountId[0] is < 'a' or > 'z'
+                || accountId[^1] == '-' || accountId.Any(character => character is not (>= 'a' and <= 'z') and not (>= '0' and <= '9') and not '-')
+                => "Enter the approved GCP project ID (6-30 lowercase letters, digits or hyphens; begin with a letter and do not end with a hyphen).",
+            "Gcp" when string.IsNullOrWhiteSpace(identity) || identity.StartsWith('-') || identity.Any(char.IsWhiteSpace)
+                => "Enter the expected active GCP CLI account (not a password or token).",
+            not ("Azure" or "Aws" or "Gcp") => "Select Azure, AWS or GCP for account verification.",
+            _ => null
+        };
+        if (validationError is not null)
+        {
+            ErrorMessage = validationError;
+            VerificationStatus = $"Not verified. {validationError}";
+            return;
+        }
+        var account = new LiveScanAccountRecord(provider, accountId, accountId, provider == "Aws" ? profile : string.Empty, "");
+        await VerifyAccountScopeAsync(account, provider == "Azure" ? tenantId : null, provider == "Gcp" ? identity : null);
+    }
+
+    public async Task VerifySelectedAccountAsync()
+    {
+        var account = SelectedVerificationAccount;
+        if (account is null) { ErrorMessage = "Select a discovered account to verify."; return; }
+        await VerifyAccountScopeAsync(account, null, null);
+    }
+
+    private async Task VerifyAccountScopeAsync(LiveScanAccountRecord account, string? expectedTenant, string? expectedIdentity)
+    {
+        var revision = ++_verificationRevision;
+        _verifiedScanAccount = null;
+        _verifiedScanIdentity = null;
+        OnPropertyChanged(nameof(CanScanVerifiedAccount));
+        try
+        {
+            ErrorMessage = null;
+            VerificationStatus = "Checking the selected account using read-only provider commands...";
+            var result = await _authenticationLauncher.VerifyAccountAsync(account);
+            if (_verificationRevision != revision) return;
+            if (!string.Equals(result.Provider, account.Provider, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(result.AccountId, account.AccountId, StringComparison.OrdinalIgnoreCase)
+                || (expectedTenant is not null && !string.Equals(result.TenantId, expectedTenant, StringComparison.OrdinalIgnoreCase))
+                || (expectedIdentity is not null && !string.Equals(result.Identity, expectedIdentity, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("Verified provider, account, tenant or CLI identity does not match the approved scope you entered.");
+            _verifiedScanAccount = account;
+            _verifiedScanIdentity = result;
+            OnPropertyChanged(nameof(CanScanVerifiedAccount));
+            VerificationStatus = $"Verified {result.Provider} account {result.AccountId} as {result.Identity}; tenant: {(string.IsNullOrEmpty(result.TenantId) ? "not applicable" : result.TenantId)} at {result.CheckedAtUtc.ToLocalTime():g}. Identity/scope only: run a read-only scan to validate source permissions. Use Scan verified account below for this account/profile only; Dashboard retains its independent selection. CLI credentials can change; verify again after a profile change.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or NotSupportedException or OperationCanceledException)
+        {
+            if (_verificationRevision != revision) return;
+            ErrorMessage = exception is OperationCanceledException ? "Verification canceled or timed out." : exception.Message;
+            VerificationStatus = $"Not verified. {ErrorMessage}";
+        }
+    }
+
+    public async Task ScanVerifiedAccountAsync()
+    {
+        if (_isVerifiedScanRunning) return;
+        var account = _verifiedScanAccount;
+        var identity = _verifiedScanIdentity;
+        if (account is null || identity is null || _liveCloudScanService is null)
+        {
+            ErrorMessage = "Verify an approved account first; verified-account scanning must be configured.";
+            VerifiedScanStatus = $"Scan not started. {ErrorMessage}";
+            return;
+        }
+        _isVerifiedScanRunning = true;
+        OnPropertyChanged(nameof(CanScanVerifiedAccount));
+        try
+        {
+            ErrorMessage = null;
+            VerifiedScanStatus = $"Rechecking identity and collecting only {account.Provider} {account.AccountId} (profile: {account.Profile}). Scope discovery may list other accounts; their inventory is excluded. No binding will be created.";
+            var result = await _liveCloudScanService.ScanVerifiedAccountAsync(account, identity);
+            UpdateScanCoverage();
+            var scanned = result.AccountRecords.Where(item => item.ScanAccess == "Scanned").ToArray();
+            if (scanned.Length != 1 || !string.Equals(scanned[0].Provider, account.Provider, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(scanned[0].AccountId, account.AccountId, StringComparison.OrdinalIgnoreCase)
+                || (account.Provider.Equals("Aws", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(string.IsNullOrEmpty(scanned[0].Profile) ? "default" : scanned[0].Profile,
+                        string.IsNullOrEmpty(account.Profile) ? "default" : account.Profile, StringComparison.Ordinal)))
+                throw new InvalidOperationException("The verified account was not collected as the single scan scope. Review coverage; do not treat this scan as successful.");
+            var gaps = result.Coverage.Count(item => item.Status is not (ScanCoverageStatus.Collected or ScanCoverageStatus.NoData));
+            VerifiedScanStatus = $"Collection finished for {account.Provider} {account.AccountId} as {identity.Identity}: {gaps} source(s) denied, partial, unavailable, unsupported or skipped. Review Latest permission and source coverage below, including intentionally excluded directory/organization/cluster sources. Zero findings do not prove full coverage. No account was bound. Verify again before another scan.";
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = $"Verified-account scan failed: {exception.Message}";
+            VerifiedScanStatus = ErrorMessage;
+        }
+        finally
+        {
+            _isVerifiedScanRunning = false;
+            _verifiedScanAccount = null;
+            _verifiedScanIdentity = null;
+            OnPropertyChanged(nameof(CanScanVerifiedAccount));
+        }
+    }
 
     public async Task DiscoverAccountsAsync()
     {
@@ -1018,6 +1188,8 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
         try
         {
             DiscoveryStatus = "Discovering accounts accessible through selected provider sign-ins...";
+            InvalidateVerification();
+            SelectedVerificationAccount = null;
             _discoveredAccounts = await _liveCloudScanService.DiscoverAccountsAsync();
             OnPropertyChanged(nameof(DiscoveredAccounts));
             DiscoveryStatus = _discoveredAccounts.Count == 0
@@ -1039,6 +1211,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
 
     private void UpdateScanCoverage()
     {
+        SelectedVerificationAccount = null;
         var result = _liveCloudScanService?.CurrentResult;
         _discoveredAccounts = result?.AccountRecords ?? Array.Empty<LiveScanAccountRecord>();
         _lastCollectionAtUtc = result?.CompletedAt;
@@ -1121,7 +1294,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             {
                 connectedProviders.Add(provider);
                 UpdateProviderStates(connectedProviders);
-                ConnectionGuidance = $"{provider} is connected. Go to Dashboard and select Scan Now to fetch cloud data.";
+                ConnectionGuidance = $"{provider} CLI sign-in detected. Discover accounts and verify the intended account identity, then go to Dashboard and select Scan Now to validate read permissions and coverage.";
                 OnPropertyChanged(nameof(ConnectionGuidance));
                 return;
             }
@@ -1142,7 +1315,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
                     connectedProviders = Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet();
                     connectedProviders.Add(provider);
                     UpdateProviderStates(connectedProviders);
-                    ConnectionGuidance = $"{provider} is connected. Go to Dashboard and select Scan Now to fetch resources, assignments, and findings. YASK-CIEM does not receive or store cloud credentials.";
+                    ConnectionGuidance = $"{provider} CLI sign-in detected. Discover accounts and verify the intended account identity, then select Scan Now in Dashboard and review source coverage. YASK-CIEM does not receive or store cloud credentials.";
                     OnPropertyChanged(nameof(ConnectionGuidance));
                     return;
                 }
@@ -1242,6 +1415,8 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
 
     private void UpdateProviderStates(IReadOnlySet<CloudProviderType> connectedProviders)
     {
+        InvalidateVerification();
+        SelectedVerificationAccount = null;
         var activeProviders = connectedProviders.Where(provider => !_cloudConnectionState.IsExplicitlyDisconnected(provider)).ToHashSet();
         foreach (var option in Providers)
         {
@@ -1259,6 +1434,7 @@ public sealed class CloudProviderConnectionOption : ObservableObject
     private bool _canConnect;
     private bool _isConnecting;
     private string _accessValidationText = "Permissions not yet validated; run a read-only scan.";
+    private DateTime? _lastSuccessfulScanAtUtc;
 
     public CloudProviderConnectionOption(CloudProviderType provider, string name, string cliName, string command, string description,
         string permissionGuidance, AsyncRelayCommand connectCommand, AsyncRelayCommand disconnectCommand)
@@ -1286,6 +1462,9 @@ public sealed class CloudProviderConnectionOption : ObservableObject
     public bool IsConnecting { get => _isConnecting; private set => SetProperty(ref _isConnecting, value); }
     public string StateText => IsConnecting ? "Connecting" : IsConnected ? "CLI authenticated" : "Not connected";
     public string AccessValidationText { get => _accessValidationText; private set => SetProperty(ref _accessValidationText, value); }
+    public string LastSuccessfulScanText => _lastSuccessfulScanAtUtc.HasValue
+        ? $"Last gap-free source collection observed this session: {_lastSuccessfulScanAtUtc.Value.ToLocalTime():g}. This is not a guarantee of complete cloud coverage."
+        : "No gap-free source collection observed this session.";
 
     internal void UpdateState(bool isConnected, bool canConnect, bool isConnecting)
     {
@@ -1307,10 +1486,16 @@ public sealed class CloudProviderConnectionOption : ObservableObject
         var partial = coverage.Count(item => item.Status == ScanCoverageStatus.Partial);
         var unavailable = coverage.Count(item => item.Status == ScanCoverageStatus.Unavailable);
         var unsupported = coverage.Count(item => item.Status == ScanCoverageStatus.Unsupported);
-        var needsAttention = denied + partial + unavailable + unsupported;
+        var skipped = coverage.Count(item => item.Status == ScanCoverageStatus.Skipped);
+        var needsAttention = denied + partial + unavailable + unsupported + skipped;
         var summary = needsAttention == 0
             ? "No permission or unsupported-source gaps reported"
-            : $"{denied} denied, {partial} partial, {unavailable} unavailable, {unsupported} unsupported source(s)";
+            : $"{denied} denied, {partial} partial, {unavailable} unavailable, {unsupported} unsupported, {skipped} skipped source(s)";
+        if (coverage.All(item => item.Status is ScanCoverageStatus.Collected or ScanCoverageStatus.NoData))
+        {
+            _lastSuccessfulScanAtUtc = completedAtUtc;
+            OnPropertyChanged(nameof(LastSuccessfulScanText));
+        }
         AccessValidationText = $"Last checked {completedAtUtc.Value.ToLocalTime():g}: {summary}.";
     }
 }

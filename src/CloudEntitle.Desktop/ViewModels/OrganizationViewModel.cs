@@ -12,6 +12,7 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
 {
     private readonly OrganizationManagementService _organizationsService;
     private readonly IOrganizationSsoService _ssoService;
+    private readonly ICloudAuthenticationLauncher _cloudAuthentication;
     private readonly ILiveCloudScanService _liveScan;
     private readonly AuthenticatedOrganizationContext _authenticatedContext;
     private readonly ICentralAuditSyncService? _centralAuditSyncService;
@@ -78,10 +79,12 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
         ISharedOrganizationApi? sharedOrganizationApi = null,
         ISharedScanSummaryPublisher? sharedScanSummaryPublisher = null,
         ISharedScanScheduleApi? sharedScanScheduleApi = null,
-        ISharedMonitoringApi? sharedMonitoringApi = null) : base(demoData)
+        ISharedMonitoringApi? sharedMonitoringApi = null,
+        ICloudAuthenticationLauncher? cloudAuthentication = null) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
+        _cloudAuthentication = cloudAuthentication ?? new CloudAuthenticationLauncher();
         _liveScan = liveScan;
         _authenticatedContext = authenticatedContext;
         _centralAuditSyncService = centralAuditSyncService;
@@ -434,7 +437,7 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
             else
                 _organizationsService.AddMember(SelectedOrganization.Id, _identity, NewMemberEmail, NewMemberRoleOption);
             NewMemberEmail = string.Empty;
-            StatusMessage = "Organization membership saved. The invited user must sign in through Entra before receiving access.";
+            StatusMessage = "Pending invitation saved. Ask the user to sign in through Entra to this organization; no invitation email was sent. Review assignment is available after acceptance for an active authorized member.";
             await RefreshAsync();
         }
         catch (Exception exception)
@@ -532,17 +535,27 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
     public async Task BindAccountAsync()
     {
         if (!CanBindAccount || _identity is null || SelectedOrganization is null || SelectedAccount is null) return;
-        if (SelectedAccount.CloudAccountId == Guid.Empty || !Enum.TryParse<CloudProvider>(SelectedAccount.Provider, true, out var provider))
+        var account = SelectedAccount;
+        var organization = SelectedOrganization;
+        var identity = _identity;
+        if (account.CloudAccountId == Guid.Empty || !Enum.TryParse<CloudProvider>(account.Provider, true, out var provider))
         {
             ErrorMessage = "This roster entry does not have a scannable cloud-account ID and cannot be bound to consolidated data.";
             return;
         }
         try
         {
+            ErrorMessage = null;
+            var verification = await _cloudAuthentication.VerifyAccountAsync(account);
+            if (!string.Equals(verification.AccountId, account.AccountId, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(verification.Provider, account.Provider, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Verified cloud scope does not match the account selected for binding.");
+            if (_identity != identity || SelectedOrganization != organization || SelectedAccount != account)
+                throw new InvalidOperationException("Organization, sign-in or account selection changed during verification. Select the intended account and try again.");
             if (_sharedOrganizationApi is not null)
-                await _sharedOrganizationApi.BindAccountAsync(SelectedOrganization.Id, new BindOrganizationAccountRequest(provider, SelectedAccount.CloudAccountId, SelectedAccount.AccountId, SelectedAccount.AccountName));
+                await _sharedOrganizationApi.BindAccountAsync(organization.Id, new BindOrganizationAccountRequest(provider, account.CloudAccountId, account.AccountId, account.AccountName));
             else
-                _organizationsService.BindCloudAccount(SelectedOrganization.Id, _identity, provider, SelectedAccount.CloudAccountId, SelectedAccount.AccountId, SelectedAccount.AccountName);
+                _organizationsService.BindCloudAccount(organization.Id, identity, provider, account.CloudAccountId, account.AccountId, account.AccountName);
             StatusMessage = "Cloud account bound to the organization. Consolidated counts use only matching live-scan account IDs.";
             await RefreshAsync();
         }

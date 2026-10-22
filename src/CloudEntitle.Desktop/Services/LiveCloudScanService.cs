@@ -16,6 +16,8 @@ public interface ILiveCloudScanService
     Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default);
     Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default);
     Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default);
+    Task<LiveCloudScanResult> ScanVerifiedAccountAsync(LiveScanAccountRecord account, CloudAccountVerification verification, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Verified-account scanning is not configured.");
     async Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, IProgress<LiveScanProgress>? progress, CancellationToken cancellationToken = default)
     {
         progress?.Report(new LiveScanProgress("Cloud", string.Empty, "Scan", LiveScanProgressState.Started));
@@ -107,17 +109,19 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
     private readonly ApplicationRiskEngine _riskEngine = new();
     private readonly LiveResourceRiskGraphEvaluator _resourceRiskGraphEvaluator = new();
     private readonly SemaphoreSlim _scanGate = new(1, 1);
+    private readonly ICloudAuthenticationLauncher? _authenticationLauncher;
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
     public event EventHandler? ScanCompleted;
 
-    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null, IPostureNotificationChannel? postureNotificationChannel = null)
+    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null, IPostureNotificationChannel? postureNotificationChannel = null, ICloudAuthenticationLauncher? authenticationLauncher = null)
     {
         _providers = providers.ToArray();
         _historyStore = historyStore;
         _kubernetesRbacProvider = kubernetesRbacProvider;
         _cloudConnectionState = cloudConnectionState;
         _postureNotificationChannel = postureNotificationChannel ?? new DisabledPostureNotificationChannel();
+        _authenticationLauncher = authenticationLauncher;
     }
 
     public async Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
@@ -182,7 +186,42 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         }
     }
 
-    private async Task<LiveCloudScanResult> ScanCoreAsync(IReadOnlySet<string>? selectedAccountKeys, IProgress<LiveScanProgress>? progress, CancellationToken cancellationToken)
+    public async Task<LiveCloudScanResult> ScanVerifiedAccountAsync(LiveScanAccountRecord account, CloudAccountVerification verification, CancellationToken cancellationToken = default)
+    {
+        if (_authenticationLauncher is null)
+            throw new InvalidOperationException("Verified-account scanning requires cloud identity verification.");
+        if (!string.Equals(account.Provider, verification.Provider, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(account.AccountId, verification.AccountId, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The selected account does not match the verified scope.");
+        if (!Enum.TryParse<CloudProviderType>(account.Provider, true, out var provider)
+            || !_providers.Any(item => item.ProviderType == provider))
+            throw new InvalidOperationException("The verified cloud provider is not configured for scanning.");
+        await _scanGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_cloudConnectionState?.IsExplicitlyDisconnected(provider) == true)
+                throw new InvalidOperationException("Connect the verified provider before scanning.");
+            CloudAccountVerifier.RequireSameIdentity(verification, await _authenticationLauncher.VerifyAccountAsync(account, cancellationToken));
+            return await ScanCoreAsync(new HashSet<string> { account.SelectionKey }, null, cancellationToken, account, verification);
+        }
+        finally
+        {
+            _scanGate.Release();
+        }
+    }
+
+    private async Task ReverifyAccountAsync(LiveScanAccountRecord account, CloudAccountVerification? verification, CancellationToken cancellationToken)
+    {
+        if (_authenticationLauncher is null || verification is null)
+            throw new InvalidOperationException("Verified-account scanning requires a verified identity.");
+        CloudAccountVerifier.RequireSameIdentity(verification, await _authenticationLauncher.VerifyAccountAsync(account, cancellationToken));
+    }
+
+    private static string ScanProfile(string profile, CloudProviderType provider)
+        => provider == CloudProviderType.Aws && string.IsNullOrEmpty(profile) ? "default" : profile;
+
+    private async Task<LiveCloudScanResult> ScanCoreAsync(IReadOnlySet<string>? selectedAccountKeys, IProgress<LiveScanProgress>? progress, CancellationToken cancellationToken,
+        LiveScanAccountRecord? verifiedAccount = null, CloudAccountVerification? verification = null)
     {
         var startedAt = DateTime.UtcNow;
         var accountsScanned = 0;
@@ -218,7 +257,9 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             }
         }
         var connectedProviders = _cloudConnectionState?.ConnectedProviders ?? new HashSet<CloudProviderType>();
-        var selectedProvider = connectedProviders.Count == 1 ? connectedProviders.Single() : (CloudProviderType?)null;
+        var selectedProvider = verifiedAccount is not null
+            ? Enum.Parse<CloudProviderType>(verifiedAccount.Provider, true)
+            : connectedProviders.Count == 1 ? connectedProviders.Single() : (CloudProviderType?)null;
         if (selectedProvider.HasValue)
         {
             messages.Add($"{selectedProvider.Value}: scan is restricted to the connected provider.");
@@ -235,7 +276,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             }
             try
             {
-                if (!await provider.TestConnectionAsync(cancellationToken))
+                if (verifiedAccount is null && !await provider.TestConnectionAsync(cancellationToken))
                 {
                     if (_cloudConnectionState?.ConnectedProviders.Contains(provider.ProviderType) == true)
                         _cloudConnectionState.Update(Array.Empty<CloudProviderType>());
@@ -244,10 +285,19 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     continue;
                 }
 
-                _cloudConnectionState?.Update(new[] { provider.ProviderType });
+                if (verifiedAccount is null) _cloudConnectionState?.Update(new[] { provider.ProviderType });
                 var accounts = await CollectAsync(provider.ProviderType.ToString(), string.Empty, "Cloud accounts", () => provider.DiscoverAccountsAsync(cancellationToken), coverage, messages, progress, cancellationToken);
-                var selectedAccounts = accounts.Where(account => selectedAccountKeys is null
-                    || selectedAccountKeys.Contains(ToAccountRecord(provider.ProviderType, account).SelectionKey)).ToArray();
+                var selectedAccounts = accounts.Where(account => verifiedAccount is not null
+                    ? string.Equals(GetStableAccountId(account), verifiedAccount.AccountId, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(ScanProfile(ExtractAwsProfile(account.Description, provider.ProviderType), provider.ProviderType),
+                            ScanProfile(verifiedAccount.Profile, provider.ProviderType), StringComparison.Ordinal)
+                    : selectedAccountKeys is null || selectedAccountKeys.Contains(ToAccountRecord(provider.ProviderType, account).SelectionKey)).ToArray();
+                if (verifiedAccount is not null)
+                {
+                    if (selectedAccounts.Length != 1)
+                        throw new InvalidOperationException("The verified account/profile was not uniquely discovered. No account inventory was collected; refresh discovery and verification.");
+                    await ReverifyAccountAsync(verifiedAccount, verification, cancellationToken);
+                }
                 accountsDiscovered.AddRange(selectedAccounts);
                 var selectedIds = selectedAccounts.Select(account => account.Id).ToHashSet();
                 accountsScanned += selectedAccounts.Length;
@@ -368,7 +418,11 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     messages.AddRange(diagnosticsProvider.DrainProviderMessages());
                 }
 
-                if (provider is IEntraDirectoryProvider entraProvider)
+                if (verifiedAccount is not null)
+                {
+                    coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra directory and PIM", ScanCoverageStatus.Skipped, 0, "Verified-account scan excludes provider-wide directory collection."));
+                }
+                else if (provider is IEntraDirectoryProvider entraProvider)
                 {
                     try
                     {
@@ -413,7 +467,11 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
                     coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Entra directory and PIM", ScanCoverageStatus.Unsupported, 0, "This Azure provider adapter does not expose Entra directory or PIM discovery."));
                 }
 
-                if (provider is ICloudOrganizationProvider organizationProvider)
+                if (verifiedAccount is not null)
+                {
+                    coverage.Add(new ScanCoverageRecord(provider.ProviderType.ToString(), "Organization hierarchy", ScanCoverageStatus.Skipped, 0, "Verified-account scan excludes organization roster collection."));
+                }
+                else if (provider is ICloudOrganizationProvider organizationProvider)
                 {
                     try
                     {
@@ -473,7 +531,11 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             }
         }
 
-        if (_kubernetesRbacProvider is not null)
+        if (verifiedAccount is not null)
+        {
+            coverage.Add(new ScanCoverageRecord(verifiedAccount.Provider, "Cluster accounts", ScanCoverageStatus.Skipped, 0, "Verified-account scan excludes Kubernetes contexts."));
+        }
+        else if (_kubernetesRbacProvider is not null)
         {
             try
             {

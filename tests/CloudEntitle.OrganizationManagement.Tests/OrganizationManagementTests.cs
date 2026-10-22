@@ -8,6 +8,54 @@ namespace CloudEntitle.OrganizationManagement.Tests;
 public sealed class OrganizationManagementTests
 {
     [Fact]
+    public void ReviewerInvitation_ShouldRequireMatchingSignInAndExcludeSuspendedMembers()
+    {
+        var service = new OrganizationManagementService();
+        var owner = CreateIdentity(Guid.NewGuid().ToString(), "owner@example.invalid");
+        var organization = service.CreateOrganization("Review team", "review-team", owner.TenantId, owner);
+        var reviewer = CreateIdentity(owner.TenantId, "reviewer@example.invalid");
+        var invitation = service.AddMember(organization.Id, owner, reviewer.Email, OrganizationMemberRole.SecurityAnalyst);
+
+        OrganizationMember[] Reviewers() => service.GetMembersAuthorizedForAction(
+            organization.Id, owner, OrganizationAction.ManageMembers, OrganizationAction.ManageRemediations).ToArray();
+
+        Assert.True(invitation.IsPending);
+        Assert.DoesNotContain(Reviewers(), member => member.Id == invitation.Id);
+        Assert.False(service.Authorize(organization.Id, reviewer, OrganizationAction.ManageRemediations).Allowed);
+        Assert.Null(service.AcceptInvitation(organization.Id, CreateIdentity(Guid.NewGuid().ToString(), reviewer.Email)));
+        Assert.Null(service.AcceptInvitation(organization.Id, CreateIdentity(owner.TenantId, "other@example.invalid")));
+
+        var accepted = Assert.IsType<OrganizationMember>(service.AcceptInvitation(organization.Id, reviewer));
+        Assert.False(accepted.IsPending);
+        Assert.Equal(reviewer.UserId, accepted.UserId);
+        Assert.Contains(Reviewers(), member => member.Id == invitation.Id);
+        Assert.True(service.Authorize(organization.Id, reviewer, OrganizationAction.ManageRemediations).Allowed);
+        Assert.Null(service.AcceptInvitation(organization.Id, reviewer));
+        Assert.Single(service.GetAuditTrail(organization.Id, owner), entry => entry.Action == "InvitationAccepted");
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            service.AddMember(organization.Id, reviewer, "extra@example.invalid", OrganizationMemberRole.Viewer));
+
+        service.SetMemberActive(organization.Id, owner, invitation.Id, false);
+        Assert.DoesNotContain(Reviewers(), member => member.Id == invitation.Id);
+        Assert.False(service.Authorize(organization.Id, reviewer, OrganizationAction.ManageRemediations).Allowed);
+        Assert.Contains(service.GetAuditTrail(organization.Id, owner), entry => entry.Action == "MemberDeactivated");
+    }
+
+    [Fact]
+    public void SuspendedInvitation_ShouldNotBeAcceptedUntilAdministratorReactivatesIt()
+    {
+        var service = new OrganizationManagementService();
+        var owner = CreateIdentity(Guid.NewGuid().ToString(), "owner@example.invalid");
+        var organization = service.CreateOrganization("Review team", "review-team", owner.TenantId, owner);
+        var reviewer = CreateIdentity(owner.TenantId, "reviewer@example.invalid");
+        var invitation = service.AddMember(organization.Id, owner, reviewer.Email, OrganizationMemberRole.SecurityAnalyst);
+        service.SetMemberActive(organization.Id, owner, invitation.Id, false);
+        Assert.Null(service.AcceptInvitation(organization.Id, reviewer));
+        service.SetMemberActive(organization.Id, owner, invitation.Id, true);
+        Assert.NotNull(service.AcceptInvitation(organization.Id, reviewer));
+    }
+
+    [Fact]
     public void RemediationPermission_ShouldPreserveExistingPersistedActionValues()
     {
         Assert.Equal(6, (int)OrganizationAction.ExportReports);

@@ -63,6 +63,7 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'infra\staging.settings.exampl
 foreach ($name in @('configure-audit-archive.ps1', 'backup-postgres.ps1', 'test-postgres-restore.ps1')) {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts\$name") -Destination $scripts
 }
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-StagingPackage.ps1') -Destination $scripts
 
 $manifest = [ordered]@{
     product = 'YASK-CIEM staging License Server and operations console'

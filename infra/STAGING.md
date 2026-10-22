@@ -74,6 +74,9 @@ GitHub. No workflow or ARM what-if was run during setup.
 Preview requests use `ValidationLevel=ProviderNoRbac` so provider checks require
 read permissions rather than resource write permissions. This requires a recent
 Az.Resources version supporting that level. It **does not prove deployment RBAC**.
+The installer hashes and reads the ZIP through one read-only file handle that
+disallows writes and replacement until verification/extraction finishes.
+
 The provisioning path retains `Provider` validation and must remain disabled:
 the preview identity cannot deploy even if someone changes the dispatch input.
 Do not broaden its role to Owner/Contributor as an error workaround.
@@ -254,6 +257,35 @@ evidence that the private-network production requirement has been met. Do not
 extend it to a full-internet rule to run migrations.
 
 ## Application package
+
+### Verified host staging (no service activation)
+
+With provisioning disabled and no independent reviewer available, the offline
+installer can be prepared and tested without changing Azure resources:
+
+```powershell
+.\infra\scripts\Test-StagingInstaller.ps1
+.\infra\scripts\Install-StagingPackage.ps1 `
+  -PackagePath 'C:\ApprovedDownloads\release.zip' `
+  -ExpectedSha256 '<independently-approved-64-character-SHA256>' `
+  -Destination 'C:\Program Files\YASK-CIEM\releases\1.0.0.1' -WhatIf
+```
+
+Use the actual release ZIP and approved checksum. Obtain the installer from a
+trusted reviewed source, not an unverified archive. Remove `-WhatIf` only on an
+approved host with an existing access-controlled parent directory. The installer
+checks the ZIP hash, every manifest file hash, required application/console/SQL
+files and Windows-safe paths before writing. It refuses overwrites, extra files
+and packaged production configuration. An interrupted extraction leaves the
+new directory for diagnosis; it is never activated automatically.
+
+This stages files only: it does not install a Windows service, start a process,
+apply migrations, configure secrets, modify ACLs/firewall/IIS/TLS or claim
+readiness. A raw ASP.NET executable must not be registered with `sc.exe` unless
+Windows service integration is supported. Choose an approved supervisor and
+service identity before implementing activation. Keep the old release intact
+until migrations, configuration, audit archive, TLS and detailed readiness have
+been verified through the release process.
 
 On an approved build host with .NET 9 SDK and Node.js 22.18.0 or later:
 

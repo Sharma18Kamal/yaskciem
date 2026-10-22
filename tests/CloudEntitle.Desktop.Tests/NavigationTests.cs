@@ -222,6 +222,277 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public async Task CloudAccountsViewModel_ShouldScanOnlyVerifiedScopeAndShowPartialCoverage()
+    {
+        var account = new LiveScanAccountRecord("Aws", "Approved", "123456789012", "approved-sso", "", "Scanned");
+        var result = VerifiedScanResult(account);
+        var scan = new OnboardingLiveScanService(result, [account]);
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher, liveCloudScanService: scan)
+        {
+            VerificationProvider = "Aws", VerificationAccountId = account.AccountId, VerificationProfile = account.Profile
+        };
+        Assert.False(viewModel.CanScanVerifiedAccount);
+        await viewModel.ScanVerifiedAccountAsync();
+        Assert.Empty(scan.VerifiedScanRequests);
+        await viewModel.VerifyEnteredAccountAsync();
+        Assert.True(viewModel.CanScanVerifiedAccount);
+
+        await viewModel.ScanVerifiedAccountAsync();
+
+        var request = Assert.Single(scan.VerifiedScanRequests);
+        Assert.Equal(account.SelectionKey, request.Account.SelectionKey);
+        Assert.Equal("fixture-identity", request.Identity.Identity);
+        Assert.Contains("Collection finished", viewModel.VerifiedScanStatus);
+        Assert.Contains("1 source(s)", viewModel.VerifiedScanStatus);
+        Assert.Contains("No account was bound", viewModel.VerifiedScanStatus);
+        Assert.Contains(viewModel.SourceCoverage, item => item.Status == "Denied");
+        Assert.False(viewModel.CanScanVerifiedAccount);
+        Assert.Null(viewModel.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task CloudAccountsViewModel_ShouldRejectScanAfterScopeEdits()
+    {
+        var account = new LiveScanAccountRecord("Aws", "Approved", "123456789012", "approved-sso", "", "Scanned");
+        var scan = new OnboardingLiveScanService(VerifiedScanResult(account), [account]);
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), new RecordingCloudAuthenticationLauncher(), liveCloudScanService: scan)
+        {
+            VerificationProvider = "Aws", VerificationAccountId = account.AccountId, VerificationProfile = account.Profile
+        };
+        await viewModel.VerifyEnteredAccountAsync();
+        viewModel.VerificationProfile = "other-profile";
+        Assert.False(viewModel.CanScanVerifiedAccount);
+        await viewModel.ScanVerifiedAccountAsync();
+        Assert.Empty(scan.VerifiedScanRequests);
+        Assert.Contains("Scan not started", viewModel.VerifiedScanStatus);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CloudAccountsViewModel_ShouldSurfaceScanFailureOrMissingScope(bool throwFailure)
+    {
+        var account = new LiveScanAccountRecord("Aws", "Approved", "123456789012", "approved-sso", "", "Scanned");
+        var scan = new OnboardingLiveScanService(VerifiedScanResult(account) with { AccountRecords = [], AccountCount = 0 }, [account])
+        {
+            VerifiedScanFailure = throwFailure ? new InvalidOperationException("Identity changed.") : null
+        };
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), new RecordingCloudAuthenticationLauncher(), liveCloudScanService: scan)
+        {
+            VerificationProvider = "Aws", VerificationAccountId = account.AccountId, VerificationProfile = account.Profile
+        };
+        await viewModel.VerifyEnteredAccountAsync();
+        await viewModel.ScanVerifiedAccountAsync();
+        Assert.Contains("Verified-account scan failed", viewModel.VerifiedScanStatus);
+        Assert.NotNull(viewModel.ErrorMessage);
+        Assert.False(viewModel.CanScanVerifiedAccount);
+    }
+
+    [Fact]
+    public async Task CloudAccountsViewModel_ShouldPreventDuplicateScanWhileFirstIsRunning()
+    {
+        var account = new LiveScanAccountRecord("Aws", "Approved", "123456789012", "approved-sso", "", "Scanned");
+        var result = VerifiedScanResult(account);
+        var pending = new TaskCompletionSource<LiveCloudScanResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var scan = new OnboardingLiveScanService(result, [account]) { PendingVerifiedScan = pending };
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), new RecordingCloudAuthenticationLauncher(), liveCloudScanService: scan)
+        {
+            VerificationProvider = "Aws", VerificationAccountId = account.AccountId, VerificationProfile = account.Profile
+        };
+        await viewModel.VerifyEnteredAccountAsync();
+        var first = viewModel.ScanVerifiedAccountAsync();
+        Assert.False(viewModel.CanScanVerifiedAccount);
+        await viewModel.ScanVerifiedAccountAsync();
+        Assert.Single(scan.VerifiedScanRequests);
+        pending.SetResult(result);
+        await first;
+        Assert.Contains("Collection finished", viewModel.VerifiedScanStatus);
+    }
+
+    private static LiveCloudScanResult VerifiedScanResult(LiveScanAccountRecord account)
+        => new(1, 0, 0, 0, 0, 0, [], DateTime.UtcNow, [], [], [], [], [], DateTime.UtcNow, [], [account])
+        {
+            Coverage = [new ScanCoverageRecord(account.Provider, "Identities", ScanCoverageStatus.Denied, 0, "Read permission missing.")]
+        };
+
+    [Fact]
+    public async Task CloudAccountsViewModel_ShouldVerifyUserEnteredAzureScopeAndExpectedTenant()
+    {
+        var subscription = Guid.NewGuid().ToString();
+        var tenant = Guid.NewGuid().ToString();
+        var launcher = new RecordingCloudAuthenticationLauncher
+        {
+            VerificationResult = new("Azure", subscription, "approved-identity", tenant, DateTime.UtcNow)
+        };
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher)
+        {
+            VerificationAccountId = $" {subscription} ",
+            VerificationTenantId = $" {tenant} "
+        };
+        await viewModel.VerifyEnteredAccountAsync();
+        Assert.Contains($"Verified Azure account {subscription}", viewModel.VerificationStatus);
+        Assert.Contains(tenant, viewModel.VerificationStatus);
+        Assert.Equal(subscription, Assert.Single(launcher.VerifiedAccounts).AccountId);
+        Assert.Empty(launcher.LaunchedProviders);
+        Assert.Empty(viewModel.DiscoveredAccounts);
+        viewModel.VerificationTenantId = Guid.NewGuid().ToString();
+        Assert.DoesNotContain("Verified Azure", viewModel.VerificationStatus);
+        await viewModel.VerifyEnteredAccountAsync();
+        Assert.StartsWith("Not verified.", viewModel.VerificationStatus);
+        Assert.Contains("does not match", viewModel.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData("Aws", "123456789012", "approved-sso", "")]
+    [InlineData("Aws", "123456789012", "default", "")]
+    [InlineData("Gcp", "approved-project", "", "approved@example.test")]
+    public async Task CloudAccountsViewModel_ShouldVerifyRuntimeAwsOrGcpScope(string provider, string accountId, string profile, string identity)
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher
+        {
+            VerificationResult = new(provider, accountId, string.IsNullOrEmpty(identity) ? "assumed-role/audit" : identity, "", DateTime.UtcNow)
+        };
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher)
+        {
+            VerificationProvider = provider,
+            VerificationAccountId = accountId,
+            VerificationProfile = profile,
+            VerificationIdentity = identity
+        };
+        await viewModel.VerifyEnteredAccountAsync();
+        Assert.Contains($"Verified {provider} account {accountId}", viewModel.VerificationStatus);
+        Assert.Equal(profile, Assert.Single(launcher.VerifiedAccounts).Profile);
+        Assert.Empty(launcher.LaunchedProviders);
+    }
+
+    [Theory]
+    [InlineData("Azure", "not-a-guid", "", "", "")]
+    [InlineData("Azure", "11111111-1111-1111-1111-111111111111", "", "", "")]
+    [InlineData("Aws", "123", "", "default", "")]
+    [InlineData("Aws", "123456789012", "", "", "")]
+    [InlineData("Aws", "123456789012", "", "--other-option", "")]
+    [InlineData("Gcp", "bad_project", "", "", "user@example.test")]
+    [InlineData("Gcp", "approved-project", "", "", "")]
+    [InlineData("Other", "account", "", "", "")]
+    public async Task CloudAccountsViewModel_ShouldValidateRuntimeScopeBeforeAnyCliCall(string provider, string accountId, string tenant, string profile, string identity)
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher)
+        {
+            VerificationProvider = provider,
+            VerificationAccountId = accountId,
+            VerificationTenantId = tenant,
+            VerificationProfile = profile,
+            VerificationIdentity = identity
+        };
+        await viewModel.VerifyEnteredAccountAsync();
+        Assert.StartsWith("Not verified.", viewModel.VerificationStatus);
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.ErrorMessage));
+        Assert.Empty(launcher.VerifiedAccounts);
+    }
+
+    [Theory]
+    [InlineData("Gcp", "approved-project", "other@example.test")]
+    [InlineData("Gcp", "other-project", "approved@example.test")]
+    [InlineData("Aws", "approved-project", "approved@example.test")]
+    public async Task CloudAccountsViewModel_ShouldRejectReturnedScopeMismatch(string actualProvider, string actualAccount, string actualIdentity)
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher
+        {
+            VerificationResult = new(actualProvider, actualAccount, actualIdentity, "", DateTime.UtcNow)
+        };
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher)
+        {
+            VerificationProvider = "Gcp",
+            VerificationAccountId = "approved-project",
+            VerificationIdentity = "approved@example.test"
+        };
+        await viewModel.VerifyEnteredAccountAsync();
+        Assert.StartsWith("Not verified.", viewModel.VerificationStatus);
+        Assert.Contains("does not match", viewModel.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CloudAccountsViewModel_ShouldDiscardLateVerificationAfterScopeEdit(bool failure)
+    {
+        var pending = new TaskCompletionSource<CloudAccountVerification>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var launcher = new RecordingCloudAuthenticationLauncher { PendingVerification = pending };
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher)
+        {
+            VerificationProvider = "Aws",
+            VerificationAccountId = "123456789012",
+            VerificationProfile = "approved"
+        };
+        var verification = viewModel.VerifyEnteredAccountAsync();
+        viewModel.VerificationAccountId = "999999999999";
+        if (failure) pending.SetException(new InvalidOperationException("Old account failed."));
+        else pending.SetResult(new("Aws", "123456789012", "fixture", "", DateTime.UtcNow));
+        await verification;
+        Assert.DoesNotContain("Verified Aws", viewModel.VerificationStatus);
+        Assert.DoesNotContain("Old account failed", viewModel.VerificationStatus);
+        Assert.Null(viewModel.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task CloudAccountsViewModel_ShouldShowVerifiedIdentityAndInvalidateOnSelectionChange()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher();
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
+        viewModel.SelectedVerificationAccount = new("Aws", "Approved", "123456789012", "audit", "Reader");
+
+        await viewModel.VerifySelectedAccountAsync();
+
+        Assert.Contains("Verified Aws account 123456789012 as fixture-identity", viewModel.VerificationStatus);
+        Assert.Contains("run a read-only scan", viewModel.VerificationStatus);
+        viewModel.SelectedVerificationAccount = null;
+        Assert.DoesNotContain("Verified Aws", viewModel.VerificationStatus);
+        await viewModel.VerifySelectedAccountAsync();
+        Assert.Contains("Select a discovered account", viewModel.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task CloudAccountsViewModel_ShouldExposeVerificationFailureWithoutSuccessStatus()
+    {
+        var launcher = new RecordingCloudAuthenticationLauncher { VerificationFailure = new InvalidOperationException("Scope mismatch") };
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), launcher);
+        viewModel.SelectedVerificationAccount = new("Aws", "Approved", "123456789012", "audit", "Reader");
+        await viewModel.VerifySelectedAccountAsync();
+        Assert.Equal("Scope mismatch", viewModel.ErrorMessage);
+        Assert.StartsWith("Not verified.", viewModel.VerificationStatus);
+    }
+
+    [Fact]
+    public void CloudAccountsViewModel_ShouldRetainLastGapFreeCollectionAfterPartialScan()
+    {
+        var completedAt = DateTime.UtcNow.AddHours(-1);
+        var result = new LiveCloudScanResult(1, 0, 0, 0, 0, 0, Array.Empty<RiskFinding>(), completedAt,
+            Array.Empty<string>(), Array.Empty<CloudPrincipal>(), Array.Empty<CloudResource>(),
+            Array.Empty<DiscoveredCloudRole>(), Array.Empty<DiscoveredCloudPermission>(), completedAt.AddMinutes(-1),
+            Array.Empty<LiveEffectiveAccessRecord>(), Array.Empty<LiveScanAccountRecord>())
+        {
+            Coverage = new[] { new ScanCoverageRecord("Azure", "Resources", ScanCoverageStatus.Collected, 1, "Read succeeded.") }
+        };
+        var scan = new OnboardingLiveScanService(result, Array.Empty<LiveScanAccountRecord>());
+        var viewModel = new CloudAccountsViewModel(new NoopDemoDataService(), new RecordingCloudAuthenticationLauncher(), liveCloudScanService: scan);
+        var azure = viewModel.Providers.Single(provider => provider.Provider == CloudProviderType.Azure);
+        var successful = azure.LastSuccessfulScanText;
+        Assert.Contains(completedAt.ToLocalTime().ToString("g"), successful);
+        foreach (var status in new[] { ScanCoverageStatus.Partial, ScanCoverageStatus.Denied, ScanCoverageStatus.Unavailable, ScanCoverageStatus.Unsupported, ScanCoverageStatus.Skipped })
+        {
+            scan.CompleteScan(result with
+            {
+                CompletedAt = completedAt.AddMinutes(30),
+                Coverage = new[] { new ScanCoverageRecord("Azure", "Resources", status, 0, "Not fully collected.") }
+            });
+            Assert.Equal(successful, azure.LastSuccessfulScanText);
+            Assert.DoesNotContain("No permission or unsupported-source gaps", azure.AccessValidationText);
+        }
+    }
+
+    [Fact]
     public async Task CloudAccountsViewModel_ShouldDiscoverAccountsAndExposeLastPermissionCoverage()
     {
         var account = new LiveScanAccountRecord("Azure", "Production", "subscription-123", "", "Reader", "Scanned");
@@ -970,6 +1241,17 @@ public sealed class NavigationTests
         public List<CloudProviderType> LaunchedProviders { get; } = new();
         public List<CloudProviderType> DisconnectedProviders { get; } = new();
         public Exception? LaunchFailure { get; set; }
+        public Exception? VerificationFailure { get; set; }
+        public CloudAccountVerification? VerificationResult { get; set; }
+        public TaskCompletionSource<CloudAccountVerification>? PendingVerification { get; set; }
+        public List<LiveScanAccountRecord> VerifiedAccounts { get; } = [];
+        public Task<CloudAccountVerification> VerifyAccountAsync(LiveScanAccountRecord account, CancellationToken cancellationToken = default)
+        {
+            VerifiedAccounts.Add(account);
+            return VerificationFailure is not null
+                ? throw VerificationFailure
+                : PendingVerification?.Task ?? Task.FromResult(VerificationResult ?? new CloudAccountVerification(account.Provider, account.AccountId, "fixture-identity", "", DateTime.UtcNow));
+        }
         public bool NeverConnect { get; set; }
         public CloudProviderType? BlockedProvider { get; set; }
         public TaskCompletionSource<bool> ConnectionCheckRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1119,15 +1401,26 @@ public sealed class NavigationTests
         }
 
         public LiveCloudScanResult? CurrentResult { get; private set; }
+        public List<(LiveScanAccountRecord Account, CloudAccountVerification Identity)> VerifiedScanRequests { get; } = [];
+        public Exception? VerifiedScanFailure { get; init; }
+        public TaskCompletionSource<LiveCloudScanResult>? PendingVerifiedScan { get; init; }
+        public async Task<LiveCloudScanResult> ScanVerifiedAccountAsync(LiveScanAccountRecord account, CloudAccountVerification verification, CancellationToken cancellationToken = default)
+        {
+            VerifiedScanRequests.Add((account, verification));
+            if (VerifiedScanFailure is not null) throw VerifiedScanFailure;
+            var result = PendingVerifiedScan is null ? _result : await PendingVerifiedScan.Task;
+            CompleteScan(result);
+            return result;
+        }
         public event EventHandler? ScanCompleted;
         public Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(_discoveredAccounts);
         public Task<LiveCloudScanResult> ScanAsync(CancellationToken cancellationToken = default) => Task.FromResult(_result);
         public Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, CancellationToken cancellationToken = default)
             => Task.FromResult(_result);
-        public void CompleteScan()
+        public void CompleteScan(LiveCloudScanResult? result = null)
         {
-            CurrentResult = _result;
+            CurrentResult = result ?? _result;
             ScanCompleted?.Invoke(this, EventArgs.Empty);
         }
     }

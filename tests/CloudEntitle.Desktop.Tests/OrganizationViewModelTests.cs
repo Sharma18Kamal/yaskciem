@@ -15,6 +15,52 @@ namespace CloudEntitle.Desktop.Tests;
 public sealed class OrganizationViewModelTests
 {
     [Theory]
+    [InlineData("verified", true)]
+    [InlineData("mismatch", false)]
+    [InlineData("denied", false)]
+    public async Task Binding_ShouldRequireFreshMatchingVerification(string outcome, bool expectedBinding)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "YaskCiemBindingTests", Guid.NewGuid().ToString("N"));
+        var tenant = Guid.NewGuid().ToString();
+        var identity = new OrganizationIdentity(Guid.NewGuid(), "owner", tenant, "owner@example.invalid");
+        var service = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        var organization = service.CreateOrganization("Test", "test", tenant, identity);
+        try
+        {
+            var scan = new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid()));
+            var launcher = new VerificationLauncher(outcome);
+            var viewModel = new OrganizationViewModel(new TestDemoDataService(), service, new TestSsoService(identity),
+                scan, new AuthenticatedOrganizationContext(), cloudAuthentication: launcher);
+            await viewModel.SignInAsync();
+            viewModel.SelectedAccount = viewModel.AvailableAccounts.First();
+            await viewModel.BindAccountAsync();
+            Assert.Equal(1, launcher.Checks);
+            Assert.Equal(expectedBinding ? 1 : 0, service.GetTenantBindings(organization.Id, identity).Count);
+            if (!expectedBinding) Assert.Contains("Unable to bind", viewModel.ErrorMessage);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private sealed class VerificationLauncher(string outcome) : ICloudAuthenticationLauncher
+    {
+        public int Checks { get; private set; }
+        public void LaunchAuthentication(CloudProviderType provider) => throw new NotSupportedException();
+        public void LaunchDisconnection(CloudProviderType provider) => throw new NotSupportedException();
+        public Task<bool> IsConnectedAsync(CloudProviderType provider, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task DisconnectAsync(CloudProviderType provider, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<CloudAccountVerification> VerifyAccountAsync(LiveScanAccountRecord account, CancellationToken cancellationToken = default)
+        {
+            Checks++;
+            if (outcome == "denied") throw new InvalidOperationException("Read permissions denied.");
+            return Task.FromResult(new CloudAccountVerification(account.Provider, outcome == "mismatch" ? "other-account" : account.AccountId,
+                "fixture", "", DateTime.UtcNow));
+        }
+    }
+
+    [Theory]
     [InlineData(OrganizationMemberRole.OrganizationAdmin, true)]
     [InlineData(OrganizationMemberRole.Viewer, false)]
     public async Task CentralMonitoring_ShouldShowFailuresGuardRuleEditsAndClearStateOnSignOut(OrganizationMemberRole role, bool canEdit)
