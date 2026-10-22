@@ -35,6 +35,9 @@ changed template/public parameters/resource change types, and provisions only
 through the compiled Bicep template. Deletes and unresolved/unsupported changes
 are rejected, not automatically accepted. This is an infrastructure pipeline,
 **not a complete application release or P2.3 acceptance pipeline**.
+The sole allowed `Ignore` is the exact existing `Yask-Ciem-Staging` resource
+group in the approved subscription: Bicep references it as `existing`, so ARM
+leaves it untouched. Ignored child resources and other groups remain blocked.
 
 ### Administrator setup before the first run
 

@@ -147,7 +147,12 @@ try {
         publicParametersSha256 = $parameterHash
         changes = $changes
     })
-    if (@($changes | Where-Object changeType -notin @('Create', 'Modify', 'NoChange')).Count -gt 0) {
+    $existingGroupId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup"
+    $blockedChanges = @($changes | Where-Object {
+        $_.changeType -notin @('Create', 'Modify', 'NoChange') -and
+        -not ($_.changeType -eq 'Ignore' -and $_.resourceId -ieq $existingGroupId)
+    })
+    if ($blockedChanges.Count -gt 0) {
         throw 'Preview contains deletes, unsupported, or unresolved changes; manual review and a new preview are required.'
     }
     if ($Phase -eq 'Preview') {

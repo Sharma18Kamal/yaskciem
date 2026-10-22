@@ -62,7 +62,7 @@ function Get-AzSubscriptionDeploymentWhatIfResult {
             Details = @([pscustomobject]@{ Code = 'RequestDisallowedByPolicy'; Message = $env:YASK_VM_ADMIN_PASSWORD })
         }
         Changes = @([pscustomobject]@{
-            FullyQualifiedResourceId = '/subscriptions/test/resource'
+            FullyQualifiedResourceId = $state.resourceId
             ChangeType = $state.changeType
             Before = @{ secret = $env:YASK_VM_ADMIN_PASSWORD }
             After = @{ secret = $env:YASK_POSTGRES_ADMIN_PASSWORD }
@@ -82,6 +82,7 @@ function Invoke-Case([string]$Name, [string]$Phase, [bool]$ShouldFail, [hashtabl
         subscription = '455b906b-799c-4c50-9d04-b092ea12116d'
         providerState = 'Registered'; quota = 20; inventoryCalls = 0; inventoryFailureCall = -1
         deploymentCalls = 0; previewCalls = 0; deploymentFailure = $false; changeType = 'Create'; previewStatus = 'Succeeded'
+        resourceId = '/subscriptions/test/resource'
     }.GetEnumerator()) { $state[$pair.Key] = $pair.Value }
     foreach ($pair in $Overrides.GetEnumerator()) { $state[$pair.Key] = $pair.Value }
     $directory = Join-Path $root $Name
@@ -160,10 +161,18 @@ try {
     Assert-Test ($state.deploymentCalls -eq 0) 'Changed template must block deployment.'
     $result = Invoke-Case 'arm-failure' Preview $true @{ previewStatus = 'Failed' }
     Assert-Test ('RequestDisallowedByPolicy' -in $result.armErrorCodes -and 'InvalidTemplateDeployment' -in $result.armErrorCodes) 'Sanitized ARM error codes must be preserved without messages.'
+    $null = Invoke-Case 'existing-group-ignore' Preview $false @{
+        changeType = 'Ignore'
+        resourceId = '/subscriptions/455b906b-799c-4c50-9d04-b092ea12116d/resourceGroups/Yask-Ciem-Staging'
+    }
+    $null = Invoke-Case 'other-group-ignore' Preview $true @{
+        changeType = 'Ignore'
+        resourceId = '/subscriptions/455b906b-799c-4c50-9d04-b092ea12116d/resourceGroups/Other'
+    }
     '{"parameters":{"vmAdminPassword":{"type":"string"},"postgresAdminPassword":{"type":"secureString"}}}' | Set-Content -LiteralPath $template
     $null = Invoke-Case 'insecure-template' Preview $true
     Assert-Test ($state.previewCalls -eq 0 -and $state.deploymentCalls -eq 0) 'Insecure credential declarations must block all ARM requests.'
-    Write-Host 'All 16 offline staging pipeline tests passed. No Azure calls were made.'
+    Write-Host 'All 18 offline staging pipeline tests passed. No Azure calls were made.'
 }
 finally {
     foreach ($entry in $savedEnvironment.GetEnumerator()) {
