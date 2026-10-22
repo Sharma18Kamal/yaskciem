@@ -175,6 +175,16 @@ catch {
     $result.failureType = $_.Exception.GetType().FullName
     $result.failureSourceLine = $_.InvocationInfo.ScriptLineNumber
     $result.failureCategory = [string]$_.CategoryInfo.Category
+    $summary = ($_.Exception.Message -split '[\r\n]', 2)[0]
+    foreach ($secretName in @('YASK_VM_ADMIN_PASSWORD', 'YASK_POSTGRES_ADMIN_PASSWORD')) {
+        $secretValue = [Environment]::GetEnvironmentVariable($secretName)
+        if (-not [string]::IsNullOrEmpty($secretValue)) { $summary = $summary.Replace($secretValue, '[REDACTED]') }
+    }
+    # Only retain a bounded text heading, never JSON/request bodies or credential assignments.
+    if ($summary -notmatch '[{}\[\]]|(?i)bearer |password\s*[:=]|token\s*[:=]|secret\s*[:=]') {
+        $result.failureSummary = $summary.Substring(0, [Math]::Min(500, $summary.Length))
+    }
+    $result.failureId = if ($_.FullyQualifiedErrorId -match '^[A-Za-z0-9_.,-]{1,300}$') { $_.FullyQualifiedErrorId } else { 'Unclassified' }
     if (-not $result.Contains('armErrorCodes')) {
         $errorText = $_.Exception.Message
         if ($null -ne $_.ErrorDetails) { $errorText += $_.ErrorDetails.Message }
