@@ -103,7 +103,7 @@ try {
     $parameters.deployedBy = 'GitHub Actions OIDC'
     $templateDefinition = Get-Content -LiteralPath $TemplateFile -Raw | ConvertFrom-Json
     foreach ($name in @('vmAdminPassword', 'postgresAdminPassword')) {
-        if ($templateDefinition.parameters.$name.type -cne 'secureString') {
+        if ($templateDefinition.parameters.$name.type -ine 'secureString') {
             throw "Credential parameter must be declared secureString: $name"
         }
     }

@@ -115,7 +115,7 @@ try {
     Assert-Test ($federation.issuer -ceq 'https://token.actions.githubusercontent.com' -and @($federation.audiences).Count -eq 1 -and $federation.audiences[0] -ceq 'api://AzureADTokenExchange') 'Federation issuer and audience must be exact.'
     New-Item -ItemType Directory -Path $root | Out-Null
     $template = Join-Path $root 'template.json'
-    '{"parameters":{"vmAdminPassword":{"type":"secureString"},"postgresAdminPassword":{"type":"secureString"}}}' | Set-Content -LiteralPath $template
+    '{"parameters":{"vmAdminPassword":{"type":"securestring"},"postgresAdminPassword":{"type":"securestring"}}}' | Set-Content -LiteralPath $template
     $env:YASK_VM_ADMIN_PASSWORD = 'mock-vm-secret-not-for-deployment'
     $env:YASK_POSTGRES_ADMIN_PASSWORD = 'mock-postgres-secret-not-for-deployment'
     $env:YASK_DEPLOYER_OBJECT_ID = '11111111-1111-1111-1111-111111111111'
