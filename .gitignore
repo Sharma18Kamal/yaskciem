@@ -43,3 +43,4 @@ packages.lock.json
 # Web operations console
 node_modules/
 src/CloudEntitle.LicenseServer/wwwroot/console/
+.copilot-azure/

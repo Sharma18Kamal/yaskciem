@@ -1,5 +1,6 @@
 # Build artifacts
 artifacts/
+staging-*/
 
 # Installer files
 *.exe

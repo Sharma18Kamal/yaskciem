@@ -1,0 +1,173 @@
+name: Azure staging infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      provision:
+        description: Provision infrastructure after reviewing the preview and approving staging
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yask-centralus-staging
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate infrastructure and build Windows package
+        shell: pwsh
+        run: |
+          .\infra\scripts\Test-StagingArtifacts.ps1
+          .\infra\scripts\Test-StagingPipeline.ps1
+          .\infra\scripts\Build-StagingPackage.ps1 -Version "1.0.$($env:GITHUB_RUN_NUMBER).$($env:GITHUB_RUN_ATTEMPT)"
+          az bicep build --file .\infra\main.bicep --outfile .\artifacts\staging-template.json
+          if ($LASTEXITCODE -ne 0) { throw 'ARM compilation failed.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staging-package
+          path: |
+            artifacts/staging-*/*.zip
+            artifacts/staging-*/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staging-template
+          path: artifacts/staging-template.json
+          if-no-files-found: error
+          retention-days: 14
+
+  preview:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: staging-preview
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-template
+          path: artifacts
+      - name: Require reviewed staging exception
+        shell: pwsh
+        env:
+          APPROVED: ${{ vars.STAGING_PASSWORD_KEYVAULT_EXCEPTION_APPROVED }}
+        run: |
+          if ($env:APPROVED -cne 'true') {
+            throw 'A deployment owner must approve the password/Key Vault and Azure-services firewall staging exceptions.'
+          }
+      - name: Verify deployment approval protections
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $environment = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/environments/staging"
+          $review = @($environment.protection_rules | Where-Object type -eq 'required_reviewers')
+          if ($review.Count -ne 1 -or @($review[0].reviewers).Count -eq 0 -or $review[0].prevent_self_review -ne $true) {
+            throw 'Configure staging required reviewers with prevention of self-review before running this workflow.'
+          }
+          if ($environment.deployment_branch_policy.protected_branches -ne $true) {
+            throw 'Restrict staging deployments to protected branches.'
+          }
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: '56c9fa43-26a9-40e2-80b1-899780a2d78f'
+          subscription-id: '455b906b-799c-4c50-9d04-b092ea12116d'
+          enable-AzPSSession: true
+      - name: Inventory and ARM what-if
+        uses: azure/powershell@v2
+        env:
+          YASK_VM_ADMIN_PASSWORD: ${{ secrets.YASK_VM_ADMIN_PASSWORD }}
+          YASK_POSTGRES_ADMIN_PASSWORD: ${{ secrets.YASK_POSTGRES_ADMIN_PASSWORD }}
+          YASK_DEPLOYER_OBJECT_ID: ${{ vars.AZURE_DEPLOYER_OBJECT_ID }}
+        with:
+          azPSVersion: latest
+          inlineScript: |
+            .\infra\scripts\Invoke-StagingInfrastructure.ps1 -Phase Preview -TemplateFile .\artifacts\staging-template.json -EvidenceDirectory .\artifacts\staging-preview
+      - name: Save preview evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-preview
+          path: artifacts/staging-preview
+          if-no-files-found: warn
+          retention-days: 14
+
+  provision:
+    if: inputs.provision
+    needs: preview
+    runs-on: windows-latest
+    timeout-minutes: 90
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-template
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-preview
+          path: artifacts/approved-preview
+      - name: Require reviewed staging exception
+        shell: pwsh
+        env:
+          APPROVED: ${{ vars.STAGING_PASSWORD_KEYVAULT_EXCEPTION_APPROVED }}
+        run: |
+          if ($env:APPROVED -cne 'true') { throw 'Staging exceptions have not been approved.' }
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: '56c9fa43-26a9-40e2-80b1-899780a2d78f'
+          subscription-id: '455b906b-799c-4c50-9d04-b092ea12116d'
+          enable-AzPSSession: true
+      - name: Refresh baseline, recheck preview, and provision Bicep
+        uses: azure/powershell@v2
+        env:
+          YASK_VM_ADMIN_PASSWORD: ${{ secrets.YASK_VM_ADMIN_PASSWORD }}
+          YASK_POSTGRES_ADMIN_PASSWORD: ${{ secrets.YASK_POSTGRES_ADMIN_PASSWORD }}
+          YASK_DEPLOYER_OBJECT_ID: ${{ vars.AZURE_DEPLOYER_OBJECT_ID }}
+        with:
+          azPSVersion: latest
+          inlineScript: |
+            .\infra\scripts\Invoke-StagingInfrastructure.ps1 -Phase Deploy -TemplateFile .\artifacts\staging-template.json -EvidenceDirectory .\artifacts\staging-deploy -ApprovedPreview .\artifacts\approved-preview\preview.json
+      - name: Save deployment evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-deployment
+          path: artifacts/staging-deploy
+          if-no-files-found: warn
+          retention-days: 30

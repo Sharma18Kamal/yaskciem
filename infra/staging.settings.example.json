@@ -1,0 +1,48 @@
+{
+  "AzureAd": {
+    "Instance": "https://login.microsoftonline.com/",
+    "TenantId": "56c9fa43-26a9-40e2-80b1-899780a2d78f",
+    "ClientId": "<staging-api-client-id>",
+    "Audience": "api://<staging-api-client-id>"
+  },
+  "WebConsole": {
+    "Enabled": true,
+    "ClientId": "<staging-spa-client-id>",
+    "ApiScope": "api://<staging-api-client-id>/access_as_user",
+    "StaleAfterHours": 72
+  },
+  "Urls": "http://127.0.0.1:5080",
+  "Security": {
+    "UseHsts": true
+  },
+  "AuditRetention": {
+    "Provider": "Postgres",
+    "MinimumRetentionDays": 2555
+  },
+  "AuditArchive": {
+    "Provider": "S3ObjectLock",
+    "Endpoint": "https://<existing-object-lock-endpoint>",
+    "Region": "<existing-signing-region>",
+    "Bucket": "<existing-object-lock-bucket>",
+    "ObjectPrefix": "yask-ciem/audit/v1",
+    "SegmentEventCount": 500,
+    "PollIntervalSeconds": 60,
+    "MaxPendingEvents": 5000,
+    "MaxLagMinutes": 60,
+    "DatabaseCredentialTarget": "YASK-CIEM/LicenseServer/AuditArchive/Postgres",
+    "S3CredentialTarget": "YASK-CIEM/LicenseServer/AuditArchive/S3"
+  },
+  "Operations": {
+    "RetentionDays": 90,
+    "RetentionBatchSize": 500,
+    "RetentionMaxBatchesPerRun": 20,
+    "Limits": {
+      "MaxScanSchedulesPerTenant": 100,
+      "MaxActiveScanJobsPerTenant": 25
+    },
+    "Readiness": {
+      "MaxQueueDepth": 1000,
+      "MaxQueueAgeSeconds": 3600
+    }
+  }
+}
