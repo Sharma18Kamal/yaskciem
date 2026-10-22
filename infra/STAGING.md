@@ -46,7 +46,7 @@ The preview environment is now configured with a dedicated Entra identity:
 | --- | --- |
 | Application client ID | `2c2505b8-b56f-4515-ac0d-0bbd5618c34d` |
 | Service principal object ID | `e5640711-5501-4b02-aad4-9986d495380b` |
-| Federated subject | `repo:Sharma18Kamal/yaskciem:environment:staging-preview` |
+| Federated subject | `repo:Sharma18Kamal@317556502/yaskciem@1387494170:environment:staging-preview` |
 | GitHub environment branch policy | Exact branch `main` |
 | Provisioning flag | Repository `STAGING_PROVISIONING_ENABLED=false` |
 
@@ -57,6 +57,9 @@ reads (needed by the existing subscription inventory) and ARM what-if only.
 It has no resource deployment writes, RBAC writes or data-plane permissions.
 The [federation definition](github-preview-federation.json) uses an exact
 environment subject, not a branch wildcard.
+The repository enables GitHub immutable subjects (`use_immutable_subject=true`).
+The exact subject above was verified against both the repository OIDC settings
+and the actual runner claim; the older name-only subject does not authenticate.
 
 `AZURE_CLIENT_ID`, `AZURE_DEPLOYER_OBJECT_ID`, and the approved staging-exception
 flag are set on `staging-preview`. Random VM and database administrator passwords
@@ -102,8 +105,8 @@ federation merely to make a preview run pass.
 3. Have an Azure identity administrator configure an Entra application/service
    principal for GitHub OIDC. Use issuer `https://token.actions.githubusercontent.com`,
    audience `api://AzureADTokenExchange`, and **two exact** federated subjects:
-   `repo:Sharma18Kamal/yaskciem:environment:staging-preview` and
-   `repo:Sharma18Kamal/yaskciem:environment:staging`.
+   `repo:Sharma18Kamal@317556502/yaskciem@1387494170:environment:staging-preview` and
+   `repo:Sharma18Kamal@317556502/yaskciem@1387494170:environment:staging`.
    Do not use wildcard subjects or a client secret. Tenant:
    `56c9fa43-26a9-40e2-80b1-899780a2d78f`; subscription:
    `455b906b-799c-4c50-9d04-b092ea12116d`.

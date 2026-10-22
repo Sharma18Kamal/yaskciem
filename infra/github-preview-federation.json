@@ -1,7 +1,7 @@
 {
   "name": "github-staging-preview",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:Sharma18Kamal/yaskciem:environment:staging-preview",
+  "subject": "repo:Sharma18Kamal@317556502/yaskciem@1387494170:environment:staging-preview",
   "audiences": [
     "api://AzureADTokenExchange"
   ]

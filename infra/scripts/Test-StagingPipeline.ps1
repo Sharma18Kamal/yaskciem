@@ -106,7 +106,7 @@ try {
     Assert-Test (@($role.Actions).Count -eq 2 -and '*/read' -in $role.Actions -and 'Microsoft.Resources/deployments/whatIf/action' -in $role.Actions) 'Preview role must not grant deployment or RBAC writes.'
     Assert-Test (@($role.DataActions).Count -eq 0) 'Preview role must not grant secret/data access.'
     $federation = Get-Content -LiteralPath (Join-Path $infra 'github-preview-federation.json') -Raw | ConvertFrom-Json
-    Assert-Test ($federation.subject -ceq 'repo:Sharma18Kamal/yaskciem:environment:staging-preview') 'Federation must be preview-only.'
+    Assert-Test ($federation.subject -ceq 'repo:Sharma18Kamal@317556502/yaskciem@1387494170:environment:staging-preview') 'Federation must be preview-only and bind immutable repository/owner IDs.'
     Assert-Test ($federation.issuer -ceq 'https://token.actions.githubusercontent.com' -and @($federation.audiences).Count -eq 1 -and $federation.audiences[0] -ceq 'api://AzureADTokenExchange') 'Federation issuer and audience must be exact.'
     New-Item -ItemType Directory -Path $root | Out-Null
     $template = Join-Path $root 'template.json'
