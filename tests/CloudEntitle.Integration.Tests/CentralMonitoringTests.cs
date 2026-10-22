@@ -45,7 +45,7 @@ public sealed partial class CentralMonitoringTests
         Assert.Equal(9, (await store.GetNotificationDeliveriesAsync(tenant, organization)).Count);
 
         // Record IDs and collection order are not the entity identity; unchanged scans must remain quiet.
-        await Save(store, Scan(tenant, organization, start.AddMinutes(2)), after.Reverse().Select(item => item with { RecordId = Guid.NewGuid().ToString() }).ToArray());
+        await Save(store, Scan(tenant, organization, start.AddMinutes(2)), Enumerable.Reverse(after).Select(item => item with { RecordId = Guid.NewGuid().ToString() }).ToArray());
         Assert.Equal(9, (await store.GetDriftEventsAsync(tenant, organization)).Count);
         await Save(store, Scan(tenant, organization, start.AddSeconds(30)), Array.Empty<SharedCiemRecordDto>());
         Assert.Equal(9, (await store.GetDriftEventsAsync(tenant, organization)).Count);
