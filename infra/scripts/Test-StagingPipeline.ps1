@@ -55,7 +55,12 @@ function Get-AzSubscriptionDeploymentWhatIfResult {
     $state.previewCalls++
     $state.validationLevel = $ValidationLevel
     [pscustomobject]@{
-        Status = 'Succeeded'
+        Status = $state.previewStatus
+        Error = [pscustomobject]@{
+            Code = 'InvalidTemplateDeployment'
+            Message = $env:YASK_POSTGRES_ADMIN_PASSWORD
+            Details = @([pscustomobject]@{ Code = 'RequestDisallowedByPolicy'; Message = $env:YASK_VM_ADMIN_PASSWORD })
+        }
         Changes = @([pscustomobject]@{
             ResourceId = '/subscriptions/test/resource'
             ChangeType = $state.changeType
@@ -76,7 +81,7 @@ function Invoke-Case([string]$Name, [string]$Phase, [bool]$ShouldFail, [hashtabl
     foreach ($pair in @{
         subscription = '455b906b-799c-4c50-9d04-b092ea12116d'
         providerState = 'Registered'; quota = 20; inventoryCalls = 0; inventoryFailureCall = -1
-        deploymentCalls = 0; previewCalls = 0; deploymentFailure = $false; changeType = 'Create'
+        deploymentCalls = 0; previewCalls = 0; deploymentFailure = $false; changeType = 'Create'; previewStatus = 'Succeeded'
     }.GetEnumerator()) { $state[$pair.Key] = $pair.Value }
     foreach ($pair in $Overrides.GetEnumerator()) { $state[$pair.Key] = $pair.Value }
     $directory = Join-Path $root $Name
@@ -153,7 +158,9 @@ try {
     '{"changed":true}' | Set-Content -LiteralPath $template
     $null = Invoke-Case 'template-change' Deploy $true @{} $approval
     Assert-Test ($state.deploymentCalls -eq 0) 'Changed template must block deployment.'
-    Write-Host 'All 14 offline staging pipeline tests passed. No Azure calls were made.'
+    $result = Invoke-Case 'arm-failure' Preview $true @{ previewStatus = 'Failed' }
+    Assert-Test ('RequestDisallowedByPolicy' -in $result.armErrorCodes -and 'InvalidTemplateDeployment' -in $result.armErrorCodes) 'Sanitized ARM error codes must be preserved without messages.'
+    Write-Host 'All 15 offline staging pipeline tests passed. No Azure calls were made.'
 }
 finally {
     foreach ($entry in $savedEnvironment.GetEnumerator()) {

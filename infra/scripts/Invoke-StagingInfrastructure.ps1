@@ -48,6 +48,18 @@ function Get-Inventory {
     })
 }
 
+function Get-SafeArmErrorCodes($ErrorNode) {
+    if ($null -eq $ErrorNode) { return }
+    foreach ($property in $ErrorNode.PSObject.Properties) {
+        if ($property.Name -ieq 'code' -and [string]$property.Value -match '^[A-Za-z][A-Za-z0-9_.-]{0,100}$') {
+            [string]$property.Value
+        }
+        elseif ($property.Name -in @('error', 'details', 'innererror')) {
+            foreach ($child in @($property.Value)) { Get-SafeArmErrorCodes $child }
+        }
+    }
+}
+
 try {
     foreach ($name in @('YASK_VM_ADMIN_PASSWORD', 'YASK_POSTGRES_ADMIN_PASSWORD', 'YASK_DEPLOYER_OBJECT_ID')) {
         if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
@@ -109,7 +121,12 @@ try {
     $validationLevel = if ($Phase -eq 'Preview') { 'ProviderNoRbac' } else { 'Provider' }
     $preview = Get-AzSubscriptionDeploymentWhatIfResult -Location centralus -TemplateFile $TemplateFile `
         -TemplateParameterObject $parameters -ValidationLevel $validationLevel -ErrorAction Stop
-    if ($preview.Status -ne 'Succeeded') { throw 'ARM what-if did not succeed.' }
+    if ($preview.Status -ne 'Succeeded') {
+        if ($preview.PSObject.Properties['Error']) {
+            $result.armErrorCodes = @(Get-SafeArmErrorCodes $preview.Error | Sort-Object -Unique)
+        }
+        throw 'ARM what-if did not succeed.'
+    }
     $changes = @($preview.Changes | Sort-Object ResourceId | ForEach-Object {
         # Never persist Before/After or delta values; ARM responses can contain resolved credentials.
         [ordered]@{ resourceId = $_.ResourceId; changeType = [string]$_.ChangeType }
@@ -153,6 +170,14 @@ try {
 catch {
     $result.failureStage = $stage
     $result.failureType = $_.Exception.GetType().FullName
+    if (-not $result.Contains('armErrorCodes')) {
+        $errorText = $_.Exception.Message
+        if ($null -ne $_.ErrorDetails) { $errorText += $_.ErrorDetails.Message }
+        $result.armErrorCodes = @(
+            [regex]::Matches($errorText, '(?i)(?:"code"\s*:\s*"|\bCode:\s*)([A-Za-z][A-Za-z0-9_.-]{0,100})(?=["\s,}]|$)') |
+                ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+        )
+    }
     # Keep raw SDK error records out of logs and artifacts; they may echo secure request parameters.
     Write-Warning "Staging $Phase failed at '$stage'. No automatic retry or cleanup will be performed."
     $result.status = 'failed'
