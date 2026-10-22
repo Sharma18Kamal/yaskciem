@@ -101,8 +101,16 @@ try {
     $parameters.deployerObjectId = $objectId
     $parameters.deployerPrincipalType = 'ServicePrincipal'
     $parameters.deployedBy = 'GitHub Actions OIDC'
-    $parameters.vmAdminPassword = ConvertTo-SecureString $env:YASK_VM_ADMIN_PASSWORD -AsPlainText -Force
-    $parameters.postgresAdminPassword = ConvertTo-SecureString $env:YASK_POSTGRES_ADMIN_PASSWORD -AsPlainText -Force
+    $templateDefinition = Get-Content -LiteralPath $TemplateFile -Raw | ConvertFrom-Json
+    foreach ($name in @('vmAdminPassword', 'postgresAdminPassword')) {
+        if ($templateDefinition.parameters.$name.type -cne 'secureString') {
+            throw "Credential parameter must be declared secureString: $name"
+        }
+    }
+    # The what-if SDK cannot serialize SecureString instances. ARM security is
+    # enforced by the template declaration; values remain in memory, never files.
+    $parameters.vmAdminPassword = $env:YASK_VM_ADMIN_PASSWORD
+    $parameters.postgresAdminPassword = $env:YASK_POSTGRES_ADMIN_PASSWORD
     $templateHash = (Get-FileHash -LiteralPath $TemplateFile -Algorithm SHA256).Hash
     # The input fingerprint detects configuration changes between protected environments without hashing secrets.
     $publicParameters = $parameters.Clone()

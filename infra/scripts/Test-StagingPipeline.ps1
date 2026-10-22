@@ -49,8 +49,8 @@ function Get-AzResource {
 }
 function Get-AzSubscriptionDeploymentWhatIfResult {
     [CmdletBinding()]param($Location, $TemplateFile, $TemplateParameterObject, $ValidationLevel)
-    Assert-Test ($TemplateParameterObject.vmAdminPassword -is [securestring]) 'VM password must be a SecureString.'
-    Assert-Test ($TemplateParameterObject.postgresAdminPassword -is [securestring]) 'Database password must be a SecureString.'
+    Assert-Test ($TemplateParameterObject.vmAdminPassword -ceq $env:YASK_VM_ADMIN_PASSWORD) 'VM password must be passed in memory to the SDK.'
+    Assert-Test ($TemplateParameterObject.postgresAdminPassword -ceq $env:YASK_POSTGRES_ADMIN_PASSWORD) 'Database password must be passed in memory to the SDK.'
     Assert-Test ($TemplateParameterObject.deployerPrincipalType -eq 'ServicePrincipal') 'OIDC principal type was not wired.'
     $state.previewCalls++
     $state.validationLevel = $ValidationLevel
@@ -115,7 +115,7 @@ try {
     Assert-Test ($federation.issuer -ceq 'https://token.actions.githubusercontent.com' -and @($federation.audiences).Count -eq 1 -and $federation.audiences[0] -ceq 'api://AzureADTokenExchange') 'Federation issuer and audience must be exact.'
     New-Item -ItemType Directory -Path $root | Out-Null
     $template = Join-Path $root 'template.json'
-    '{}' | Set-Content -LiteralPath $template
+    '{"parameters":{"vmAdminPassword":{"type":"secureString"},"postgresAdminPassword":{"type":"secureString"}}}' | Set-Content -LiteralPath $template
     $env:YASK_VM_ADMIN_PASSWORD = 'mock-vm-secret-not-for-deployment'
     $env:YASK_POSTGRES_ADMIN_PASSWORD = 'mock-postgres-secret-not-for-deployment'
     $env:YASK_DEPLOYER_OBJECT_ID = '11111111-1111-1111-1111-111111111111'
@@ -155,12 +155,15 @@ try {
     $null = Invoke-Case 'configuration-change' Deploy $true @{} $approval
     Assert-Test ($state.deploymentCalls -eq 0) 'Changed public configuration must block deployment.'
     $env:YASK_DEPLOYER_OBJECT_ID = '11111111-1111-1111-1111-111111111111'
-    '{"changed":true}' | Set-Content -LiteralPath $template
+    '{"changed":true,"parameters":{"vmAdminPassword":{"type":"secureString"},"postgresAdminPassword":{"type":"secureString"}}}' | Set-Content -LiteralPath $template
     $null = Invoke-Case 'template-change' Deploy $true @{} $approval
     Assert-Test ($state.deploymentCalls -eq 0) 'Changed template must block deployment.'
     $result = Invoke-Case 'arm-failure' Preview $true @{ previewStatus = 'Failed' }
     Assert-Test ('RequestDisallowedByPolicy' -in $result.armErrorCodes -and 'InvalidTemplateDeployment' -in $result.armErrorCodes) 'Sanitized ARM error codes must be preserved without messages.'
-    Write-Host 'All 15 offline staging pipeline tests passed. No Azure calls were made.'
+    '{"parameters":{"vmAdminPassword":{"type":"string"},"postgresAdminPassword":{"type":"secureString"}}}' | Set-Content -LiteralPath $template
+    $null = Invoke-Case 'insecure-template' Preview $true
+    Assert-Test ($state.previewCalls -eq 0 -and $state.deploymentCalls -eq 0) 'Insecure credential declarations must block all ARM requests.'
+    Write-Host 'All 16 offline staging pipeline tests passed. No Azure calls were made.'
 }
 finally {
     foreach ($entry in $savedEnvironment.GetEnumerator()) {

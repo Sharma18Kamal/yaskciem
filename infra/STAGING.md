@@ -129,8 +129,10 @@ federation merely to make a preview run pass.
    values**. No Azure client secret is used. Keep these credentials stable across
    preview, provisioning, retries and later runs: changing them may rotate live
    credentials. Never paste them into dispatch inputs, source or chat.
-   Secret parameters are converted to `SecureString` and passed in memory to
-   Azure PowerShell; no secret parameter file is generated.
+   Secret parameters are passed in memory to Azure PowerShell; the compiled
+   template must declare both credentials as `secureString` before any request.
+   No secret parameter file is generated. CLR `SecureString` values are not used
+   in the parameter object because the what-if SDK fails to serialize them.
 7. A deployment owner must explicitly review the staging exceptions: retain
    password-compatible PostgreSQL/Key Vault, and the Azure-services database
    firewall rule. Record the approval in your change-control system and set
