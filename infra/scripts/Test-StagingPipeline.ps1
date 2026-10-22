@@ -62,7 +62,7 @@ function Get-AzSubscriptionDeploymentWhatIfResult {
             Details = @([pscustomobject]@{ Code = 'RequestDisallowedByPolicy'; Message = $env:YASK_VM_ADMIN_PASSWORD })
         }
         Changes = @([pscustomobject]@{
-            ResourceId = '/subscriptions/test/resource'
+            FullyQualifiedResourceId = '/subscriptions/test/resource'
             ChangeType = $state.changeType
             Before = @{ secret = $env:YASK_VM_ADMIN_PASSWORD }
             After = @{ secret = $env:YASK_POSTGRES_ADMIN_PASSWORD }

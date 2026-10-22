@@ -138,9 +138,9 @@ try {
         }
         throw 'ARM what-if did not succeed.'
     }
-    $changes = @($preview.Changes | Sort-Object ResourceId | ForEach-Object {
+    $changes = @($preview.Changes | Sort-Object FullyQualifiedResourceId | ForEach-Object {
         # Never persist Before/After or delta values; ARM responses can contain resolved credentials.
-        [ordered]@{ resourceId = $_.ResourceId; changeType = [string]$_.ChangeType }
+        [ordered]@{ resourceId = $_.FullyQualifiedResourceId; changeType = [string]$_.ChangeType }
     })
     Save-Evidence 'preview.json' ([ordered]@{
         templateSha256 = $templateHash
