@@ -1,0 +1,15 @@
+{
+  "Name": "YASK staging GitHub preview",
+  "IsCustom": true,
+  "Description": "Read subscription inventory and request ARM what-if only. Cannot deploy resources, assign roles, read secret values or change credentials.",
+  "Actions": [
+    "*/read",
+    "Microsoft.Resources/deployments/whatIf/action"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/455b906b-799c-4c50-9d04-b092ea12116d"
+  ]
+}

@@ -106,8 +106,9 @@ try {
     $baseline = @(Get-Inventory)
     Save-Evidence 'inventory-before.json' $baseline
     $stage = 'what-if'
+    $validationLevel = if ($Phase -eq 'Preview') { 'ProviderNoRbac' } else { 'Provider' }
     $preview = Get-AzSubscriptionDeploymentWhatIfResult -Location centralus -TemplateFile $TemplateFile `
-        -TemplateParameterObject $parameters -ErrorAction Stop
+        -TemplateParameterObject $parameters -ValidationLevel $validationLevel -ErrorAction Stop
     if ($preview.Status -ne 'Succeeded') { throw 'ARM what-if did not succeed.' }
     $changes = @($preview.Changes | Sort-Object ResourceId | ForEach-Object {
         # Never persist Before/After or delta values; ARM responses can contain resolved credentials.

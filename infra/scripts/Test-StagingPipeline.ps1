@@ -48,11 +48,12 @@ function Get-AzResource {
     }
 }
 function Get-AzSubscriptionDeploymentWhatIfResult {
-    [CmdletBinding()]param($Location, $TemplateFile, $TemplateParameterObject)
+    [CmdletBinding()]param($Location, $TemplateFile, $TemplateParameterObject, $ValidationLevel)
     Assert-Test ($TemplateParameterObject.vmAdminPassword -is [securestring]) 'VM password must be a SecureString.'
     Assert-Test ($TemplateParameterObject.postgresAdminPassword -is [securestring]) 'Database password must be a SecureString.'
     Assert-Test ($TemplateParameterObject.deployerPrincipalType -eq 'ServicePrincipal') 'OIDC principal type was not wired.'
     $state.previewCalls++
+    $state.validationLevel = $ValidationLevel
     [pscustomobject]@{
         Status = 'Succeeded'
         Changes = @([pscustomobject]@{
@@ -100,6 +101,13 @@ function Invoke-Case([string]$Name, [string]$Phase, [bool]$ShouldFail, [hashtabl
 }
 
 try {
+    $infra = Split-Path -Parent $PSScriptRoot
+    $role = Get-Content -LiteralPath (Join-Path $infra 'github-preview-role.json') -Raw | ConvertFrom-Json
+    Assert-Test (@($role.Actions).Count -eq 2 -and '*/read' -in $role.Actions -and 'Microsoft.Resources/deployments/whatIf/action' -in $role.Actions) 'Preview role must not grant deployment or RBAC writes.'
+    Assert-Test (@($role.DataActions).Count -eq 0) 'Preview role must not grant secret/data access.'
+    $federation = Get-Content -LiteralPath (Join-Path $infra 'github-preview-federation.json') -Raw | ConvertFrom-Json
+    Assert-Test ($federation.subject -ceq 'repo:Sharma18Kamal/yaskciem:environment:staging-preview') 'Federation must be preview-only.'
+    Assert-Test ($federation.issuer -ceq 'https://token.actions.githubusercontent.com' -and @($federation.audiences).Count -eq 1 -and $federation.audiences[0] -ceq 'api://AzureADTokenExchange') 'Federation issuer and audience must be exact.'
     New-Item -ItemType Directory -Path $root | Out-Null
     $template = Join-Path $root 'template.json'
     '{}' | Set-Content -LiteralPath $template
@@ -110,10 +118,12 @@ try {
 
     $null = Invoke-Case 'preview' Preview $false
     Assert-Test ($state.deploymentCalls -eq 0) 'Preview must never deploy.'
+    Assert-Test ($state.validationLevel -eq 'ProviderNoRbac') 'Preview must not require deployment write permissions.'
     $emptyInventory = Get-Content -LiteralPath (Join-Path $root 'preview\inventory-before.json') -Raw
     Assert-Test ($emptyInventory.Trim() -eq '[]') 'Empty inventory must be a JSON array.'
     $approval = Join-Path $root 'preview\preview.json'
     $result = Invoke-Case 'deploy' Deploy $false @{} $approval
+    Assert-Test ($state.validationLevel -eq 'Provider') 'Deployment must check resource write permissions.'
     Assert-Test ($result.status -eq 'infrastructure-succeeded' -and $state.deploymentCalls -eq 1) 'Successful deployment evidence is missing.'
     Assert-Test ($result.deploymentNames.Count -eq 1 -and $state.inventoryCalls -eq 2) 'Actual attempt and inventories must be recorded.'
     $null = Invoke-Case 'delete' Deploy $true @{ changeType = 'Delete' } $approval

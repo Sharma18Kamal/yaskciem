@@ -38,6 +38,48 @@ are rejected, not automatically accepted. This is an infrastructure pipeline,
 
 ### Administrator setup before the first run
 
+#### Current preview-only configuration
+
+The preview environment is now configured with a dedicated Entra identity:
+
+| Setting | Value |
+| --- | --- |
+| Application client ID | `2c2505b8-b56f-4515-ac0d-0bbd5618c34d` |
+| Service principal object ID | `e5640711-5501-4b02-aad4-9986d495380b` |
+| Federated subject | `repo:Sharma18Kamal/yaskciem:environment:staging-preview` |
+| GitHub environment branch policy | Exact branch `main` |
+| Provisioning flag | Repository `STAGING_PROVISIONING_ENABLED=false` |
+
+Only the preview federation exists. There is no Azure client secret and no
+`staging` federation or environment. The
+[preview role](github-preview-role.json) grants subscription control-plane
+reads (needed by the existing subscription inventory) and ARM what-if only.
+It has no resource deployment writes, RBAC writes or data-plane permissions.
+The [federation definition](github-preview-federation.json) uses an exact
+environment subject, not a branch wildcard.
+
+`AZURE_CLIENT_ID`, `AZURE_DEPLOYER_OBJECT_ID`, and the approved staging-exception
+flag are set on `staging-preview`. Random VM and database administrator passwords
+were generated in memory and uploaded directly as the two GitHub environment
+secrets. Values were not logged, placed in local files or applied to a live
+resource. Preserve existing secrets on retry; they cannot be downloaded from
+GitHub. No workflow or ARM what-if was run during setup.
+
+Preview requests use `ValidationLevel=ProviderNoRbac` so provider checks require
+read permissions rather than resource write permissions. This requires a recent
+Az.Resources version supporting that level. It **does not prove deployment RBAC**.
+The provisioning path retains `Provider` validation and must remain disabled:
+the preview identity cannot deploy even if someone changes the dispatch input.
+Do not broaden its role to Owner/Contributor as an error workaround.
+
+The full deployment setup below is future work, not evidence of completion.
+Before enabling it, establish independent review, protected branches and a
+separately approved deployment identity/permission model. If the principal changes,
+generate a new preview with that configuration; old public-parameter hashes will
+not match. Plan a protected credential handoff for future deployment; do not
+regenerate or rotate live credentials implicitly. Never grant a deployment
+federation merely to make a preview run pass.
+
 1. Review and merge the infrastructure, scripts and workflow to the repository's
    protected default branch. The workflow accepts no arbitrary checkout ref,
    resource group, subscription, region or template input. Preserve branch
@@ -45,13 +87,18 @@ are rejected, not automatically accepted. This is an infrastructure pipeline,
 2. Create GitHub environments named `staging-preview` and `staging`. For
    `staging`, require an independent reviewer, prevent self-review, disallow
    administrator bypass and allow deployments from protected branches only.
-   The preview job checks reviewers, prevention of self-review and the protected
+   For provisioning requests, the preview job checks reviewers, prevention of self-review and the protected
    branch policy through GitHub's environment API; inaccessible or missing
-   settings stop the workflow. The documented API response does not expose the
+   settings stop provisioning. Preview-only requests do not require a deployment
+   reviewer. Provisioning also requires `STAGING_PROVISIONING_ENABLED=true`;
+   leave this repository variable `false` until independent approval is configured.
+   The documented API response does not expose the
    administrator-bypass setting, so verify that setting manually in GitHub.
    If the repository's
    GitHub plan does not support these protections, do not enable provisioning.
-   Restrict `staging-preview` to the protected default branch as well.
+   Restrict `staging-preview` to the default branch (an exact `main` branch policy
+   is suitable during preview-only setup). This is not a substitute for branch
+   protection, which must be configured before enabling provisioning.
 3. Have an Azure identity administrator configure an Entra application/service
    principal for GitHub OIDC. Use issuer `https://token.actions.githubusercontent.com`,
    audience `api://AzureADTokenExchange`, and **two exact** federated subjects:

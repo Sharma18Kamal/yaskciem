@@ -78,10 +78,15 @@ jobs:
             throw 'A deployment owner must approve the password/Key Vault and Azure-services firewall staging exceptions.'
           }
       - name: Verify deployment approval protections
+        if: inputs.provision
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          PROVISIONING_ENABLED: ${{ vars.STAGING_PROVISIONING_ENABLED }}
         run: |
+          if ($env:PROVISIONING_ENABLED -cne 'true') {
+            throw 'Provisioning is disabled. Configure an independent reviewer and obtain deployment-owner approval before enabling it.'
+          }
           $headers = @{
             Authorization = "Bearer $env:GH_TOKEN"
             Accept = 'application/vnd.github+json'
