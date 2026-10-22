@@ -27,4 +27,13 @@
     <EmbeddedResource Include="..\..\infra\postgres\003-governance-deadlines.sql" LogicalName="CloudEntitle.LicenseServer.GovernanceSchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\004-operational-integrations.sql" LogicalName="CloudEntitle.LicenseServer.OperationsSchema.sql" />
   </ItemGroup>
+
+  <Target Name="BuildOperationsConsole" BeforeTargets="PrepareForBuild" Condition="'$(BuildWebConsole)' == 'true'">
+    <Exec WorkingDirectory="..\CloudEntitle.WebConsole" Command="npm ci" />
+    <Exec WorkingDirectory="..\CloudEntitle.WebConsole" Command="npm run build" />
+    <ItemGroup>
+      <Content Remove="wwwroot\console\**" />
+      <Content Include="wwwroot\console\**" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 </Project>

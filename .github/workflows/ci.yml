@@ -18,6 +18,20 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      - name: Setup Node for operations console
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/CloudEntitle.WebConsole/package-lock.json
+
+      - name: Build and test operations console
+        working-directory: src/CloudEntitle.WebConsole
+        run: |
+          npm ci
+          npm test
+          npm run build
+
       - name: Restore
         run: dotnet restore CloudEntitle.sln --configfile .nuget/NuGet.Config
 

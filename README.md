@@ -30,6 +30,12 @@ The desktop client currently supports:
 
 Provider adapters default to deterministic mock data in tests. The desktop composition enables live CLI discovery.
 
+An optional **read-only web operations console** provides organization-wide
+posture, finding evidence, scan coverage, review backlog and snapshot history
+without the Windows Desktop client. It uses the existing API permissions and
+Entra sign-in. See [web console setup](docs/deployment/web-operations-console.md)
+for build, configuration and the 72-hour freshness policy.
+
 ## Prerequisites
 
 - Windows 10/11

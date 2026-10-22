@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YASK-CIEM | Operations</title>
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">YASK-CIEM / ENTERPRISE VISIBILITY</span><h1>Operations console</h1></div>
+    <div class="session"><span class="badge">Read-only</span><button id="sign-in">Sign in with Entra</button><button id="sign-out" hidden>Sign out</button></div>
+  </header>
+  <main>
+    <p id="message" role="status" aria-live="polite">Loading console configuration...</p>
+    <section class="filters" aria-label="Posture filters">
+      <label>Organization<select id="organization" disabled><option value="">Sign in to select</option></select></label>
+      <label>Provider<select id="provider" disabled><option value="">All providers</option></select></label>
+      <label>Account<select id="account" disabled><option value="">All accounts</option></select></label>
+      <button id="refresh" disabled>Refresh</button>
+    </section>
+    <div id="workspace" hidden>
+      <p id="scope-note" class="notice"></p>
+      <section aria-labelledby="posture-title"><h2 id="posture-title">Organization posture</h2><div id="posture" class="cards"></div></section>
+      <section aria-labelledby="coverage-title"><h2 id="coverage-title">Account &amp; scan coverage</h2><div id="coverage"></div></section>
+      <section aria-labelledby="findings-title"><h2 id="findings-title">Findings</h2><p id="finding-notice" class="notice"></p><div id="findings"></div></section>
+      <section id="evidence-section" hidden aria-labelledby="evidence-title"><h2 id="evidence-title">Finding evidence</h2><div id="evidence"></div></section>
+      <section aria-labelledby="reviews-title"><h2 id="reviews-title">Review backlog</h2><p id="review-notice" class="notice"></p><div id="reviews"></div></section>
+      <section aria-labelledby="trends-title"><h2 id="trends-title">Posture history</h2><p class="notice">Scan snapshot totals, not cumulative or deduplicated findings. Different scopes or incomplete coverage are not directly comparable.</p><div id="trends"></div></section>
+    </div>
+  </main>
+  <footer>Read-only visibility. Reviews, ticket creation, scheduling and access changes remain in governed workflows.</footer>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

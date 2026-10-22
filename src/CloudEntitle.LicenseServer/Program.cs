@@ -164,6 +164,7 @@ app.Use(async (context, next) =>
 	SecurityHeaderPolicy.Apply(context.Response, useHsts);
 	await next();
 });
+app.UseOperationsConsole();
 app.UseAuthentication();
 app.UseAuthorization();
 

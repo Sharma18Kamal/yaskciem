@@ -2,6 +2,15 @@
 
 The solution now exposes a versioned integration contract through `CloudEntitle.Integration` and the existing ASP.NET License Server host.
 
+## Read-only web operations console
+
+P2.1 adds an optional same-origin TypeScript console at `/console/`, using Entra
+SPA sign-in and the existing v1 read contracts below. It provides account/provider
+filters, finding evidence, source coverage, review backlog and scoped snapshot
+history, with a default 72-hour stale threshold. It adds no operational write
+actions or database access. See [console setup and limits](../deployment/web-operations-console.md)
+and [hosting HTTP examples](../../src/CloudEntitle.LicenseServer/WebConsole.http).
+
 ## Endpoints
 
 - `GET /health`: host health check.

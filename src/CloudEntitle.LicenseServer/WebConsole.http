@@ -1,0 +1,10 @@
+@baseUrl = https://localhost:5001
+
+### Public shell (404 when WebConsole is disabled)
+GET {{baseUrl}}/console/
+
+### Public settings only; no tokens or client secret
+GET {{baseUrl}}/console/config
+
+### No write endpoint
+POST {{baseUrl}}/console/config
