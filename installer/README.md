@@ -1,6 +1,6 @@
 # Windows MSIX installer
 
-To create a single-file, self-contained Setup EXE that includes the MSIX app and .NET 9 runtime, and offers an explicit current-user trust step for the bundled public publisher certificate:
+To create a single-file, self-contained Setup EXE that includes the MSIX app and .NET 10 runtime, and offers an explicit current-user trust step for the bundled public publisher certificate:
 
 ```powershell
 .\scripts\package-msix.ps1 -PackageVersion 1.0.0.36 -OutputPath .\artifacts\msix-1.0.0.36
@@ -67,13 +67,32 @@ The package script requires WiX 5, SignTool, and the YASK-CIEM signing certifica
 
 ```powershell
 .\scripts\package-native-installers.ps1 `
-  -PackageVersion 1.0.0.21 `
+  -PackageVersion 1.0.0.63 `
   -WixExePath "$env:TEMP\yask-wix-tools-v5\wix.exe"
 ```
 
 The output directory defaults to `artifacts/native-installers-<version>` and contains `YASK-CIEM-<version>.msi` and `YASK-CIEM-Setup-<version>.exe`. The MSI installs per-machine under Program Files and adds a Start Menu shortcut. The setup EXE embeds the MSI and triggers the standard Windows elevation prompt.
 
-Both packages are framework-dependent: install the .NET 9 Desktop Runtime x64 on the target PC first. These local packages use the development signing certificate; share its public `.cer` only with trusted reviewers who need to install the packages. Never distribute the `.pfx` or its password. Public distribution requires an organization-trusted code-signing certificate.
+Version 1.0.0.63 and later bundles the desktop and required .NET 10 runtimes, so
+these native packages do not require a separate runtime installation. The
+package version must match `Directory.Build.props`. Earlier 1.0.0.62 native
+packages were framework-dependent and required .NET 9 Desktop and ASP.NET Core
+runtimes.
+
+The MSI is the unattended installation candidate (`msiexec /i <package.msi> /qn
+/norestart /l*v <log>`); it still requires elevation for per-machine installation.
+The interactive Setup EXE prompts and is not an unattended Store installer.
+It now invokes Windows Installer directly without pre-uninstalling the old
+version; MSI major upgrades run inside the installation transaction and prevent
+downgrades. Same-version launches can enter maintenance mode. Actual
+install/upgrade/rollback acceptance is still required on an isolated test PC.
+
+Local candidate packages use the development signing certificate and are for
+trusted test use only. Never distribute the `.pfx` or its password. The selected
+EXE/MSI Store listing route requires an owner-verified listing, stable download
+URLs, appropriate production signing, silent-install behavior and certification.
+Microsoft signing of Store-distributed MSIX does not make this native MSI
+production-signed.
 
 ## User-level Start Menu installer
 
@@ -100,7 +119,7 @@ To sign it:
 2. Replace the generated placeholder PNG assets in the package script with branded assets.
 3. Use a certificate whose subject exactly matches the manifest `Publisher` value.
 4. Sign the package and install it on a clean Windows 10/11 test VM.
-5. Verify SQLite initialization, CLI readiness messaging, scan execution, report export, and trial enforcement.
+5. Verify SQLite initialization, CLI readiness messaging, scan execution, report export, and free-edition access without a trial lock.
 6. Publish checksums and the signed installer through the release channel.
 
 The local development machine may not contain `MakeAppx.exe`; in that case package creation must run on a Windows SDK build agent. The package is not trusted for distribution until signed with the organization certificate.

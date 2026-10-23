@@ -9,7 +9,7 @@ This repository follows a clean architecture model aligned with the CloudEntitle
 - Infrastructure: SQLite, logging, configuration, persistence, local storage
 - Cloud provider adapters: Azure, AWS, GCP mapping to normalized models
 - Desktop UI: WPF + MVVM shell and screens
-- Licensing: remote validation service and local trial handling
+- Licensing library: retained for future editions; the free standalone desktop does not reference or enforce it
 
 ## Principles
 

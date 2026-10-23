@@ -43,17 +43,17 @@
                     </StackPanel>
                 </Border>
                 <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,10,0,0">
-                    <Border Style="{StaticResource StatusPill}" ToolTip="Fourteen-day local trial status. The trial continues across app reinstalls on this Windows installation."><TextBlock Text="{Binding TrialStatusText}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
-                    <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" IsEnabled="{Binding IsTrialActive}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
+                    <Border Style="{StaticResource StatusPill}" ToolTip="Free standalone desktop edition. No trial expiry or license activation is required."><TextBlock Text="{Binding EditionDisplayName}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
+                    <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
                     <Button Content="{Binding DisconnectCloudButtonLabel}" Command="{Binding OpenCloudDisconnectCommand}" IsEnabled="{Binding CanDisconnectCloud}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Disconnect the active CLI or cancel a pending sign-in"/>
-                    <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNavigationItem}" IsEnabled="{Binding IsTrialActive}" Style="{StaticResource QuietButton}" Margin="12,0,0,0" ToolTip="Open application settings"/>
+                    <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNavigationItem}" Style="{StaticResource QuietButton}" Margin="12,0,0,0" ToolTip="Open application settings"/>
                     <Button Content="−" Style="{StaticResource WindowChromeButton}" Margin="16,0,0,0" Click="MinimizeButton_Click" ToolTip="Minimize window" AutomationProperties.Name="Minimize window"/>
                     <Button Content="□" Style="{StaticResource WindowChromeButton}" Click="MaximizeButton_Click" ToolTip="Maximize or restore window" AutomationProperties.Name="Maximize or restore window"/>
                     <Button Content="×" Style="{StaticResource WindowChromeButton}" Click="CloseButton_Click" ToolTip="Close YASK-CIEM" AutomationProperties.Name="Close YASK-CIEM"/>
                 </StackPanel>
             </Grid>
         </Border>
-        <Grid Grid.Row="1" IsEnabled="{Binding IsTrialActive}">
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions><ColumnDefinition Width="250"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0" Padding="16,22">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">

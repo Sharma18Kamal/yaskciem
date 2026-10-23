@@ -2,18 +2,12 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace YaskCiemNativeSetup;
 
 internal static class Program
 {
     private const string MsiResourceName = "YaskCiemNativeSetup.Payload.msi";
-    private const string UpgradeCode = "{D0B7D2CC-5BD5-4A29-9E79-2E5EA68F6B4C}";
-
-    [DllImport("msi.dll", CharSet = CharSet.Unicode)]
-    private static extern uint MsiEnumRelatedProducts(string upgradeCode, int reserved, int index, StringBuilder productCode);
-
     private static async Task<int> Main()
     {
         var extractedMsiPath = Path.Combine(Path.GetTempPath(), $"YASK-CIEM-{Guid.NewGuid():N}.msi");
@@ -29,16 +23,10 @@ internal static class Program
                 await resource.CopyToAsync(output);
             }
 
-            // Re-running the same MSI over an installed copy opens maintenance mode instead of reinstalling, so remove it first.
-            var command = new StringBuilder();
-            var installed = FindInstalledProduct();
-            if (installed is not null) command.Append($"msiexec /x {installed} /qn /norestart & ");
-            command.Append($"msiexec /i \"{extractedMsiPath}\" /qb /norestart /l*v \"{logPath}\"");
-
             var startInfo = new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = $"/d /s /c \"{command}\"",
+                FileName = Path.Combine(Environment.SystemDirectory, "msiexec.exe"),
+                Arguments = $"/i \"{extractedMsiPath}\" /qb /norestart /l*v \"{logPath}\"",
                 UseShellExecute = true,
                 Verb = "runas",
                 WindowStyle = ProcessWindowStyle.Hidden
@@ -55,7 +43,7 @@ internal static class Program
                     var appPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "YASK-CIEM", "CloudEntitle.Desktop.exe");
                     if (File.Exists(appPath)) Process.Start(new ProcessStartInfo(appPath) { UseShellExecute = true });
                 }
-                return 0;
+                return installer.ExitCode;
             }
 
             MessageBoxW(IntPtr.Zero, $"YASK-CIEM installation failed (Windows Installer code {installer.ExitCode}).\n\n{BuildLabel()}\nDetails: {logPath}", title, 0x10);
@@ -93,9 +81,4 @@ internal static class Program
         return parts.Length == 2 ? $"Version {parts[0]} (built {parts[1].Replace('T', ' ')})" : $"Version {parts[0]}";
     }
 
-    private static string? FindInstalledProduct()
-    {
-        var productCode = new StringBuilder(39);
-        return MsiEnumRelatedProducts(UpgradeCode, 0, 0, productCode) == 0 ? productCode.ToString() : null;
-    }
 }

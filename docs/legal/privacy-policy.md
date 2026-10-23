@@ -2,7 +2,7 @@
 
 **Effective date:** October 11, 2026
 **Publisher:** [Insert the publisher's full legal name]
-**Privacy contact:** [Insert a monitored privacy contact email or web form]
+**Privacy contact:** [kamal18sharma@hotmail.com](mailto:kamal18sharma@hotmail.com)
 **Postal address:** [Insert the publisher's business address]
 
 This Privacy Policy explains how the publisher of YASK-CIEM ("we," "us," or "our") handles information when you install or use the YASK-CIEM Windows desktop application (the "App"). It covers the App's local operation and optional connections that you or your organization configure.
@@ -13,7 +13,7 @@ This Privacy Policy explains how the publisher of YASK-CIEM ("we," "us," or "our
 - Scan results, reports, review records, and most settings are stored on the device. They are not automatically uploaded by the App.
 - Optional organization, ticketing, and alert features send the information needed for those features to the service you configure.
 - The App does not include advertising or product-analytics SDKs.
-- The App does not currently provide online license activation or payment processing. Its trial record is stored locally.
+- The free standalone edition does not require license activation or payment processing. It does not create or use trial records.
 
 ## Information the App Processes
 
@@ -23,9 +23,9 @@ When you run a scan, the App queries the cloud accounts and Kubernetes contexts 
 
 The App uses the provider's CLI session on your device. It does not ask you to enter your Azure, AWS, Google Cloud, or Kubernetes password into the App and does not intentionally collect or store the CLI's authentication tokens. The provider's CLI and cloud services process the requests under their own terms and privacy notices. Scan results are stored locally unless you use an optional sharing feature described below.
 
-### Trial and device information
+### Legacy trial and device information
 
-The current trial implementation reads the Windows MachineGuid, or a network adapter identifier as a fallback, to derive a device identifier. It stores hashes of the trial identifier and device identifier, together with trial start, end, and last-observed times, in the current Windows user's local application data. The App does not request an email address or name to start this local trial. This identifier is not sent to a licensing server by the current App.
+Version 1.0.0.63 and later uses the free standalone model. It does not read Windows MachineGuid or a network-adapter identifier for licensing and does not create, read or transmit local trial records. Earlier versions stored hashed trial/device identifiers and trial timestamps locally. Existing legacy trial files are left untouched and ignored by the free edition; you may remove those files yourself if they are no longer needed by an older version.
 
 ### Organization sign-in information
 
@@ -60,7 +60,7 @@ We do not control the privacy or security practices of cloud providers, Microsof
 
 ## Purposes and Legal Basis
 
-The App processes information to perform read-only cloud access analysis, display findings and evidence, support local or organization-shared access reviews and remediation planning, operate optional organization and ticketing features, deliver configured posture alerts, maintain the local trial, and diagnose errors. Shared access-review records may include organization member identities, assignments, decisions, rationales, evidence snapshots, evidence digests, timestamps, and audit correlation IDs. Where required by applicable law, the organization that configures and uses the App is responsible for identifying its legal basis and providing any employee or administrator notices required for cloud-account analysis.
+The App processes information to perform read-only cloud access analysis, display findings and evidence, support local or organization-shared access reviews and remediation planning, operate optional organization and ticketing features, deliver configured posture alerts, and diagnose errors. Shared access-review records may include organization member identities, assignments, decisions, rationales, evidence snapshots, evidence digests, timestamps, and audit correlation IDs. Where required by applicable law, the organization that configures and uses the App is responsible for identifying its legal basis and providing any employee or administrator notices required for cloud-account analysis.
 
 ## Retention and Deletion
 
@@ -80,7 +80,7 @@ YASK-CIEM is a business security application and is not designed for children. W
 
 You can choose which providers, accounts, and Kubernetes contexts to scan; whether to enable scheduled scans; whether to configure ticketing or alert destinations; and whether to publish shared summaries or synchronize central audit events. You can refrain from using optional sharing features. Your organization may control some settings and data when it manages the App or License Server.
 
-To ask questions or make a privacy request, contact **[insert privacy contact email or web form]**. Include the App version, your organization (if applicable), and a description of the request. Do not include passwords, license keys, or access tokens. We may need to verify your identity and coordinate with your organization before responding.
+To ask questions or make a privacy request, contact [kamal18sharma@hotmail.com](mailto:kamal18sharma@hotmail.com). Include the App version, your organization (if applicable), and a description of the request. Do not include passwords, license keys, or access tokens. We may need to verify your identity and coordinate with your organization before responding.
 
 Depending on your location, you may have rights to request access, correction, deletion, restriction, portability, or to object to certain processing. Your organization may be the controller of cloud-account information processed on its behalf; in that case, direct requests to your organization first.
 
@@ -95,7 +95,8 @@ We may update this policy when the App's data practices change or legal requirem
 ## Publisher Contact
 
 **Legal entity:** [Insert publisher's full legal name]
-**Privacy contact:** [Insert monitored email address or web form]
+**Privacy contact:** [kamal18sharma@hotmail.com](mailto:kamal18sharma@hotmail.com)
+**Support contact:** [kamal18sharma@hotmail.com](mailto:kamal18sharma@hotmail.com)
 **Postal address:** [Insert business address]
 **Public policy URL:** [Insert the permanent HTTPS URL to this policy]
 

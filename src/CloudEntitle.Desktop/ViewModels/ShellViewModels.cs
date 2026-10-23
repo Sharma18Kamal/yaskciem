@@ -94,29 +94,18 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly INavigationService _navigation;
     private readonly CloudConnectionState _cloudConnectionState;
     private readonly ICloudAuthenticationLauncher? _authenticationLauncher;
-    private readonly ITrialService? _trialService;
-    private readonly Func<string> _getDeviceIdentifier;
     private object _currentViewModel;
     private NavigationItem _currentNavigationItem;
     private string _statusMessage = "Ready";
-    private string _trialStatusText = "Checking trial";
-    private bool _isTrialActive;
-    private string? _trialUserId;
-    private string? _trialDeviceIdentifier;
-    private DateTime? _trialExpiresAtUtc;
 
     public MainWindowViewModel(
         INavigationService navigation,
         CloudConnectionState? cloudConnectionState = null,
-        ICloudAuthenticationLauncher? authenticationLauncher = null,
-        ITrialService? trialService = null,
-        Func<string>? getDeviceIdentifier = null)
+        ICloudAuthenticationLauncher? authenticationLauncher = null)
     {
         _navigation = navigation;
         _cloudConnectionState = cloudConnectionState ?? new CloudConnectionState();
         _authenticationLauncher = authenticationLauncher;
-        _trialService = trialService;
-        _getDeviceIdentifier = getDeviceIdentifier ?? WindowsDeviceIdentity.GetIdentifier;
         _cloudConnectionState.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(CloudConnectionState.Status)) OnPropertyChanged(nameof(CloudConnectionStatus));
@@ -165,11 +154,9 @@ public sealed class MainWindowViewModel : ObservableObject
     public string ApplicationName => "YASK-CIEM";
     public string ApplicationVersion => typeof(MainWindowViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";
     public string DatabaseStatus => "Connected";
-    public bool IsTrialActive { get => _isTrialActive; private set { if (SetProperty(ref _isTrialActive, value)) OnPropertyChanged(nameof(CanDisconnectCloud)); } }
-    public string TrialStatusText { get => _trialStatusText; private set => SetProperty(ref _trialStatusText, value); }
-    public DateTime? TrialExpiresAtUtc { get => _trialExpiresAtUtc; private set => SetProperty(ref _trialExpiresAtUtc, value); }
+    public string EditionDisplayName => "Free standalone edition";
     public string CloudConnectionStatus => _cloudConnectionState.Status;
-    public bool CanDisconnectCloud => IsTrialActive && _cloudConnectionState.HasConnections;
+    public bool CanDisconnectCloud => _cloudConnectionState.HasConnections;
     public string DisconnectCloudButtonLabel => _cloudConnectionState.PendingProvider.HasValue ? "Cancel Sign-in" : "Disconnect Cloud";
     public IReadOnlyList<NavigationItem> NavigationItems { get; }
     public NavigationItem CloudAccountsNavigationItem => NavigationItems[1];
@@ -199,76 +186,6 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }));
         _cloudConnectionState.Update(states.Where(state => state.IsConnected).Select(state => state.Provider));
-    }
-
-    public async Task InitializeTrialAsync(CancellationToken cancellationToken = default)
-    {
-        IsTrialActive = false;
-        TrialStatusText = "Checking trial";
-        if (_trialService is null)
-        {
-            TrialStatusText = "Trial service unavailable";
-            StatusMessage = "Trial status could not be verified. Features are locked.";
-            return;
-        }
-
-        try
-        {
-            _trialDeviceIdentifier = _getDeviceIdentifier();
-            _trialUserId = $"YASK-LOCAL-DEVICE-{_trialDeviceIdentifier}";
-            var trialInfo = await _trialService.GetTrialStatusAsync(_trialUserId, _trialDeviceIdentifier, cancellationToken);
-            trialInfo ??= await _trialService.StartTrialAsync(_trialUserId, _trialDeviceIdentifier, cancellationToken);
-            ApplyTrialStatus(trialInfo);
-        }
-        catch (Exception exception)
-        {
-            IsTrialActive = false;
-            TrialStatusText = "Trial status unavailable";
-            StatusMessage = $"Trial verification failed; application options are locked. {exception.Message}";
-        }
-    }
-
-    public async Task RefreshTrialStatusAsync(CancellationToken cancellationToken = default)
-    {
-        if (_trialService is null || _trialUserId is null || _trialDeviceIdentifier is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var trialInfo = await _trialService.GetTrialStatusAsync(_trialUserId, _trialDeviceIdentifier, cancellationToken);
-            if (trialInfo is null)
-            {
-                IsTrialActive = false;
-                TrialExpiresAtUtc = null;
-                TrialStatusText = "Trial status unavailable";
-                StatusMessage = "Trial status could not be verified. Application options are locked.";
-                return;
-            }
-
-            ApplyTrialStatus(trialInfo);
-        }
-        catch (Exception exception)
-        {
-            IsTrialActive = false;
-            TrialStatusText = "Trial status unavailable";
-            StatusMessage = $"Trial verification failed; application options are locked. {exception.Message}";
-        }
-    }
-
-    private void ApplyTrialStatus(TrialInfo trialInfo)
-    {
-        TrialExpiresAtUtc = trialInfo.TrialEnd.ToUniversalTime();
-        var remaining = (int)Math.Ceiling((TrialExpiresAtUtc.Value - DateTime.UtcNow).TotalDays);
-        IsTrialActive = trialInfo.Status == LicenseStatus.Trial && remaining > 0;
-        TrialStatusText = IsTrialActive
-            ? $"Trial: {remaining} {(remaining == 1 ? "day" : "days")} left"
-            : "Trial expired";
-        if (!IsTrialActive)
-        {
-            StatusMessage = "Trial expired. Application options are locked.";
-        }
     }
 
     private async Task DisconnectActiveCloudAsync()

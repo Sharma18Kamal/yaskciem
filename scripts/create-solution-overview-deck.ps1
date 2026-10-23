@@ -168,7 +168,7 @@ try {
     $slide = Add-BaseSlide $presentation '#F6F4EC' 'Clear safety boundaries; a few release gaps remain' '06 / Boundaries and readiness' 7 'Sources: README.md; docs/licensing/licensing.md; docs/architecture/architecture.md; CloudEntitle.Desktop.csproj'
     Add-Card $slide 0.72 1.72 5.75 2.0 'Safety posture' 'Current provider scans are read-only. Credentials are not persisted in the domain model. Missing or unauthenticated CLIs should be reported rather than silently treated as empty inventory.' '#72B7A1'
     Add-Card $slide 6.82 1.72 5.75 2.0 'License enforcement' 'The fourteen-day trial is local and explicitly not tamper-proof. Remote validation/activation support exists in parts, but the desktop flow is not integrated.' '#F07D5D'
-    Add-Card $slide 0.72 4.02 5.75 1.72 'Framework target' 'Desktop project targets net9.0-windows; the project brief states .NET 10. Align target framework and CI before production release.' '#D8EF72'
+    Add-Card $slide 0.72 4.02 5.75 1.72 'Framework target' 'Desktop project targets net10.0-windows (.NET 10 LTS). Release still requires installed-package and real-cloud acceptance.' '#D8EF72'
     Add-Card $slide 6.82 4.02 5.75 1.72 'Evidence of readiness' 'Validate end-to-end scans against real cloud tenants, provider permissions, incomplete-data behavior, and exported findings.' '#72B7A1'
 
     # 8. Close / priorities

@@ -60,20 +60,20 @@ Two installers are provided. Install only one on a machine.
 
 Notes:
 - The installer writes `%TEMP%\YASK-CIEM-Setup.log` (native). Send this file if an install fails.
-- Re-running the native setup over an installed copy removes the old copy first, then installs.
+- Version 1.0.0.63 native setup delegates upgrades to Windows Installer without pre-uninstalling the old version; same-version runs can enter maintenance mode.
 
-### 2.3 First launch and the trial
+### 2.3 First launch and the free standalone edition
 
-- On first launch a **14-day trial** starts. The header pill shows the days left.
-- When the trial expires, cloud and workspace options are disabled; your local data is not deleted.
-- The trial survives reinstalling under the same Windows account.
+- Version 1.0.0.63 and later shows **Free standalone edition** in the header.
+- Workspace and cloud controls do not expire after fourteen days or require license activation.
+- Legacy trial files are ignored without modification; cloud and organization authorization is unchanged.
 
 ### 2.4 Window layout
 
 | Area | What it contains |
 |---|---|
 | Header, left | Logo, application name and tagline |
-| Header, right | Trial pill, **Connect Cloud**, **Disconnect Cloud**, **Settings**, minimize, maximize, close |
+| Header, right | Free edition pill, **Connect Cloud**, **Disconnect Cloud**, **Settings**, minimize, maximize, close |
 | Left menu | Dashboard, Cloud Accounts, Identities, Resources, Entitlements, Effective Access, Access Paths, Risk Findings, Recommendations, Remediation, Organizations, Access Reviews, Scan History (and Feedback, Settings) |
 | Security workspace card | Shows which provider is connected |
 | Main area | The selected page |
@@ -375,7 +375,7 @@ The application log lists every cloud CLI command with its duration, which helps
 | Reviewer list is empty | Scan first; users must be active and hold a qualifying role |
 | Export evidence bundle is disabled | Sign in to an organization with report-export permission |
 | Install did nothing | Run the setup from PowerShell, read `%TEMP%\YASK-CIEM-Setup.log` |
-| Trial expired | Cloud and workspace options are disabled; data is kept |
+| Older app reports trial expired | Verify the installed version; 1.0.0.63 and later ignores legacy trial state. Do not delete scan data as a workaround |
 
 ---
 

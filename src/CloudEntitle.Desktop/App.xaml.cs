@@ -11,7 +11,6 @@ using CloudEntitle.Cloud.Azure;
 using CloudEntitle.Cloud.Gcp;
 using CloudEntitle.Infrastructure;
 using CloudEntitle.Infrastructure.Persistence;
-using CloudEntitle.Licensing;
 using CloudEntitle.IdentityGovernance.Services;
 using CloudEntitle.Compliance.Services;
 using CloudEntitle.EffectiveAccess.Abstractions;
@@ -61,7 +60,6 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<ILocalDataBackupService, LocalDataBackupService>();
 		services.AddSingleton<IMonitoringScheduleStore, LocalMonitoringScheduleStore>();
 		services.AddSingleton<ContinuousMonitoringService>();
-		services.AddSingleton<ITrialService, TrialService>();
 		services.AddSingleton<ICloudCommandRunner>(_ => new LoggingCloudCommandRunner(new ProcessCloudCommandRunner()));
 		services.AddSingleton<IPostureWebhookCredentialStore, WindowsPostureWebhookCredentialStore>();
 		services.AddSingleton<IPostureNotificationChannel>(provider => new WebhookPostureNotificationChannel(
@@ -144,7 +142,6 @@ public partial class App : System.Windows.Application
 		_services = services.BuildServiceProvider();
 		await _services.GetRequiredService<ContinuousMonitoringService>().InitializeAsync();
 		var mainViewModel = _services.GetRequiredService<MainWindowViewModel>();
-		await mainViewModel.InitializeTrialAsync();
 		_services.GetRequiredService<MainWindow>().Show();
 		if (linkedRecommendationId is { } id)
 			await mainViewModel.OpenRecommendationAsync(id);

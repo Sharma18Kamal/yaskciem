@@ -6,7 +6,7 @@
       UpgradeCode="{D0B7D2CC-5BD5-4A29-9E79-2E5EA68F6B4C}"
       Scope="perMachine"
       Compressed="yes">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of YASK-CIEM is already installed." />
+    <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer version of YASK-CIEM is already installed." />
     <Property Id="ARPCOMMENTS" Value="Version $(var.FullVersion), built $(var.BuildTimestamp)" />
     <MediaTemplate EmbedCab="yes" />
 

@@ -21,13 +21,13 @@ Replace `<repository-url>` with the repository URL supplied by your team.
 2. Extract it to a local folder, for example `C:\YASK-CIEM`.
 3. Open PowerShell in the extracted folder.
 
-The repository currently builds locally with .NET 9. The production brief targets .NET 10; install .NET 10 and retarget the projects when the production SDK is adopted.
+The repository targets .NET 10 LTS. Install SDK 10.0.402 or a later stable .NET 10 feature band, as selected by `global.json`.
 
 ## 2. Install prerequisites
 
 Install the following tools:
 
-- .NET 9 SDK
+- .NET 10 SDK
 - Git
 - PowerShell 7 or Windows PowerShell
 - Azure CLI for Azure discovery
@@ -153,11 +153,13 @@ The application stores local data in these locations:
 ```text
 %LocalAppData%\CloudEntitle\Data\cloudentitle.db
 %LocalAppData%\CloudEntitle\Logs\
-%LocalAppData%\YASK-CIEM\trial-state.json
 %LocalAppData%\YASK-CIEM\reports\
 ```
 
 Do not manually edit these files while the application is running.
+
+Version 1.0.0.63 and later is the free standalone edition. It has no trial lock
+and ignores any legacy `trial-state.json` without deleting or modifying it.
 
 ## 10. Troubleshooting
 
@@ -197,10 +199,15 @@ These commands open the provider's official browser or credential flow. YASK-CIE
 
 Run `Scan Now` after authenticating at least one provider. Findings are generated only from discovered permissions that match enabled risk rules.
 
-### The trial cannot be started
+### An older installation reports an expired trial
 
-A trial can be used only once per normalized email address and once per normalized hardware/MAC identity. This is intentional. MAC addresses can be changed or spoofed and are a trial deterrent, not a cryptographic hardware identity.
+Confirm the installed app version. Version 1.0.0.63 and later is the free
+standalone edition and does not use trial state. Do not delete local scan data
+or reset trial files as a workaround. Upgrade acceptance is required before
+distributing the new candidate.
 
 ### Build targets the wrong framework
 
-The local scaffold currently targets .NET 9 because that SDK is installed in the development environment. Install the intended production SDK and update the project target framework as part of the release migration.
+The solution targets .NET 10. Check `dotnet --version` from the repository root
+and install the SDK selected by `global.json`; do not retarget individual
+projects to an older runtime to bypass a missing SDK.

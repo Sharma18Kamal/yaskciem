@@ -7,6 +7,30 @@ namespace CloudEntitle.Desktop.Tests;
 
 public sealed class WorkspaceViewBindingTests
 {
+    [Fact]
+    public void FreeEdition_ShouldNotGateWorkspaceOrCloudControlsOnLegacyTrialState()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var document = XDocument.Load(Path.Combine(root, "src", "CloudEntitle.Desktop", "MainWindow.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        Assert.Contains(document.Descendants(presentation + "TextBlock"),
+            element => (string?)element.Attribute("Text") == "{Binding EditionDisplayName}");
+        Assert.DoesNotContain(document.Descendants().Attributes(), attribute => attribute.Value.Contains("Trial", StringComparison.Ordinal));
+        foreach (var label in new[] { "Connect Cloud", "Settings" })
+        {
+            var button = Assert.Single(document.Descendants(presentation + "Button"),
+                element => (string?)element.Attribute("Content") == label);
+            Assert.Null(button.Attribute("IsEnabled"));
+            Assert.DoesNotContain(button.Ancestors(), ancestor => ancestor.Attribute("IsEnabled") is not null);
+        }
+
+        var startup = File.ReadAllText(Path.Combine(root, "src", "CloudEntitle.Desktop", "App.xaml.cs"));
+        Assert.DoesNotContain("TrialService", startup);
+        Assert.DoesNotContain("InitializeTrial", startup);
+        var window = File.ReadAllText(Path.Combine(root, "src", "CloudEntitle.Desktop", "MainWindow.xaml.cs"));
+        Assert.DoesNotContain("TrialStatus", window);
+    }
+
     [Theory]
     [InlineData(2560, 1600, 2.0)]
     [InlineData(1920, 1080, 2.0)]

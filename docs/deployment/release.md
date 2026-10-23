@@ -1,5 +1,48 @@
 # Release checklist
 
+## Desktop production-readiness gate
+
+See the [October 23, 2026 desktop assessment](desktop-production-readiness.md)
+for verified artifact fingerprints, fresh test results and remaining Store
+release gates. Desktop acceptance is separate from Azure backend provisioning,
+which remains on hold. Passing tests does not certify the installed package.
+
+## Local candidate 1.0.0.63
+
+- Owner selected a **free standalone edition**, native EXE/MSI Store listing and
+  no real-cloud account access at this stage. The display name `YASK-CIEM` does
+  not establish a verified Partner Center product ID or submission configuration.
+- Desktop trial service/device-identity lookup, startup verification, timer and
+  UI gates are removed. Existing trial files are not modified; free desktop
+  access does not change cloud/organization authorization.
+- Shared solution targets .NET 10; SDK 10.0.402 and Microsoft EF/Extensions/SQLite
+  packages 10.0.13 are used. CI/CD SDK selection is aligned. The licensing
+  library remains tested but is no longer a desktop project dependency.
+- The native packages bundle .NET, Windows Desktop and ASP.NET Core 10.0.13.
+  App/Setup version is 1.0.0.63; encoded MSI ProductVersion is 1.0.63.
+  The script rejects source/package version mismatches.
+- Setup no longer pre-uninstalls an existing version. MSI controls transactional
+  upgrades, rollback and downgrade refusal. Reboot-required exit status is
+  preserved. This is verified by source contracts, not an executed installation.
+- Full .NET 10 solution tests: **457 passed, 28 skipped, 0 failed**.
+  The 28 PostgreSQL tests require `YASK_CIEM_TEST_POSTGRES`; no database was
+  provisioned or credentials requested. Desktop accounts for **221 passed**,
+  including free-edition and native-installer regression contracts.
+- NuGet advisory audit of all resolved solution packages, including transitives:
+  no reported advisories. Identity.Web's older cryptography dependencies are
+  explicitly pinned to 10.0.13. The SDK reports NU1510 for the XML reference
+  being redundant in the Web project; it is retained to keep downstream test
+  consumers patched. This package audit is not an application security review.
+- All 26 offline pipeline cases, 9 authorization harness cases and staging ZIP
+  installer safeguards pass without Azure calls. Packaging scripts parse.
+- Signed local development MSI and interactive Setup EXE were built in
+  `artifacts/native-installers-1.0.0.63`. MSI table inspection confirms version,
+  upgrade code, desktop DLL version and bundled runtime files. Neither has a
+  timestamp or production signing chain.
+- No installer was executed, certificate imported, Store listing changed, live
+  cloud scan run or Azure infrastructure provisioned. Clean-device acceptance,
+  production signing/hosting and actual Store certification remain open.
+
 ## Local build 1.0.0.62
 
 - Fits and centers the initial window inside the Windows work area in device-independent units, including taskbar space, instead of always requesting 1440x900. Minimum dimensions are reduced only when the work area is smaller.
@@ -58,14 +101,15 @@
 - Install on a clean supported Windows 10/11 VM as a standard user; verify Start Menu launch and clean uninstall.
 - Install from the `.appinstaller` feed, publish a higher package version at the same package URL, and verify on-launch/background update behavior and user-data preservation.
 - Confirm `az`, `aws`, and `gcloud` missing, unauthenticated, and authenticated states are handled without crashing; verify discovery remains read-only.
-- Confirm findings, inventory, risk rules, and trial state persist under `%LocalAppData%\\YASK-CIEM` and JSON/CSV report export works.
-- Confirm trial reuse is rejected across normalized email and device identifiers, and validate expiration/clock rollback behavior.
+- Confirm findings, inventory and settings persist at their documented locations and JSON/CSV report export works.
+- Confirm the free edition stays usable after fourteen days and ignores missing, expired and damaged legacy trial files without changing or deleting them.
 - Verify the installed build’s logs contain no credential values and that configured API security headers are present.
 
 ## Release blockers
 
-- Release signing requires the organization-owned code-signing certificate and trusted publisher chain; CI intentionally produces unsigned QA artifacts only.
-- Automatic updates require stable HTTPS hosting for the signed MSIX and `.appinstaller` feed. The per-user ZIP installer has no automatic update mechanism.
-- Remote HTTPS license validation and a server-approved trial backend are not implemented; local trial state is not production anti-tamper enforcement.
+- Direct distribution requires trusted production signing; Store-distributed MSIX is signed by Microsoft on submission and must match the reserved Store identity. CI intentionally produces unsigned QA artifacts only.
+- Direct MSIX automatic updates require stable HTTPS hosting for the signed MSIX and `.appinstaller` feed; Store-managed MSIX uses the Store update channel instead. The per-user ZIP installer has no automatic update mechanism.
+- Free standalone behavior is implemented; installed upgrade acceptance must verify legacy trial state cannot lock the app. Do not advertise paid entitlements or hosted services as included.
+- Complete the privacy policy's publisher/contact/address placeholders and publish the reviewed policy and support details for the Store listing.
 - Real cloud acceptance testing requires isolated Azure, AWS, and GCP test accounts with least-privilege read-only identities and authenticated CLI sessions.
-- The current application targets .NET 9. A production framework upgrade must be scheduled and validated before declaring the requested .NET 10 target complete.
+- The current source and native candidate target .NET 10 LTS. Installed-package acceptance on the supported Windows matrix remains required; passing build/unit tests alone does not validate deployment.

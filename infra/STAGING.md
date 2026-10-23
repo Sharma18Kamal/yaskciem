@@ -506,7 +506,7 @@ service identity before implementing activation. Keep the old release intact
 until migrations, configuration, audit archive, TLS and detailed readiness have
 been verified through the release process.
 
-On an approved build host with .NET 9 SDK and Node.js 22.18.0 or later:
+On an approved build host with the .NET 10 SDK selected by `global.json` and Node.js 24 LTS:
 
 ```powershell
 .\infra\scripts\Build-StagingPackage.ps1 -Version 1.0.0.49

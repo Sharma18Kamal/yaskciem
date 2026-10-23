@@ -171,10 +171,10 @@ The Dashboard's **Discover accounts** action lists the accounts visible to the o
 
 ## Local data and reports
 
-YASK-CIEM stores its local SQLite database and trial state under:
+YASK-CIEM stores its SQLite database under:
 
 ```text
-%LocalAppData%\YASK-CIEM
+%LocalAppData%\CloudEntitle\Data\cloudentitle.db
 ```
 
 Reports are written to:
@@ -182,6 +182,9 @@ Reports are written to:
 ```text
 %LocalAppData%\YASK-CIEM\reports
 ```
+
+The free standalone edition does not create or use trial state. Legacy trial
+files are left untouched and ignored.
 
 ## Troubleshooting
 

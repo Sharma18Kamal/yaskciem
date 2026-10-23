@@ -1,17 +1,38 @@
 # Install YASK-CIEM on Windows
 
+## Current free standalone candidate: 1.0.0.63
+
+The free standalone edition has no fourteen-day trial lock and does not require
+Azure backend provisioning or license activation. Legacy trial files are ignored
+and left untouched. Cloud and organization permissions are unchanged.
+
+- [Native MSI test candidate](../../artifacts/native-installers-1.0.0.63/YASK-CIEM-1.0.0.63.msi)
+- [Interactive Setup EXE test candidate](../../artifacts/native-installers-1.0.0.63/YASK-CIEM-Setup-1.0.0.63.exe)
+
+These self-contained x64 packages include .NET 10 runtimes; no separate runtime
+installation is required. Native installation is per-machine and requires
+administrator approval. Both files use a local development certificate, without
+a timestamp: they are **trusted-test candidates, not public Store releases**.
+Do not import development certificates on customer PCs. The intended Store
+route is a native EXE/MSI listing; the MSI supports unattended installation,
+while the interactive Setup EXE is not the unattended submission asset.
+
+Installed-app, upgrade and real-cloud acceptance remain pending. The older
+1.0.0.61 package instructions below describe historical test packages, not the
+current candidate. See [the release checklist](release.md) for current gates.
+
 YASK-CIEM supports Windows 10/11. Choose the installation method supplied by your organization. For a normal release, use the signed MSIX or App Installer feed. Use the ZIP for a portable/manual installation, or the per-user script when installing from a source checkout.
 
 ## Before you start
 
 - Use a Windows account allowed to install applications.
-- The current self-contained Setup EXE includes the .NET 9 runtime. Framework-dependent ZIP/native packages need the .NET 9 Desktop Runtime; source builds need the .NET 9 SDK.
+- The current self-contained native candidate includes .NET 10 runtimes. Source builds need the .NET 10 SDK. Framework-dependent .NET 10 builds need the matching Desktop and ASP.NET Core runtimes; older framework-dependent packages need the runtimes matching their version.
 - Install only the cloud CLI tools you plan to use: Azure CLI (`az`), AWS CLI (`aws`), and/or Google Cloud CLI (`gcloud`). Cloud discovery is optional until you configure a provider.
 - Obtain installation files from your organization’s trusted release location. Do not install unsigned packages or trust a signing certificate from an unknown source.
 
 > **PostgreSQL is not required for the desktop app.** Install it only when preparing a self-hosted License Server/backend. For online and offline server prerequisites, follow [Install PostgreSQL for Self-Hosted YASK-CIEM](postgresql-installation.md).
 
-## Current Setup EXE
+## Historical MSIX-based Setup EXE (1.0.0.61)
 
 The current local build is [YASK-CIEM-Setup-1.0.0.61.exe](../../artifacts/installer-1.0.0.61/YASK-CIEM-Setup-1.0.0.61.exe). It contains the self-contained MSIX, the matching public publisher certificate, and the .NET runtime; a separate .NET Desktop Runtime installation is not required. Run it and follow the Windows prompts, then launch **YASK-CIEM** from Start.
 
@@ -153,8 +174,10 @@ Remove the listed `%LocalAppData%\CloudEntitle` and `%LocalAppData%\YASK-CIEM` f
 ## Troubleshooting
 
 - **Windows reports an untrusted publisher:** Stop and confirm the package and certificate with your release administrator. Do not bypass the warning or import an unfamiliar certificate.
-- **The app fails to start after installing:** Install or repair the .NET 9 Desktop Runtime, then try again.
+- **The app fails to start after installing:** The 1.0.0.63 native candidate bundles its runtimes. Confirm package integrity and inspect the installation/application logs; do not install an older runtime as a workaround. Framework-dependent packages require the runtimes matching their build.
 - **A provider is unavailable:** Install its CLI, authenticate in the same Windows user account, and restart YASK-CIEM.
 - **There is no separate cloud login button:** Use the provider CLI commands above; the desktop app reuses those sessions.
 
-The current local trial mechanism is not a server-controlled production license. For release and licensing limitations, see [Release checklist](release.md) and [Licensing](../licensing/licensing.md).
+The current standalone edition has no trial or paid activation requirement.
+Earlier versions retain their original trial behavior. For release gates and
+edition details, see [Release checklist](release.md) and [Licensing](../licensing/licensing.md).
