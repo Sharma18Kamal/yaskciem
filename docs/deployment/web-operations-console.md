@@ -7,7 +7,8 @@ write client, ticket action, scan trigger, review decision or account mutation.
 
 ## Build and publish
 
-Requires Node.js 22.18+ and the existing .NET 9 server prerequisites.
+Requires Node.js 24.22.1+ (Node.js 24 LTS recommended) and the existing .NET 9 server prerequisites.
+CI and staging package builds select the latest available Node.js 24 patch.
 
 ```powershell
 npm ci --prefix .\src\CloudEntitle.WebConsole
