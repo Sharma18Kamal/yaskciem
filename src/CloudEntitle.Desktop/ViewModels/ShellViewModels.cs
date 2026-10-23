@@ -152,7 +152,7 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public string ApplicationName => "YASK-CIEM";
-    public string ApplicationVersion => typeof(MainWindowViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";
+    public string ApplicationVersion => typeof(MainWindowViewModel).Assembly.GetName().Version?.ToString(4) ?? "0.0.0.0";
     public string DatabaseStatus => "Connected";
     public string EditionDisplayName => "Free standalone edition";
     public string CloudConnectionStatus => _cloudConnectionState.Status;
@@ -2522,7 +2522,7 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     }
     public override string Title => "Settings";
     public override string Subtitle => "Application, database, connection, and security preferences.";
-    public string ApplicationVersion => typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";
+    public string ApplicationVersion => typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(4) ?? "0.0.0.0";
     public string DataLocation => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     public string DemoModeState { get => _demoModeState; private set => SetProperty(ref _demoModeState, value); }
     public string JiraBaseUrl { get => _ticketingProviderUrls.GetValueOrDefault(TicketingProvider.Jira, string.Empty); set => SetProviderUrl(TicketingProvider.Jira, value); }

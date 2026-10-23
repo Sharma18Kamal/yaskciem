@@ -125,10 +125,16 @@ public sealed class WorkspaceViewBindingTests
 
         Assert.Equal("Bold", (string?)credit.Attribute("FontWeight"));
         Assert.Equal("Wrap", (string?)credit.Attribute("TextWrapping"));
-        Assert.Equal("2", (string?)credit.Attribute("Grid.Column"));
-        var brand = Assert.Single(credit.Parent!.Elements(presentation + "StackPanel"));
+        Assert.Equal("2", (string?)credit.Parent!.Attribute("Grid.Column"));
+        var contact = Assert.Single(credit.Parent.Elements(presentation + "TextBlock"),
+            element => (string?)element.Attribute("Text") == "kamal18sharma@hotmail.com");
+        Assert.Same(credit, contact.PreviousNode);
+        var brand = Assert.Single(credit.Parent.Parent!.Elements(presentation + "StackPanel"),
+            panel => (string?)panel.Attribute("Grid.Column") == "1");
         Assert.Equal("1", (string?)brand.Attribute("Grid.Column"));
         Assert.Contains(brand.Descendants(presentation + "TextBlock"), textBlock => (string?)textBlock.Attribute("Text") == "YASK-CIEM");
+        Assert.Contains(brand.Descendants(presentation + "TextBlock"), textBlock =>
+            (string?)textBlock.Attribute("Text") == "{Binding ApplicationVersion, StringFormat=Version {0}}");
         var header = credit.Ancestors(presentation + "Border").First();
         Assert.Equal("0", (string?)header.Attribute("Grid.Row"));
         Assert.Contains(header.Descendants(presentation + "StackPanel"), panel => (string?)panel.Attribute("Grid.Row") == "1");
@@ -245,16 +251,63 @@ public sealed class WorkspaceViewBindingTests
             ((string?)textBlock.Attribute("Text"))?.Contains("ScanElapsedText", StringComparison.Ordinal) == true);
         Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
             ((string?)textBlock.Attribute("Text"))?.Contains("\u2601", StringComparison.Ordinal) == true);
-        var hourglass = Assert.Single(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
-            ((string?)textBlock.Attribute("Text"))?.Contains("\u231B", StringComparison.Ordinal) == true);
-        var scanningTrigger = Assert.Single(hourglass.Descendants(presentation + "DataTrigger"), trigger =>
-            (string?)trigger.Attribute("Binding") == "{Binding IsScanning}"
-            && (string?)trigger.Attribute("Value") == "True");
-        var animation = Assert.Single(scanningTrigger.Descendants(presentation + "DoubleAnimation"));
-        Assert.Equal("180", (string?)animation.Attribute("To"));
-        Assert.Equal("True", (string?)animation.Attribute("AutoReverse"));
-        Assert.Equal("Forever", (string?)scanningTrigger.Descendants(presentation + "Storyboard").Single().Attribute("RepeatBehavior"));
-        Assert.Single(scanningTrigger.Descendants(presentation + "StopStoryboard"));
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var hourglass = Assert.Single(scanPanel.Descendants(presentation + "Canvas"),
+            canvas => (string?)canvas.Attribute(xaml + "Name") == "ScanHourglass");
+        Assert.Equal("ScanHourglass_IsVisibleChanged", (string?)hourglass.Attribute("IsVisibleChanged"));
+        var cycle = Assert.Single(hourglass.Descendants(presentation + "Storyboard"));
+        Assert.Equal("Forever", (string?)cycle.Attribute("RepeatBehavior"));
+        Assert.DoesNotContain(cycle.Descendants().Attributes(), attribute => attribute.Name == "AutoReverse");
+        var rotation = Assert.Single(cycle.Elements(), animation =>
+            (string?)animation.Attribute("Storyboard.TargetName") == "ScanHourglass");
+        Assert.Equal(new[] { "0", "0", "180", "180", "360" },
+            rotation.Elements().Select(frame => (string?)frame.Attribute("Value")));
+        foreach (var name in new[] { "UpperSand", "LowerSand", "SandStream" })
+            Assert.Contains(cycle.Elements(), animation => (string?)animation.Attribute("Storyboard.TargetName") == name);
+    }
+
+    [Fact]
+    public void HourglassCycle_ShouldRotateForwardAndTransferSandAtRuntime()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+                var document = XDocument.Load(Path.Combine(root, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+                XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+                XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+                var element = new XElement(Assert.Single(document.Descendants(presentation + "Canvas"),
+                    canvas => (string?)canvas.Attribute(xaml + "Name") == "ScanHourglass"));
+                element.Attribute("IsVisibleChanged")!.Remove();
+                foreach (var attribute in element.DescendantsAndSelf().Attributes()
+                    .Where(attribute => attribute.Value.StartsWith("{StaticResource ", StringComparison.Ordinal)))
+                    attribute.Value = "#2F79BF";
+                var canvas = (System.Windows.Controls.Canvas)System.Windows.Markup.XamlReader.Parse(element.ToString());
+                var cycle = (System.Windows.Media.Animation.Storyboard)canvas.Resources["HourglassCycle"];
+                cycle.Begin(canvas, true);
+                foreach (var (seconds, angle, upper, lower) in new[]
+                {
+                    (1.0, 0.0, 0.5, 0.5), (2.5, 90.0, 0.0, 1.0),
+                    (4.0, 180.0, 0.5, 0.5), (5.5, 270.0, 1.0, 0.0)
+                })
+                {
+                    cycle.SeekAlignedToLastTick(canvas, TimeSpan.FromSeconds(seconds), System.Windows.Media.Animation.TimeSeekOrigin.BeginTime);
+                    Assert.Equal(angle, ((System.Windows.Media.RotateTransform)canvas.RenderTransform).Angle, 3);
+                    var top = (System.Windows.Shapes.Path)canvas.FindName("UpperSand");
+                    var bottom = (System.Windows.Shapes.Path)canvas.FindName("LowerSand");
+                    Assert.Equal(upper, ((System.Windows.Media.ScaleTransform)top.RenderTransform).ScaleY, 3);
+                    Assert.Equal(lower, ((System.Windows.Media.ScaleTransform)bottom.RenderTransform).ScaleY, 3);
+                }
+                cycle.Remove(canvas);
+            }
+            catch (Exception exception) { failure = exception; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
     }
 
     [Fact]

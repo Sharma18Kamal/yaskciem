@@ -2,6 +2,7 @@ using System.Windows.Controls;
 using System.Windows;
 using System.Diagnostics;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Navigation;
 using CloudEntitle.Desktop.ViewModels;
 
@@ -12,6 +13,16 @@ public partial class WorkspaceView : UserControl
     public WorkspaceView()
     {
         InitializeComponent();
+    }
+
+    private void ScanHourglass_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        var hourglass = (FrameworkElement)sender;
+        var animation = (Storyboard)hourglass.Resources["HourglassCycle"];
+        if (hourglass.IsVisible)
+            animation.Begin(hourglass, true);
+        else
+            animation.Remove(hourglass);
     }
 
     private async void SaveTicketingCredentials_Click(object sender, RoutedEventArgs e)

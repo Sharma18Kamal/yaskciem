@@ -3,6 +3,7 @@ artifacts/
 staging-*/
 offline-acceptance/
 native-installers-1.0.0.63/
+native-installers-1.0.0.63-ui-refresh/
 
 # Installer files
 *.exe

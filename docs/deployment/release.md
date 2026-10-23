@@ -9,6 +9,13 @@ which remains on hold. Passing tests does not certify the installed package.
 
 ## Local candidate 1.0.0.63
 
+- Same-version UI refresh: full four-part installed-app version appears in the
+  top-left brand area; contact email appears below the developer credit. The
+  scan hourglass uses vector sand transfer and forward 0/180/360-degree turns,
+  stops when hidden, and no longer reverses like a pendulum. Refreshed native
+  test packages are in `artifacts/native-installers-1.0.0.63-ui-refresh`;
+  original candidate files are preserved. Same-version replacement behavior
+  still needs installed-device verification; use a fresh test VM for this build.
 - Owner selected a **free standalone edition**, native EXE/MSI Store listing and
   no real-cloud account access at this stage. The display name `YASK-CIEM` does
   not establish a verified Partner Center product ID or submission configuration.
