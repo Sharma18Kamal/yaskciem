@@ -55,6 +55,7 @@ jobs:
       - name: Test staging release safeguards offline
         shell: pwsh
         run: |
+          .\infra\scripts\Test-StagingArtifacts.ps1
           .\infra\scripts\Test-StagingInstaller.ps1
           .\infra\scripts\Test-StagingPipeline.ps1
 

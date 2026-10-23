@@ -33,26 +33,9 @@ resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' existing = {
   name: resourceGroupName
 }
 
-// Custom data role permits backup creation/append without delete access to retained blobs.
-resource backupWriterRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+// An administrator creates this role with bootstrap.bicep before deployment.
+resource backupWriterRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
   name: guid(subscription().id, 'yask-staging-backup-writer')
-  properties: {
-    roleName: 'YASK staging immutable backup writer'
-    description: 'Create and append backup blobs without delete permissions.'
-    type: 'CustomRole'
-    permissions: [
-      {
-        dataActions: [
-          'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read'
-          'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write'
-          'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action'
-        ]
-      }
-    ]
-    assignableScopes: [
-      subscription().id
-    ]
-  }
 }
 
 module network './modules/network.bicep' = {

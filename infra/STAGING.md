@@ -19,7 +19,7 @@ The estimate excludes network transfer, transaction charges, backup overage,
 monitoring beyond free allowances, certificates/DNS, taxes, and credits.
 Single-instance staging is not an HA production architecture.
 
-## GitHub Actions alternative (not executed)
+## GitHub Actions alternative
 
 The manually dispatched [staging workflow](../.github/workflows/staging.yml)
 is an independently reviewed alternative to the VS Code extension workflow.
@@ -53,8 +53,11 @@ The preview environment is now configured with a dedicated Entra identity:
 | GitHub environment branch policy | Exact branch `main` |
 | Provisioning flag | Repository `STAGING_PROVISIONING_ENABLED=false` |
 
-Only the preview federation exists. There is no Azure client secret and no
-`staging` federation or environment. The
+Only the preview federation exists. There is no Azure client secret or
+`staging` federation. The protected `staging` GitHub environment exists with
+independent reviewer `demouser-reviewer`, self-review prevention, administrator
+bypass disabled, and protected-branch-only deployments; its identity variables
+and password secrets still require administrator handoff. The
 [preview role](github-preview-role.json) grants subscription control-plane
 reads (needed by the existing subscription inventory) and ARM what-if only.
 It has no resource deployment writes, RBAC writes or data-plane permissions.
@@ -69,7 +72,7 @@ flag are set on `staging-preview`. Random VM and database administrator password
 were generated in memory and uploaded directly as the two GitHub environment
 secrets. Values were not logged, placed in local files or applied to a live
 resource. Preserve existing secrets on retry; they cannot be downloaded from
-GitHub. No workflow or ARM what-if was run during setup.
+GitHub. Subsequent preview-only runs have succeeded, without provisioning.
 
 Preview requests use `ValidationLevel=ProviderNoRbac` so provider checks require
 read permissions rather than resource write permissions. This requires a recent
@@ -88,6 +91,126 @@ generate a new preview with that configuration; old public-parameter hashes will
 not match. Plan a protected credential handoff for future deployment; do not
 regenerate or rotate live credentials implicitly. Never grant a deployment
 federation merely to make a preview run pass.
+
+#### Selected deployment identity and administrator bootstrap (not applied)
+
+Use a **new** Entra application/service principal for deployment; preserve the
+existing preview-only application's federation and read/what-if permissions.
+Do not add deployment permissions to the existing preview service principal.
+The new application's client ID and enterprise application's object ID must be
+recorded separately. Use OIDC, not an application password.
+
+The administrator-only [bootstrap template](bootstrap.bicep) creates the
+pre-existing backup-writer role referenced by [main.bicep](main.bicep), plus
+the following deployment grants. It does not create the application/federations,
+VM, database, secrets, GitHub settings, or application resources.
+
+| Grant to the new deployment principal | Scope | Permissions / restrictions |
+| --- | --- | --- |
+| Reader | Subscription | Control-plane inventory/provider/quota reads; no data-plane access |
+| Custom subscription deployment submitter | Subscription | Only `Microsoft.Resources/deployments/write`, `validate/action`, and `whatIf/action` |
+| Contributor | Existing `Yask-Ciem-Staging` group | Resource management within this group, including destructive writes; not a read-only or create-only role |
+| Custom role assignment writer, with condition version 2.0 | Existing staging group and descendants | Only `Microsoft.Authorization/roleAssignments/write`; no assignment deletes or custom role-definition writes |
+
+The assignment condition permits:
+
+- Key Vault Secrets Officer **only to the new deployment principal itself**.
+- Key Vault Secrets User, Storage Blob Data Reader, and the existing custom
+  backup-writer role **only to service principals**, including the future VM's
+  system-assigned managed identity.
+- No Owner, Contributor, RBAC administrator, User Access Administrator, or
+  assignment-writer grants through the conditioned role.
+
+The future VM principal ID is unknown at bootstrap time. Accordingly the latter
+three grants are bounded by role, principal type, and resource-group scope, **not**
+by one specific principal ID or just the eventual vault/container. A trusted
+workflow could assign these data roles to other service principals in that
+group. Contributor also has substantial control over the group's resources.
+The backup role allows overwrites as well as creates/appends; blob immutability,
+not the role name alone, supplies retention protection. Accept these residual
+permissions explicitly before applying bootstrap.
+
+The workflow must **never deploy bootstrap.bicep** or receive Owner,
+unconditioned RBAC administration, or role-definition write permissions.
+An authorized Azure administrator must review/bootstrap the exact target
+subscription separately and inspect the resulting assignments and condition.
+Conditions on assignment writes use the documented
+[authorization attributes](https://learn.microsoft.com/azure/role-based-access-control/conditions-authorization-actions-attributes).
+Local compilation/contract tests do not certify live Azure condition enforcement.
+An administrator must also validate an allowed assignment and denied
+out-of-allowlist/wrong-principal assignments using the deployment identity in a
+controlled window, removing any test grants with administrator credentials.
+
+Because the current workflow requires **the same principal in both jobs**,
+the new deployment application needs both exact environment federations listed
+below and matching client/object-ID variables in both environments. The old
+preview-only application remains unchanged but will no longer be the application's
+selected workflow login after that approved switch.
+**Both `staging-preview` and `staging` must require independent approval,
+prevent self-review, disallow administrator bypass, and restrict deployments to
+protected branches before the new write-capable identity is selected.**
+An OIDC token issued to the same principal carries its write permissions even
+in a preview job; the `provision=false` input is not an Azure permission boundary.
+Retain trusted-workflow/branch review protections. If ungated read-only previews
+are required, redesign the workflow for separate preview and deployment
+principals instead of reusing the write-capable identity.
+
+Administrator sequence after independent PR approval/merge:
+
+1. Keep `STAGING_PROVISIONING_ENABLED=false`. Create the new application/service
+   principal, record its client/object IDs, and verify it is not the old
+   preview-only principal. Do not create a client secret.
+2. Protect **both** environments as described above; add only the two exact
+   federations from step 3 below to the new application.
+3. Review the bootstrap template and exact permissions, then obtain separate
+   approval for the IAM changes. An Azure administrator may review its what-if
+   and apply it outside GitHub Actions. These commands are instructions only:
+
+   ```powershell
+   $subscriptionId = '455b906b-799c-4c50-9d04-b092ea12116d'
+   $tenantId = '56c9fa43-26a9-40e2-80b1-899780a2d78f'
+   $newDeployerObjectId = '<new-service-principal-object-id>'
+   $account = az account show --output json | ConvertFrom-Json
+   if ($LASTEXITCODE -ne 0 -or $account.id -ne $subscriptionId -or $account.tenantId -ne $tenantId) {
+       throw 'Select the approved Azure subscription and tenant before bootstrap.'
+   }
+   if ($newDeployerObjectId -eq 'e5640711-5501-4b02-aad4-9986d495380b') {
+       throw 'Do not bootstrap the preview-only principal.'
+   }
+   $newDeployerObjectId = [guid]::Parse($newDeployerObjectId).ToString()
+   az deployment sub what-if --subscription $subscriptionId --location centralus `
+       --template-file .\infra\bootstrap.bicep --parameters deployerObjectId=$newDeployerObjectId
+   if ($LASTEXITCODE -ne 0) { throw 'Bootstrap what-if failed.' }
+   # Only after separate review and explicit approval of these IAM changes:
+   az deployment sub create --subscription $subscriptionId --location centralus `
+       --name yask-staging-identity-bootstrap --template-file .\infra\bootstrap.bicep `
+       --parameters deployerObjectId=$newDeployerObjectId
+   if ($LASTEXITCODE -ne 0) { throw 'Bootstrap failed; inspect ARM operations before retrying.' }
+   ```
+
+4. Inspect all grants, scopes, custom role actions and the complete assignment
+   condition using the administrator identity; verify the new principal has no
+   inherited/group-based permissions that bypass these restrictions. Record
+   evidence of live authorization checks. Do not silently broaden a failed grant.
+5. Set `AZURE_CLIENT_ID` and `AZURE_DEPLOYER_OBJECT_ID` in **both**
+   environments to the new principal. Retain the previously approved staging
+   exception flag in preview and set it to `true` in staging only for that same
+   approved decision. Do not change the existing preview-only application's
+   federation or RBAC.
+6. The credential custodian has retained the original password values and will
+   enter them directly under repository **Settings > Environments > staging >
+   Environment secrets** as `YASK_VM_ADMIN_PASSWORD` and
+   `YASK_POSTGRES_ADMIN_PASSWORD`. They must match the existing `staging-preview`
+   values. Never paste values into chat, commands, logs, source, or workflow
+   inputs. Do not rotate/regenerate either password. GitHub secret names and
+   timestamps cannot prove equality; the custodian must attest to this handoff.
+7. Run a new default-branch preview with `provision=false`, approve its protected
+   preview environment, and inspect evidence. The bootstrap moves the custom
+   backup role out of the application plan, so historical change counts/hashes
+   are not the new baseline. Keep provisioning disabled until separate release
+   approval; that approval must not be inferred from this preparation PR.
+
+#### Workflow configuration requirements
 
 1. Review and merge the infrastructure, scripts and workflow to the repository's
    protected default branch. The workflow accepts no arbitrary checkout ref,
@@ -122,13 +245,12 @@ federation merely to make a preview run pass.
    object ID. Preview and provisioning must use the same principal/configuration.
    Bicep now accepts `deployerPrincipalType=ServicePrincipal`; interactive
    deployments still default to `User`.
-5. Approve narrowly scoped RBAC through your Azure administrator. This template
-   needs subscription deployments, resource writes within the existing group,
-   a subscription custom role definition and role assignments at Key Vault and
-   backup-container scopes. Plain Contributor is insufficient. Have the
-   administrator validate a custom least-privilege role or a reviewed combination
-   of Contributor and RBAC administration permissions; do not grant Owner just
-   to make a failed run pass. ARM what-if must also have resource read access.
+5. Approve the administrator bootstrap above separately. The application
+   template needs subscription deployment submission, resource writes within
+   the existing group, the **pre-existing** custom backup role and restricted
+   role assignments at Key Vault/backup-container scopes. It no longer creates
+   role definitions. Plain Contributor is insufficient; do not grant Owner or
+   unconditioned RBAC administration just to make a failed run pass.
 6. Generate strong, unique VM/PostgreSQL administrator credentials outside logs
    and store them as GitHub Actions secrets `YASK_VM_ADMIN_PASSWORD` and
    `YASK_POSTGRES_ADMIN_PASSWORD`, accessible to both environments with **identical
