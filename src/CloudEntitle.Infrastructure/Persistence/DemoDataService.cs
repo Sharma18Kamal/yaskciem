@@ -84,7 +84,11 @@ public sealed class DemoDataService : IDemoDataService
         Log.Information("Reset synthetic Demo Mode data without removing real cloud records");
     }
 
-    public async Task<DemoSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+    public Task<DemoSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+        // SQLite async query methods execute synchronously; keep snapshot reads off the WPF dispatcher.
+        => Task.Run(() => ReadSnapshotAsync(cancellationToken), cancellationToken);
+
+    private async Task<DemoSnapshot> ReadSnapshotAsync(CancellationToken cancellationToken)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var accounts = await context.CloudAccounts.AsNoTracking().Where(account => account.ExternalAccountId != null && account.ExternalAccountId.StartsWith(DemoPrefix)).ToListAsync(cancellationToken);

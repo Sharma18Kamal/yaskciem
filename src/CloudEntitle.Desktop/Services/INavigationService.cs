@@ -26,7 +26,9 @@ public sealed class NavigationService : INavigationService
 
     public void NavigateTo<TViewModel>() where TViewModel : class
     {
-        _currentViewModel = GetOrCreate<TViewModel>();
+        var next = GetOrCreate<TViewModel>();
+        if (ReferenceEquals(_currentViewModel, next)) return;
+        _currentViewModel = next;
         CurrentViewModelChanged?.Invoke(this, EventArgs.Empty);
     }
 

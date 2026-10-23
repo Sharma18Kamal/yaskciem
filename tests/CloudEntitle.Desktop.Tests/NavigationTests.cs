@@ -48,6 +48,12 @@ public sealed class NavigationTests
         Assert.IsType<CloudAccountsViewModel>(navigation.CurrentViewModel);
         Assert.Same(first, navigation.CurrentViewModel);
         Assert.Equal("Cloud Accounts", ((WorkspaceViewModel)navigation.CurrentViewModel).Title);
+        var notifications = 0;
+        navigation.CurrentViewModelChanged += (_, _) => notifications++;
+        navigation.NavigateTo<CloudAccountsViewModel>();
+        Assert.Equal(0, notifications);
+        navigation.NavigateTo<IdentitiesViewModel>();
+        Assert.Equal(1, notifications);
     }
 
     [Fact]
@@ -72,7 +78,7 @@ public sealed class NavigationTests
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Access Reviews");
         Assert.Equal("YASK-CIEM", viewModel.ApplicationName);
         Assert.Equal("Cloud Accounts", viewModel.CloudAccountsNavigationItem.Title);
-        Assert.Equal("1.0.0.63", viewModel.ApplicationVersion);
+        Assert.Equal("1.0.0.64", viewModel.ApplicationVersion);
     }
 
     [Fact]

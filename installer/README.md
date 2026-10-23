@@ -67,7 +67,7 @@ The package script requires WiX 5, SignTool, and the YASK-CIEM signing certifica
 
 ```powershell
 .\scripts\package-native-installers.ps1 `
-  -PackageVersion 1.0.0.63 `
+  -PackageVersion 1.0.0.64 `
   -WixExePath "$env:TEMP\yask-wix-tools-v5\wix.exe"
 ```
 
@@ -84,7 +84,13 @@ The MSI is the unattended installation candidate (`msiexec /i <package.msi> /qn
 The interactive Setup EXE prompts and is not an unattended Store installer.
 It now invokes Windows Installer directly without pre-uninstalling the old
 version; MSI major upgrades run inside the installation transaction and prevent
-downgrades. Same-version launches can enter maintenance mode. Actual
+downgrades to lower MSI versions. Newly built packages explicitly include equal
+MSI versions in major-upgrade detection, so a rebuilt 1.0.0.63 package replaces
+an earlier 1.0.0.63 package with a different ProductCode instead of leaving two
+products in the same directory. Re-running the identical MSI can enter
+maintenance mode. Equal-version rebuilds cannot be ordered: an older rebuild
+can replace a newer rebuild, so use only the designated latest candidate and
+increment the version for subsequent public releases. Actual
 install/upgrade/rollback acceptance is still required on an isolated test PC.
 
 Local candidate packages use the development signing certificate and are for

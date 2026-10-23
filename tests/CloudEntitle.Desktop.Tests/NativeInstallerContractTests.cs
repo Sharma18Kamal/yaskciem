@@ -15,6 +15,7 @@ public sealed class NativeInstallerContractTests
         XNamespace wix = "http://wixtoolset.org/schemas/v4/wxs";
         var upgrade = Assert.Single(document.Descendants(wix + "MajorUpgrade"));
         Assert.Equal("afterInstallInitialize", (string?)upgrade.Attribute("Schedule"));
+        Assert.Equal("yes", (string?)upgrade.Attribute("AllowSameVersionUpgrades"));
         Assert.NotNull(upgrade.Attribute("DowngradeErrorMessage"));
 
         var setup = File.ReadAllText(Path.Combine(Root, "installer", "YaskCiemNativeSetup", "Program.cs"));

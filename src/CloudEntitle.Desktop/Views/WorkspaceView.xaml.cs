@@ -10,19 +10,32 @@ namespace CloudEntitle.Desktop.Views;
 
 public partial class WorkspaceView : UserControl
 {
+    private readonly Dictionary<object, ContentControl> _pages = new(ReferenceEqualityComparer.Instance);
+
     public WorkspaceView()
     {
         InitializeComponent();
+        DataContextChanged += (_, _) => ShowPage();
+        Loaded += (_, _) => ShowPage();
     }
 
-    private void ScanHourglass_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    private void ShowPage()
     {
-        var hourglass = (FrameworkElement)sender;
-        var animation = (Storyboard)hourglass.Resources["HourglassCycle"];
-        if (hourglass.IsVisible)
-            animation.Begin(hourglass, true);
-        else
-            animation.Remove(hourglass);
+        if (DataContext is not WorkspaceViewModel viewModel) return;
+        if (!_pages.TryGetValue(viewModel, out var page))
+        {
+            page = new ContentControl
+            {
+                Content = viewModel,
+                ContentTemplate = (DataTemplate)Resources[new DataTemplateKey(viewModel.GetType())],
+                HorizontalContentAlignment = HorizontalAlignment.Stretch
+            };
+            _pages.Add(viewModel, page);
+        }
+        if (ReferenceEquals(PageHost.Content, page)) return;
+        PageHost.Content = page;
+        if (SystemParameters.ClientAreaAnimation)
+            page.BeginAnimation(OpacityProperty, new DoubleAnimation(0.75, 1, TimeSpan.FromMilliseconds(120)));
     }
 
     private async void SaveTicketingCredentials_Click(object sender, RoutedEventArgs e)

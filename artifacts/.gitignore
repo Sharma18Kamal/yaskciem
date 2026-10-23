@@ -4,6 +4,9 @@ staging-*/
 offline-acceptance/
 native-installers-1.0.0.63/
 native-installers-1.0.0.63-ui-refresh/
+native-installers-1.0.0.63-upgrade-fix/
+native-installers-1.0.0.64/
+msix-1.0.0.64/
 
 # Installer files
 *.exe

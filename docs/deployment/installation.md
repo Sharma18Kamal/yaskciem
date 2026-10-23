@@ -1,13 +1,19 @@
 # Install YASK-CIEM on Windows
 
-## Current free standalone candidate: 1.0.0.63
+## Current free standalone candidate: 1.0.0.64
 
 The free standalone edition has no fourteen-day trial lock and does not require
 Azure backend provisioning or license activation. Legacy trial files are ignored
 and left untouched. Cloud and organization permissions are unchanged.
 
-- [Native MSI test candidate](../../artifacts/native-installers-1.0.0.63/YASK-CIEM-1.0.0.63.msi)
-- [Interactive Setup EXE test candidate](../../artifacts/native-installers-1.0.0.63/YASK-CIEM-Setup-1.0.0.63.exe)
+- [Native MSI test candidate](../../artifacts/native-installers-1.0.0.64/YASK-CIEM-1.0.0.64.msi)
+- [Interactive Setup EXE test candidate](../../artifacts/native-installers-1.0.0.64/YASK-CIEM-Setup-1.0.0.64.exe)
+- [MSIX test candidate](../../artifacts/msix-1.0.0.64/YASK-CIEM-1.0.0.64.msix)
+
+Close the app before installing. For an existing MSI installation, use the new
+MSI or native Setup EXE, not MSIX; switching package technologies is not an
+in-place MSI upgrade. Do not remove application data. Version 1.0.0.64 has
+persistent right-side scan progress and revised navigation/rendering behavior.
 
 These self-contained x64 packages include .NET 10 runtimes; no separate runtime
 installation is required. Native installation is per-machine and requires

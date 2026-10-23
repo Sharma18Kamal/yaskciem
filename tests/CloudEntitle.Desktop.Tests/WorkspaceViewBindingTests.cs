@@ -238,23 +238,21 @@ public sealed class WorkspaceViewBindingTests
     public void DashboardScanProgress_ShouldBeIndeterminateAndFollowScanState()
     {
         var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+        var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "Views", "ScanProgressView.xaml"));
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
 
         var progress = Assert.Single(document.Descendants(presentation + "ProgressBar"));
         Assert.Equal("True", (string?)progress.Attribute("IsIndeterminate"));
         var scanPanel = progress.Ancestors(presentation + "Border").First();
-        Assert.Equal("1", (string?)scanPanel.Attribute("Grid.Column"));
+        Assert.Equal("Right", (string?)document.Root!.Attribute("HorizontalAlignment"));
         Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
             ((string?)textBlock.Attribute("Text"))?.Contains("ScanStatusMessage", StringComparison.Ordinal) == true);
         Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
             ((string?)textBlock.Attribute("Text"))?.Contains("ScanElapsedText", StringComparison.Ordinal) == true);
-        Assert.Contains(scanPanel.Descendants(presentation + "TextBlock"), textBlock =>
-            ((string?)textBlock.Attribute("Text"))?.Contains("\u2601", StringComparison.Ordinal) == true);
         XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
         var hourglass = Assert.Single(scanPanel.Descendants(presentation + "Canvas"),
             canvas => (string?)canvas.Attribute(xaml + "Name") == "ScanHourglass");
-        Assert.Equal("ScanHourglass_IsVisibleChanged", (string?)hourglass.Attribute("IsVisibleChanged"));
+        Assert.Equal("ScanProgress_IsVisibleChanged", (string?)document.Root.Attribute("IsVisibleChanged"));
         var cycle = Assert.Single(hourglass.Descendants(presentation + "Storyboard"));
         Assert.Equal("Forever", (string?)cycle.Attribute("RepeatBehavior"));
         Assert.DoesNotContain(cycle.Descendants().Attributes(), attribute => attribute.Name == "AutoReverse");
@@ -275,12 +273,11 @@ public sealed class WorkspaceViewBindingTests
             try
             {
                 var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-                var document = XDocument.Load(Path.Combine(root, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+                var document = XDocument.Load(Path.Combine(root, "src", "CloudEntitle.Desktop", "Views", "ScanProgressView.xaml"));
                 XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
                 XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
                 var element = new XElement(Assert.Single(document.Descendants(presentation + "Canvas"),
                     canvas => (string?)canvas.Attribute(xaml + "Name") == "ScanHourglass"));
-                element.Attribute("IsVisibleChanged")!.Remove();
                 foreach (var attribute in element.DescendantsAndSelf().Attributes()
                     .Where(attribute => attribute.Value.StartsWith("{StaticResource ", StringComparison.Ordinal)))
                     attribute.Value = "#2F79BF";

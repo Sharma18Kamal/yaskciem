@@ -104,6 +104,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ICloudAuthenticationLauncher? authenticationLauncher = null)
     {
         _navigation = navigation;
+        ScanProgress = navigation.CurrentViewModel as DashboardViewModel;
         _cloudConnectionState = cloudConnectionState ?? new CloudConnectionState();
         _authenticationLauncher = authenticationLauncher;
         _cloudConnectionState.PropertyChanged += (_, args) =>
@@ -152,6 +153,7 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public string ApplicationName => "YASK-CIEM";
+    public DashboardViewModel? ScanProgress { get; }
     public string ApplicationVersion => typeof(MainWindowViewModel).Assembly.GetName().Version?.ToString(4) ?? "0.0.0.0";
     public string DatabaseStatus => "Connected";
     public string EditionDisplayName => "Free standalone edition";

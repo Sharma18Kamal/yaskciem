@@ -7,8 +7,48 @@ for verified artifact fingerprints, fresh test results and remaining Store
 release gates. Desktop acceptance is separate from Azure backend provisioning,
 which remains on hold. Passing tests does not certify the installed package.
 
+## Local candidate 1.0.0.64
+
+- Moves the rotating hourglass to a persistent shell control aligned to the
+  right edge of the content viewport, outside the page templates and scroll
+  area. Scan state remains visible when navigating away from Dashboard.
+- Animation now starts only after the control is loaded and visible, uses a
+  cloned storyboard in the control's own name scope, and removes its clocks
+  when hidden/unloaded. UI exceptions remain logged/reported, not suppressed.
+- Workspace pages are reused by view-model instance instead of repeatedly
+  creating their control trees. Repeated selection of the current page no
+  longer raises redundant navigation changes. A 120ms fade respects the
+  Windows client-area-animation preference.
+- SQLite snapshot reads run off the dispatcher because the SQLite provider's
+  async query calls can execute synchronously. Database contexts are created
+  and disposed within the background operation; UI updates still resume on
+  the original caller's context.
+- Runtime rendering regression visits Dashboard, Cloud Accounts, Identities,
+  Resources, Entitlements and Settings three times with synthetic scan state,
+  asserting page reuse, right-edge placement and scan hide/show/reload behavior.
+  It does not scan a real tenant or prove performance with customer data.
+- New native MSI/EXE and MSIX candidates use version 1.0.0.64, avoiding another
+  same-version update ambiguity. Local signatures are development-only.
+  Exact customer-popup diagnosis still requires the affected device's current
+  `application-*.log`; available development-machine logs predate the report.
+  Installed upgrade, visual acceptance and Store certification remain pending.
+- Validation: 223 desktop tests and 11 infrastructure tests passed. The compiled
+  shell template retains the same workspace and cached page controls across
+  navigation. A separate persistence regression verifies snapshot context
+  creation is on a worker thread, not the calling thread. MSI, Setup EXE and
+  MSIX signatures verified locally; all app/package versions are 1.0.0.64
+  (MSI ProductVersion 1.0.64), with .NET runtimes 10.0.13 bundled.
+
 ## Local candidate 1.0.0.63
 
+- Same-version upgrade correction: original and UI-refresh MSI Upgrade tables
+  excluded equality (`WIX_UPGRADE_DETECTED` attributes 1). Rebuilt native
+  packages in `artifacts/native-installers-1.0.0.63-upgrade-fix` explicitly
+  include equal versions and retain transactional replacement. Use this
+  designated candidate, not the superseded UI-refresh installer, over an older
+  1.0.0.63 installation. Equal-version builds cannot enforce chronological
+  downgrade protection; future public releases must increment versions.
+  Actual installed upgrade and launch remain acceptance gates.
 - Same-version UI refresh: full four-part installed-app version appears in the
   top-left brand area; contact email appears below the developer credit. The
   scan hourglass uses vector sand transfer and forward 0/180/360-degree turns,

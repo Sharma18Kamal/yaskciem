@@ -73,76 +73,6 @@
                     </ItemsControl>
                 </StackPanel>
             </Expander>
-            <Grid Margin="0,0,0,14">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="250"/></Grid.ColumnDefinitions>
-                <Border Grid.Column="1" HorizontalAlignment="Stretch">
-                    <Border.Style>
-                        <Style TargetType="Border" BasedOn="{StaticResource SectionCard}">
-                            <Setter Property="Visibility" Value="Collapsed"/>
-                            <Setter Property="Padding" Value="12"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsScanning}" Value="True">
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <StackPanel>
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="&#x2601;" FontSize="24" Foreground="{StaticResource AccentBrush}" Margin="0,0,2,0"/>
-                            <Canvas x:Name="ScanHourglass" Width="26" Height="34" Margin="0,0,10,0" RenderTransformOrigin="0.5,0.5" IsVisibleChanged="ScanHourglass_IsVisibleChanged" AutomationProperties.Name="Rotating hourglass with flowing sand">
-                                <Canvas.RenderTransform><RotateTransform/></Canvas.RenderTransform>
-                                <Canvas.Resources>
-                                    <Storyboard x:Key="HourglassCycle" RepeatBehavior="Forever" Duration="0:0:6">
-                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ScanHourglass" Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)">
-                                            <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:2" Value="0"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:3" Value="180"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:5" Value="180"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:6" Value="360"/>
-                                        </DoubleAnimationUsingKeyFrames>
-                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="UpperSand" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
-                                            <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:2" Value="0"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:3" Value="0"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:5" Value="1"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:6" Value="1"/>
-                                        </DoubleAnimationUsingKeyFrames>
-                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="LowerSand" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
-                                            <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="0"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:2" Value="1"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:3" Value="1"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:5" Value="0"/>
-                                            <LinearDoubleKeyFrame KeyTime="0:0:6" Value="0"/>
-                                        </DoubleAnimationUsingKeyFrames>
-                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="SandStream" Storyboard.TargetProperty="Opacity">
-                                            <DiscreteDoubleKeyFrame KeyTime="0:0:0" Value="1"/>
-                                            <DiscreteDoubleKeyFrame KeyTime="0:0:2" Value="0"/>
-                                            <DiscreteDoubleKeyFrame KeyTime="0:0:3" Value="1"/>
-                                            <DiscreteDoubleKeyFrame KeyTime="0:0:5" Value="0"/>
-                                        </DoubleAnimationUsingKeyFrames>
-                                    </Storyboard>
-                                </Canvas.Resources>
-                                <Path Data="M 4,4 L 22,4 C 22,12 16,14 13,17 C 16,20 22,22 22,30 L 4,30 C 4,22 10,20 13,17 C 10,14 4,12 4,4 Z" Fill="{StaticResource PanelBrush}" Stroke="{StaticResource AccentBrush}" StrokeThickness="1.5"/>
-                                <Path x:Name="UpperSand" Data="M 6,7 L 20,7 L 13,16 Z" Fill="{StaticResource AccentBrush}" RenderTransformOrigin="0.5,1">
-                                    <Path.RenderTransform><ScaleTransform ScaleY="1"/></Path.RenderTransform>
-                                </Path>
-                                <Path x:Name="LowerSand" Data="M 6,28 L 20,28 L 13,20 Z" Fill="{StaticResource AccentBrush}" RenderTransformOrigin="0.5,1">
-                                    <Path.RenderTransform><ScaleTransform ScaleY="0"/></Path.RenderTransform>
-                                </Path>
-                                <Path x:Name="SandStream" Data="M 13,15 L 13,26" Stroke="{StaticResource AccentBrush}" StrokeThickness="1" Opacity="0"/>
-                                <Path Data="M 2,3 L 24,3 M 2,31 L 24,31" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-                            </Canvas>
-                            <StackPanel>
-                                <TextBlock Text="Cloud scan in progress" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/>
-                                <TextBlock Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap"/>
-                                <TextBlock Text="{Binding ScanElapsedText}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,3,0,0"/>
-                            </StackPanel>
-                        </StackPanel>
-                        <ProgressBar Height="6" IsIndeterminate="True" Background="{StaticResource LineBrush}" Foreground="{StaticResource AccentBrush}" Margin="0,10,0,0" ToolTip="Scan in progress"/>
-                    </StackPanel>
-                </Border>
-            </Grid>
             <Expander Header="{Binding AccountSelectionMessage}" IsExpanded="False" Margin="0,0,0,14" ToolTip="Choose cloud accounts and Kubernetes contexts included in the next scan.">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
@@ -1340,5 +1270,5 @@
             <Border Style="{StaticResource EmptyStateCard}"><StackPanel><TextBlock Text="○" Foreground="{StaticResource AccentBrush}" FontSize="28" HorizontalAlignment="Center"/><TextBlock Text="{Binding DemoRecords}" Foreground="{StaticResource PrimaryBrush}" FontSize="30" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,12,0,0"/><TextBlock Text="{Binding DemoStatus}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Center" Margin="0,6,0,0"/><TextBlock Text="Demo Mode data uses the normalized CIEM model and SQLite persistence." Foreground="{StaticResource MutedBrush}" FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,0" TextWrapping="Wrap"/></StackPanel></Border>
         </DataTemplate>
     </UserControl.Resources>
-    <ContentControl Content="{Binding}" />
+    <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch"/>
 </UserControl>

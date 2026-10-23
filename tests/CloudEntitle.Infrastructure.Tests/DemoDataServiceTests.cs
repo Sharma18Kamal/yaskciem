@@ -1,3 +1,4 @@
+using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain;
 using CloudEntitle.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
@@ -8,6 +9,27 @@ namespace CloudEntitle.Infrastructure.Tests;
 
 public sealed class DemoDataServiceTests
 {
+    [Fact]
+    public async Task GetSnapshotAsync_ShouldCreateAndReadContextOffCallingThread()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        var factory = CreateFactory(connection);
+        using var setup = factory.CreateDbContext();
+        setup.Database.EnsureCreated();
+        var pending = new TaskCompletionSource<Task<DemoSnapshot>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var caller = new Thread(() =>
+        {
+            try { pending.SetResult(new DemoDataService(factory).GetSnapshotAsync()); }
+            catch (Exception exception) { pending.SetException(exception); }
+        });
+        caller.Start();
+        var snapshot = await await pending.Task;
+
+        Assert.NotEqual(caller.ManagedThreadId, factory.AsyncCreationThreadId);
+        Assert.Empty(snapshot.Accounts);
+    }
+
     [Fact]
     public async Task LoadAsync_ShouldPersistAzureAwsAndGcpDataThroughNormalizedEntities()
     {
@@ -69,8 +91,13 @@ public sealed class DemoDataServiceTests
     private sealed class TestContextFactory : IDbContextFactory<CloudEntitleDbContext>
     {
         private readonly DbContextOptions<CloudEntitleDbContext> _options;
+        public int AsyncCreationThreadId { get; private set; }
         public TestContextFactory(DbContextOptions<CloudEntitleDbContext> options) => _options = options;
         public CloudEntitleDbContext CreateDbContext() => new(_options);
-        public Task<CloudEntitleDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) => Task.FromResult(new CloudEntitleDbContext(_options));
+        public Task<CloudEntitleDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+        {
+            AsyncCreationThreadId = Environment.CurrentManagedThreadId;
+            return Task.FromResult(new CloudEntitleDbContext(_options));
+        }
     }
 }
