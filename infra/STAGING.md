@@ -339,6 +339,40 @@ read-back mismatch and interrupted requests without Azure calls.
 
 ### Run and review
 
+#### Protected validation-only run
+
+Keep `STAGING_PROVISIONING_ENABLED=false`. Dispatch **Azure staging
+infrastructure** on protected `main` with `validate_only=true` and
+`provision=false`. The workflow rejects both inputs being true, builds the
+package/template, and waits for independent `staging-preview` approval before
+OIDC sign-in. It uses the exact approved deployment application/principal.
+
+The existing runner's `Validate` phase passes the existing password values
+directly in memory to `Test-AzSubscriptionDeployment` with
+`ValidationLevel=Provider`, disabled parameter prompting and suppressed provider
+diagnostics. It rejects returned validation errors or thrown SDK failures,
+then performs Provider-level what-if and captures before/after inventory.
+It **never calls** `New-AzSubscriptionDeployment` in this phase and the
+provision job is explicitly excluded for validation-only requests.
+No secret parameter files, password exports or regenerated credentials are used.
+
+Download the normal `staging-preview` artifact. Require `result.json` to report
+`validation-succeeded`, `templateValidationSucceeded=true`,
+`validationLevel=Provider`, `whatIfStatus=Succeeded`, `inventoryVerified=true`
+and `deploymentAttempted=false`. Review `preview.json` hashes/change types
+and the compiled template. Failures retain sanitized codes, not raw validation
+error objects/messages. No automatic retry, permission broadening or cleanup
+is performed. A validation failure must be investigated before another run.
+
+This is the protected equivalent of the CLI core validation sequence for this
+pipeline, not a claim that the external CLI helper was run. Its parameter-file
+interface cannot safely consume the GitHub-only passwords. Record actual SDK
+commands and run timestamps in the deployment plan; do not mark the external
+helper PASS. Policy-scope review, full resource-limit checks, build/static-role
+proof and the remaining formal validation steps still need completion before
+the plan may become `Validated` or provisioning may be enabled.
+Existing preview-only requests (both inputs false) retain ProviderNoRbac behavior.
+
 First dispatch **Azure staging infrastructure** on the default branch with
 `provision=false`. Download `staging-template`, `staging-preview`, and
 `staging-package`. Verify the package SHA256, compiled template and inventory.

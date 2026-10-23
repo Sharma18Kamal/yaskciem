@@ -7,6 +7,10 @@ on:
         description: Provision infrastructure after reviewing the preview and approving staging
         type: boolean
         default: false
+      validate_only:
+        description: Run protected Provider-level template validation and what-if without provisioning
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,6 +25,15 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
+      - name: Reject conflicting dispatch modes
+        shell: pwsh
+        env:
+          PROVISION: ${{ inputs.provision }}
+          VALIDATE_ONLY: ${{ inputs.validate_only }}
+        run: |
+          if ($env:PROVISION -eq 'true' -and $env:VALIDATE_ONLY -eq 'true') {
+            throw 'Validation-only and provisioning cannot be requested together.'
+          }
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -78,6 +91,15 @@ jobs:
           if ($env:APPROVED -cne 'true') {
             throw 'A deployment owner must approve the password/Key Vault and Azure-services firewall staging exceptions.'
           }
+      - name: Require disabled provisioning for validation-only mode
+        if: inputs.validate_only
+        shell: pwsh
+        env:
+          PROVISIONING_ENABLED: ${{ vars.STAGING_PROVISIONING_ENABLED }}
+        run: |
+          if ($env:PROVISIONING_ENABLED -cne 'false') {
+            throw 'Keep provisioning explicitly disabled during protected validation.'
+          }
       - name: Verify deployment approval protections
         if: inputs.provision
         shell: pwsh
@@ -107,16 +129,18 @@ jobs:
           tenant-id: '56c9fa43-26a9-40e2-80b1-899780a2d78f'
           subscription-id: '455b906b-799c-4c50-9d04-b092ea12116d'
           enable-AzPSSession: true
-      - name: Inventory and ARM what-if
+      - name: Inventory and ARM validation or what-if
         uses: azure/powershell@v2
         env:
           YASK_VM_ADMIN_PASSWORD: ${{ secrets.YASK_VM_ADMIN_PASSWORD }}
           YASK_POSTGRES_ADMIN_PASSWORD: ${{ secrets.YASK_POSTGRES_ADMIN_PASSWORD }}
           YASK_DEPLOYER_OBJECT_ID: ${{ vars.AZURE_DEPLOYER_OBJECT_ID }}
+          VALIDATE_ONLY: ${{ inputs.validate_only }}
         with:
           azPSVersion: latest
           inlineScript: |
-            .\infra\scripts\Invoke-StagingInfrastructure.ps1 -Phase Preview -TemplateFile .\artifacts\staging-template.json -EvidenceDirectory .\artifacts\staging-preview
+            $phase = if ($env:VALIDATE_ONLY -eq 'true') { 'Validate' } else { 'Preview' }
+            .\infra\scripts\Invoke-StagingInfrastructure.ps1 -Phase $phase -TemplateFile .\artifacts\staging-template.json -EvidenceDirectory .\artifacts\staging-preview
       - name: Save preview evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4
@@ -127,7 +151,7 @@ jobs:
           retention-days: 14
 
   provision:
-    if: inputs.provision
+    if: inputs.provision && !inputs.validate_only
     needs: preview
     runs-on: windows-latest
     timeout-minutes: 90

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Preview', 'Deploy')]
+    [ValidateSet('Preview', 'Validate', 'Deploy')]
     [string]$Phase,
     [Parameter(Mandatory)]
     [string]$TemplateFile,
@@ -71,6 +71,12 @@ try {
     if ($context.Subscription.Id -ne $subscriptionId -or $context.Tenant.Id -ne $tenantId) {
         throw 'Azure context does not match the approved target.'
     }
+    if ($Phase -eq 'Validate') {
+        if ($objectId -ne 'e5f3aecd-613d-4a2c-95b3-209ed796b6cf' -or
+            $context.Account.Id -ne '5bc90f84-57b2-4487-866f-bc86cf96f671') {
+            throw 'Protected validation must use the approved deployment application and service principal.'
+        }
+    }
     $null = Get-AzResourceGroup -Name $resourceGroup -ErrorAction Stop
     $stage = 'provider-registration'
     foreach ($namespace in @(
@@ -125,6 +131,19 @@ try {
     $stage = 'baseline-inventory'
     $baseline = @(Get-Inventory)
     Save-Evidence 'inventory-before.json' $baseline
+    if ($Phase -eq 'Validate') {
+        $stage = 'template-validation'
+        $result.validationLevel = 'Provider'
+        $result.templateValidationSucceeded = $false
+        $validationErrors = @(Test-AzSubscriptionDeployment -Location centralus -TemplateFile $TemplateFile `
+            -TemplateParameterObject $parameters -ValidationLevel Provider -SkipTemplateParameterPrompt `
+            -SuppressDiagnostics -WarningAction SilentlyContinue -InformationAction SilentlyContinue -ErrorAction Stop)
+        if ($validationErrors.Count -gt 0) {
+            $result.armErrorCodes = @($validationErrors | ForEach-Object { Get-SafeArmErrorCodes $_ } | Sort-Object -Unique)
+            throw 'ARM template validation returned errors; inspect sanitized codes.'
+        }
+        $result.templateValidationSucceeded = $true
+    }
     $stage = 'what-if'
     $validationLevel = if ($Phase -eq 'Preview') { 'ProviderNoRbac' } else { 'Provider' }
     $preview = Get-AzSubscriptionDeploymentWhatIfResult -Location centralus -TemplateFile $TemplateFile `
@@ -157,6 +176,9 @@ try {
     }
     if ($Phase -eq 'Preview') {
         $result.status = 'preview-succeeded'
+    }
+    elseif ($Phase -eq 'Validate') {
+        $result.status = 'validation-succeeded'
     }
     else {
         $stage = 'approved-preview'
