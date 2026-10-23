@@ -1,6 +1,7 @@
 # Build artifacts
 artifacts/
 staging-*/
+offline-acceptance/
 
 # Installer files
 *.exe
