@@ -20,6 +20,7 @@ function Get-AzContext {
     [pscustomobject]@{
         Subscription = @{ Id = $state.subscription }
         Tenant = @{ Id = '56c9fa43-26a9-40e2-80b1-899780a2d78f' }
+        Account = @{ Id = $state.clientId }
     }
 }
 function Get-AzResourceGroup {
@@ -75,6 +76,20 @@ function New-AzSubscriptionDeployment {
     if ($state.deploymentFailure) { throw "Mock SDK secret: $env:YASK_POSTGRES_ADMIN_PASSWORD" }
     [pscustomobject]@{ ProvisioningState = 'Succeeded' }
 }
+function Test-AzSubscriptionDeployment {
+    [CmdletBinding()]param($Location, $TemplateFile, $TemplateParameterObject, $ValidationLevel,
+        [switch]$SkipTemplateParameterPrompt, [switch]$SuppressDiagnostics)
+    $state.validationCalls++
+    Assert-Test ($Location -eq 'centralus' -and $ValidationLevel -eq 'Provider') 'Validation must use Provider-level checks in Central US.'
+    Assert-Test ($SkipTemplateParameterPrompt -and $SuppressDiagnostics) 'Validation must suppress prompts and provider diagnostics.'
+    Assert-Test ($TemplateParameterObject.vmAdminPassword -ceq $env:YASK_VM_ADMIN_PASSWORD -and
+        $TemplateParameterObject.postgresAdminPassword -ceq $env:YASK_POSTGRES_ADMIN_PASSWORD) 'Validation must pass the actual protected parameters in memory.'
+    if ($state.validationThrows) { throw "Mock validation SDK secret: $env:YASK_VM_ADMIN_PASSWORD" }
+    if ($state.validationErrors) {
+        [pscustomobject]@{ Code = 'InvalidTemplateDeployment'; Message = $env:YASK_POSTGRES_ADMIN_PASSWORD
+            Details = @([pscustomobject]@{ Code = 'RequestDisallowedByPolicy'; Message = $env:YASK_VM_ADMIN_PASSWORD }) }
+    }
+}
 
 function Invoke-Case([string]$Name, [string]$Phase, [bool]$ShouldFail, [hashtable]$Overrides = @{}, [string]$Approval) {
     $state.Clear()
@@ -83,6 +98,8 @@ function Invoke-Case([string]$Name, [string]$Phase, [bool]$ShouldFail, [hashtabl
         providerState = 'Registered'; quota = 20; inventoryCalls = 0; inventoryFailureCall = -1
         deploymentCalls = 0; previewCalls = 0; deploymentFailure = $false; changeType = 'Create'; previewStatus = 'Succeeded'
         resourceId = '/subscriptions/test/resource'
+        clientId = '5bc90f84-57b2-4487-866f-bc86cf96f671'
+        validationCalls = 0; validationThrows = $false; validationErrors = $false
     }.GetEnumerator()) { $state[$pair.Key] = $pair.Value }
     foreach ($pair in $Overrides.GetEnumerator()) { $state[$pair.Key] = $pair.Value }
     $directory = Join-Path $root $Name
@@ -108,6 +125,12 @@ function Invoke-Case([string]$Name, [string]$Phase, [bool]$ShouldFail, [hashtabl
 
 try {
     $infra = Split-Path -Parent $PSScriptRoot
+    $workflow = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $infra) '.github\workflows\staging.yml') -Raw
+    Assert-Test ($workflow -match '(?m)^      validate_only:\r?\n(?:.*\r?\n){1,3}        default: false') 'Validation-only mode must be opt-in.'
+    Assert-Test ($workflow.Contains("if: inputs.provision && !inputs.validate_only")) 'Validation-only mode must exclude the provision job.'
+    Assert-Test ($workflow.Contains("`$env:PROVISION -eq 'true' -and `$env:VALIDATE_ONLY -eq 'true'")) 'Workflow must reject conflicting dispatch modes before processing secrets.'
+    Assert-Test ($workflow.Contains("`$env:PROVISIONING_ENABLED -cne 'false'")) 'Validation-only dispatch must require provisioning explicitly disabled.'
+    Assert-Test ($workflow.Contains("`$phase = if (`$env:VALIDATE_ONLY -eq 'true') { 'Validate' } else { 'Preview' }")) 'Validation-only input must select the non-deploying runner phase.'
     $role = Get-Content -LiteralPath (Join-Path $infra 'github-preview-role.json') -Raw | ConvertFrom-Json
     Assert-Test (@($role.Actions).Count -eq 2 -and '*/read' -in $role.Actions -and 'Microsoft.Resources/deployments/whatIf/action' -in $role.Actions) 'Preview role must not grant deployment or RBAC writes.'
     Assert-Test (@($role.DataActions).Count -eq 0) 'Preview role must not grant secret/data access.'
@@ -169,10 +192,33 @@ try {
         changeType = 'Ignore'
         resourceId = '/subscriptions/455b906b-799c-4c50-9d04-b092ea12116d/resourceGroups/Other'
     }
+    $env:YASK_DEPLOYER_OBJECT_ID = 'e5f3aecd-613d-4a2c-95b3-209ed796b6cf'
+    $result = Invoke-Case 'validate' Validate $false
+    Assert-Test ($state.validationCalls -eq 1 -and $state.previewCalls -eq 1 -and $state.deploymentCalls -eq 0) 'Validation must validate and preview exactly once, never deploy.'
+    Assert-Test ($state.validationLevel -eq 'Provider' -and $result.templateValidationSucceeded -and
+        $result.status -eq 'validation-succeeded' -and -not $result.deploymentAttempted -and
+        $result.deploymentNames.Count -eq 0 -and $result.inventoryVerified) 'Validation success evidence must distinguish validation from deployment.'
+    $result = Invoke-Case 'validation-errors' Validate $true @{ validationErrors = $true }
+    Assert-Test ($state.previewCalls -eq 0 -and $state.deploymentCalls -eq 0 -and -not $result.templateValidationSucceeded) 'Validation error objects must block what-if and deployment.'
+    Assert-Test ('RequestDisallowedByPolicy' -in $result.armErrorCodes) 'Validation must retain sanitized nested policy codes, not error messages.'
+    $result = Invoke-Case 'validation-throws' Validate $true @{ validationThrows = $true }
+    Assert-Test ($state.previewCalls -eq 0 -and $state.deploymentCalls -eq 0) 'Thrown validation failures must block further ARM operations.'
+    $null = Invoke-Case 'validation-wrong-client' Validate $true @{ clientId = 'administrator-not-deployer' }
+    Assert-Test ($state.validationCalls -eq 0 -and $state.previewCalls -eq 0) 'Validation must reject the wrong client before any ARM validation request.'
+    $env:YASK_DEPLOYER_OBJECT_ID = '11111111-1111-1111-1111-111111111111'
+    $null = Invoke-Case 'validation-wrong-principal' Validate $true
+    Assert-Test ($state.validationCalls -eq 0 -and $state.previewCalls -eq 0) 'Validation must reject the wrong service principal.'
+    $env:YASK_DEPLOYER_OBJECT_ID = 'e5f3aecd-613d-4a2c-95b3-209ed796b6cf'
+    $null = Invoke-Case 'validation-what-if-fails' Validate $true @{ previewStatus = 'Failed' }
+    Assert-Test ($state.validationCalls -eq 1 -and $state.deploymentCalls -eq 0) 'Successful validation must not hide a failed what-if.'
+    $result = Invoke-Case 'validation-inventory-fails' Validate $true @{ inventoryFailureCall = 2 }
+    Assert-Test ($result.status -eq 'failed' -and -not $result.inventoryVerified -and $state.deploymentCalls -eq 0) 'Validation must fail closed on missing post-run inventory.'
     '{"parameters":{"vmAdminPassword":{"type":"string"},"postgresAdminPassword":{"type":"secureString"}}}' | Set-Content -LiteralPath $template
+    $null = Invoke-Case 'validation-insecure-template' Validate $true
+    Assert-Test ($state.validationCalls -eq 0 -and $state.previewCalls -eq 0 -and $state.deploymentCalls -eq 0) 'Validation must reject insecure secret declarations before any ARM validation request.'
     $null = Invoke-Case 'insecure-template' Preview $true
     Assert-Test ($state.previewCalls -eq 0 -and $state.deploymentCalls -eq 0) 'Insecure credential declarations must block all ARM requests.'
-    Write-Host 'All 18 offline staging pipeline tests passed. No Azure calls were made.'
+    Write-Host 'All 26 offline staging pipeline tests passed. No Azure calls were made.'
 }
 finally {
     foreach ($entry in $savedEnvironment.GetEnumerator()) {

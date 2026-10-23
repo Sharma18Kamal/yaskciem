@@ -119,10 +119,17 @@ Do not export or regenerate passwords, write a plaintext secret parameter file,
 substitute dummy values, run prompting commands unattended, or call this
 validation complete based only on prior what-if.
 
-Next implementation decision: provide a reviewed protected validation path that
-uses existing secrets in memory, validates the exact deployment identity/target,
-and redacts sensitive provider errors. Review the helper integration for secure
-parameter transport before execution; do not modify external skill files.
+Prepared implementation, not yet live-validated: the existing staging workflow
+adds `validate_only=true` with `provision=false`, while provisioning stays disabled.
+After independent review/merge and environment approval, the `Validate` runner
+phase calls `Test-AzSubscriptionDeployment` with Provider validation, actual
+protected parameters in memory, no parameter prompting and suppressed provider
+diagnostics. It rejects returned/throwing validation errors before Provider-level
+what-if, captures sanitized results and inventory, and never deploys.
+The workflow rejects conflicting dispatch inputs and excludes its provision job.
+This is an explicit SDK-based core-validation equivalent, not evidence that the
+external CLI helper ran; do not mark that helper as passed.
+Record actual run results before completing the core-validation checklist.
 Complete applicable policy and quota checks, build/static-role verification,
 record actual commands/timestamps and resolve all failures before setting
 Validated through the validation workflow.
