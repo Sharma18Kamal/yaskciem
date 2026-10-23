@@ -1,0 +1,73 @@
+name: Staging authorization probes
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe_id:
+        description: Fresh administrator-recorded GUID for this one-time probe
+        type: string
+        required: true
+      recipient_object_id:
+        description: Disposable credential-free service principal object ID verified by administrator
+        type: string
+        required: true
+      user_object_id:
+        description: Existing consenting Azure user object ID for expected-denial principal-type probe
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yask-centralus-staging
+  cancel-in-progress: false
+
+jobs:
+  authorization:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    environment: staging-preview
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require disabled provisioning and approved identity
+        shell: pwsh
+        env:
+          PROVISIONING_ENABLED: ${{ vars.STAGING_PROVISIONING_ENABLED }}
+          CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          OBJECT_ID: ${{ vars.AZURE_DEPLOYER_OBJECT_ID }}
+        run: |
+          if ($env:PROVISIONING_ENABLED -cne 'false') { throw 'Keep provisioning explicitly disabled during probes.' }
+          if ($env:CLIENT_ID -ne '5bc90f84-57b2-4487-866f-bc86cf96f671' -or $env:OBJECT_ID -ne 'e5f3aecd-613d-4a2c-95b3-209ed796b6cf') {
+            throw 'Unexpected deployment identity.'
+          }
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: '56c9fa43-26a9-40e2-80b1-899780a2d78f'
+          subscription-id: '455b906b-799c-4c50-9d04-b092ea12116d'
+          enable-AzPSSession: true
+      - name: Test actual role-assignment authorization
+        uses: azure/powershell@v2
+        env:
+          PROBE_ID: ${{ inputs.probe_id }}
+          RECIPIENT_ID: ${{ inputs.recipient_object_id }}
+          USER_ID: ${{ inputs.user_object_id }}
+        with:
+          azPSVersion: latest
+          inlineScript: |
+            .\infra\scripts\Test-StagingAuthorization.ps1 -ProbeId $env:PROBE_ID -RecipientObjectId $env:RECIPIENT_ID -UserObjectId $env:USER_ID -EvidenceDirectory .\artifacts\authorization-probes
+      - name: Save exact test assignment IDs even after failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-authorization-probes
+          path: artifacts/authorization-probes
+          if-no-files-found: warn
+          retention-days: 14

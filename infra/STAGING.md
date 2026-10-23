@@ -210,6 +210,69 @@ Administrator sequence after independent PR approval/merge:
    are not the new baseline. Keep provisioning disabled until separate release
    approval; that approval must not be inferred from this preparation PR.
 
+#### Controlled live authorization probes
+
+The manual [authorization workflow](../.github/workflows/staging-authorization.yml)
+uses the new deployment identity through independently approved `staging-preview`
+OIDC, not the administrator's session. It is default-branch-only, shares staging
+concurrency, requires provisioning explicitly disabled, and does not read password
+secrets or deploy templates.
+
+Before dispatch, the administrator must:
+
+1. Confirm both environment protections and `STAGING_PROVISIONING_ENABLED=false`.
+   Keep the staging group free of application resources during these tests.
+2. Create a disposable Entra application/service principal **without credentials,
+   federations or other grants**. Record both its application and service
+   principal object IDs for later deletion. Verify its principal type and tenant.
+3. Select an existing consenting Azure user (normally the administrator) and
+   verify that user's object ID and type. The user-data-role request must be denied.
+4. Record a fresh probe GUID, the disposable service principal ID and user ID in
+   the change record. Dispatch **Staging authorization probes** on `main` with
+   those three values. Inputs are IDs, never passwords or tokens.
+5. The independent reviewer inspects the workflow, target IDs and authorization
+   scope before approving the environment. This approval authorizes temporary
+   role-assignment writes, not just read-only what-if.
+
+The [probe script](scripts/Test-StagingAuthorization.ps1) records seven exact
+assignment IDs **before** any write and requires every ID to be absent. It tests
+allowing Blob Data Reader, Secrets User and backup writer to the disposable
+principal, and Secrets Officer to the deployer itself, all at staging group scope.
+It tests denying Contributor to the disposable principal, Secrets Officer to
+that wrong principal and Blob Data Reader to a User. These are real temporary
+grants: if the group contains data, even expected grants may provide access.
+An unexpected denial/allow, unrelated HTTP failure, or read-back mismatch fails
+the run immediately. Only HTTP 403 with an authorization/condition-denial code
+counts as an expected rejection; conflicts, authentication failures, policy
+errors and timeouts are not passing authorization evidence.
+
+**Mandatory administrator cleanup, even after failure/cancellation:**
+
+- Download `staging-authorization-probes`, inspect `authorization-probes.json`,
+  and compare its probe ID/recipient/user with the pre-dispatch change record.
+  If no artifact exists, recover the deterministic assignment IDs from the
+  reviewed script and recorded probe GUID; do not assume no writes occurred.
+- Using the **administrator identity**, GET each of the seven exact IDs. A 404
+  means absent; any other failed read requires investigation. For existing
+  assignments, verify exact scope, principal ID, principal type and role ID
+  against the reviewed case before deleting **that exact assignment ID**.
+  Never delete by broad principal, scope or role filters. Stop on mismatches.
+- Re-read every ID and require 404. Record UTC cleanup evidence separately;
+  the workflow result deliberately remains `cleanupRequired=true`.
+- Delete only the recorded disposable service principal/application, after
+  verifying their identity and lack of unrelated usage. Verify both are absent.
+  Preserve all four permanent deployment grants and the original preview identity.
+- Keep provisioning disabled. A successful workflow without verified cleanup
+  does **not** complete this gate. These seven tests sample the configured
+  restrictions; they are not proof of every possible authorization path.
+
+The workflow intentionally receives **no assignment-delete permissions**.
+Do not add credentials, temporary broad roles or an extra federation merely
+to avoid the protected workflow. The existing
+[offline harness tests](scripts/Test-StagingAuthorizationOffline.ps1) verify
+success, unexpected grants, HTTP failures, wrong identity, preexisting assignments,
+read-back mismatch and interrupted requests without Azure calls.
+
 #### Workflow configuration requirements
 
 1. Review and merge the infrastructure, scripts and workflow to the repository's
