@@ -31,6 +31,37 @@ public sealed class RecommendationEngineTests
         Assert.False(string.IsNullOrWhiteSpace(recommendation.Evidence));
     }
 
+    [Fact]
+    public async Task StandingPrivilegedAccess_ShouldRecommendReviewOnlyJit()
+    {
+        var fixture = FixtureData.Create(Stable("CIEM-001"), RiskEvaluationState.Confirmed, "AdministratorAccess");
+        fixture.Effective.IsPrivileged = true;
+
+        var result = await new RecommendationEngine().EvaluateAsync(fixture.Context);
+
+        var recommendation = Assert.Single(result.Recommendations,
+            item => item.RecommendationType == RecommendationType.JustInTimeAccess);
+        Assert.Equal(RecommendationImpactState.HighPotentialImpact, recommendation.ImpactState);
+        Assert.Contains("time-bounded", recommendation.SuggestedState, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no grant is changed", recommendation.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TimeBoundPrivilegedAssignment_ShouldNotReceiveJitRecommendation()
+    {
+        var fixture = FixtureData.Create(Stable("CIEM-001"), RiskEvaluationState.Confirmed, "AdministratorAccess");
+        fixture.Effective.IsPrivileged = true;
+        var context = fixture.Context with
+        {
+            Entitlements = new[] { fixture.Entitlement with { ExpiresAt = DateTime.UtcNow.AddDays(1) } }
+        };
+
+        var result = await new RecommendationEngine().EvaluateAsync(context);
+
+        Assert.DoesNotContain(result.Recommendations,
+            item => item.RecommendationType == RecommendationType.JustInTimeAccess);
+    }
+
     [Theory]
     [InlineData(CloudProvider.Azure, "Microsoft.Storage/storageAccounts/read", "Actions")]
     [InlineData(CloudProvider.Aws, "s3:GetObject", "Version")]

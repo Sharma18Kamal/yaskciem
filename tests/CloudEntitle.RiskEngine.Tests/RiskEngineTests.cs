@@ -383,6 +383,196 @@ public sealed class RiskEngineTests
         Assert.Equal(result.Findings.Select(finding => finding.Fingerprint).Distinct().Count(), result.Findings.Count);
     }
 
+    [Fact]
+    public async Task SensitiveStorageReadAndPublicPolicyPermission_ShouldReportToxicCombination()
+    {
+        var fixture = FixtureData.Create("s3:GetObject", "demo-bucket");
+        var storage = fixture.Request.Resources.Single();
+        storage.Type = "AWS S3 Bucket";
+        var publicPolicy = new CloudPermission
+        {
+            Id = Guid.NewGuid(),
+            AccountId = fixture.Effective.CloudAccountId,
+            Name = "Set bucket policy",
+            Action = "s3:PutBucketPolicy",
+            AccessType = AccessType.Allow
+        };
+        var companion = new DomainEffectiveAccess
+        {
+            Id = Guid.NewGuid(),
+            Provider = fixture.Effective.Provider,
+            CloudAccountId = fixture.Effective.CloudAccountId,
+            PrincipalId = fixture.Effective.PrincipalId,
+            ResourceId = fixture.Effective.ResourceId,
+            PermissionId = publicPolicy.Id,
+            Decision = AccessDecision.Allow,
+            EvaluationStatus = EvaluationStatus.FullyEvaluated
+        };
+        var request = fixture.Request with
+        {
+            Permissions = fixture.Request.Permissions.Append(publicPolicy).ToArray(),
+            EffectiveAccess = fixture.Request.EffectiveAccess.Append(companion).ToArray(),
+            ResourceSecuritySignals = new[]
+            {
+                new ResourceSecuritySignal(storage.Id, ResourceSecuritySignalType.SensitiveData,
+                    "Sensitive data", "test", RiskSeverity.High)
+            }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+        Assert.Equal(RiskEvaluationState.Potential, finding.EvaluationState);
+        Assert.Equal(RiskSeverity.High, finding.Severity);
+        Assert.Contains(companion.Id.ToString("D"), finding.Evidence.Summary);
+    }
+
+    [Fact]
+    public async Task CredentialCreationAndAdministrativeAccess_ShouldReportToxicCombination()
+    {
+        var fixture = FixtureData.Create("iam:CreateAccessKey", "identity");
+        var adminPermission = new CloudPermission
+        {
+            Id = Guid.NewGuid(),
+            AccountId = fixture.Effective.CloudAccountId,
+            Name = "AdministratorAccess",
+            Action = "AdministratorAccess",
+            AccessType = AccessType.Allow
+        };
+        var adminAccess = new DomainEffectiveAccess
+        {
+            Id = Guid.NewGuid(),
+            Provider = fixture.Effective.Provider,
+            CloudAccountId = fixture.Effective.CloudAccountId,
+            PrincipalId = fixture.Effective.PrincipalId,
+            PermissionId = adminPermission.Id,
+            Decision = AccessDecision.Allow,
+            IsPrivileged = true,
+            EvaluationStatus = EvaluationStatus.FullyEvaluated
+        };
+        var request = fixture.Request with
+        {
+            Permissions = fixture.Request.Permissions.Append(adminPermission).ToArray(),
+            EffectiveAccess = fixture.Request.EffectiveAccess.Append(adminAccess).ToArray()
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+        Assert.Equal(RiskSeverity.Critical, finding.Severity);
+        Assert.Contains("Credential creation", finding.Title, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IamPolicyModificationAndCriticalDatabaseAccess_ShouldReportToxicCombination()
+    {
+        var fixture = FixtureData.Create("database.read", "prod-db");
+        var database = fixture.Request.Resources.Single();
+        database.Type = "AWS RDS Database";
+        var iamPermission = new CloudPermission
+        {
+            Id = Guid.NewGuid(),
+            AccountId = fixture.Effective.CloudAccountId,
+            Name = "Modify role policy",
+            Action = "iam:PutRolePolicy",
+            AccessType = AccessType.Allow
+        };
+        var iamAccess = new DomainEffectiveAccess
+        {
+            Id = Guid.NewGuid(),
+            Provider = fixture.Effective.Provider,
+            CloudAccountId = fixture.Effective.CloudAccountId,
+            PrincipalId = fixture.Effective.PrincipalId,
+            PermissionId = iamPermission.Id,
+            Decision = AccessDecision.Allow,
+            EvaluationStatus = EvaluationStatus.FullyEvaluated
+        };
+        var request = fixture.Request with
+        {
+            Permissions = fixture.Request.Permissions.Append(iamPermission).ToArray(),
+            EffectiveAccess = fixture.Request.EffectiveAccess.Append(iamAccess).ToArray(),
+            ResourceSecuritySignals = new[]
+            {
+                new ResourceSecuritySignal(database.Id, ResourceSecuritySignalType.CriticalAsset,
+                    "Critical database", "test", RiskSeverity.Critical)
+            }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+        Assert.Equal(RiskSeverity.Critical, finding.Severity);
+        Assert.Contains("database", finding.Title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ToxicPermissionCombination_ShouldNotJoinDifferentAccounts()
+    {
+        var fixture = FixtureData.Create("s3:GetObject", "demo-bucket");
+        var storage = fixture.Request.Resources.Single();
+        storage.Type = "AWS S3 Bucket";
+        var publicPolicy = new CloudPermission
+        {
+            Id = Guid.NewGuid(),
+            AccountId = Guid.NewGuid(),
+            Name = "Set bucket policy",
+            Action = "s3:PutBucketPolicy",
+            AccessType = AccessType.Allow
+        };
+        var otherAccountAccess = new DomainEffectiveAccess
+        {
+            Id = Guid.NewGuid(),
+            Provider = fixture.Effective.Provider,
+            CloudAccountId = publicPolicy.AccountId,
+            PrincipalId = fixture.Effective.PrincipalId,
+            PermissionId = publicPolicy.Id,
+            Decision = AccessDecision.Allow
+        };
+        var request = fixture.Request with
+        {
+            Permissions = fixture.Request.Permissions.Append(publicPolicy).ToArray(),
+            EffectiveAccess = fixture.Request.EffectiveAccess.Append(otherAccountAccess).ToArray(),
+            ResourceSecuritySignals = new[]
+            {
+                new ResourceSecuritySignal(storage.Id, ResourceSecuritySignalType.SensitiveData,
+                    "Sensitive data", "test", RiskSeverity.High)
+            }
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.DoesNotContain(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+    }
+
+    [Fact]
+    public async Task StaleCredential_ShouldRequireCompleteInventoryEvidence()
+    {
+        var fixture = FixtureData.Create("s3:GetObject", "demo-bucket");
+        var principal = fixture.Request.Principals.Single();
+        principal.CredentialLastRotatedAtUtc = DateTime.UtcNow.AddDays(-120);
+        principal.CredentialInventoryComplete = true;
+        principal.CredentialEvidenceSource = "test credential inventory";
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-022"));
+        Assert.Equal(RiskEvaluationState.Confirmed, finding.EvaluationState);
+        Assert.Contains("MaximumAgeDays=90", finding.Evidence.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IncompleteCredentialInventory_ShouldNotClaimCredentialIsFreshOrStale()
+    {
+        var fixture = FixtureData.Create("s3:GetObject", "demo-bucket");
+        var principal = fixture.Request.Principals.Single();
+        principal.CredentialLastRotatedAtUtc = DateTime.UtcNow.AddDays(-120);
+        principal.CredentialInventoryComplete = false;
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request);
+
+        Assert.DoesNotContain(result.Findings, item => item.RuleId == Stable("CIEM-022"));
+    }
+
     private static Guid Stable(string rule) => GuidUtility.Create(GuidUtility.Namespace, rule);
 
     private sealed record FixtureData(RiskEvaluationRequest Request, DomainEffectiveAccess Effective)

@@ -344,6 +344,50 @@ public sealed class RemoveUnusedRoleRule : RecommendationRuleBase
         return Task.FromResult<IReadOnlyCollection<RecommendationModel>>(recommendations);
     }
 }
+public sealed class JustInTimeAccessRecommendationRule : RecommendationRuleBase
+{
+    public override string RuleId => "CIEM-001";
+    public override RecommendationType RecommendationType => RecommendationType.JustInTimeAccess;
+
+    public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(
+        RecommendationContext context,
+        CancellationToken cancellationToken = default)
+    {
+        var recommendations = Findings(context, RuleId)
+            .Where(finding => finding.EvaluationState == RiskEvaluationState.Confirmed)
+            .Select(finding =>
+            {
+                var access = context.EffectiveAccess.FirstOrDefault(item => item.Id == finding.EffectiveAccessId);
+                var entitlement = access is null ? null : context.Entitlements.FirstOrDefault(item =>
+                    item.CloudAccountId == finding.CloudAccountId
+                    && item.PrincipalId == finding.PrincipalId
+                    && item.PermissionId == finding.PermissionId
+                    && item.RoleId == access.RoleId
+                    && item.ResourceId == access.ResourceId);
+                return new { Finding = finding, Access = access, Entitlement = entitlement };
+            })
+            .Where(item => item.Access?.IsPrivileged == true
+                && item.Entitlement is not null
+                && !item.Entitlement.ExpiresAt.HasValue)
+            .Select(item =>
+            {
+                var entitlement = item.Entitlement!;
+                return Create(
+                    context,
+                    item.Finding,
+                    "Review just-in-time privileged access",
+                    "Replace standing privileged access with an approved, time-bounded activation where the provider supports it.",
+                    $"{entitlement.AssignmentType} assignment with no recorded expiry",
+                    "Time-bounded provider-supported eligible access with approval, activation duration, and expiry",
+                    "This is a review-only proposal. Provider support, operational dependencies, and access impact must be validated; no grant is changed.",
+                    RecommendationImpactState.HighPotentialImpact,
+                    sourceEntitlement: entitlement);
+            })
+            .ToArray();
+
+        return Task.FromResult<IReadOnlyCollection<RecommendationModel>>(recommendations);
+    }
+}
 public sealed class NarrowWildcardPermissionRule : RecommendationRuleBase { public override string RuleId => "CIEM-003"; public override RecommendationType RecommendationType => RecommendationType.NarrowWildcardPermission; public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RecommendationModel>>(Findings(c, RuleId).Select(f => Create(c, f, "Narrow wildcard permission", "Replace the wildcard action with only observed required operations after review.", Permission(c, f.PermissionId), "Specific observed permissions at the narrowest supported scope.", "The risk evidence identifies a wildcard action; required operations are not fully inferred.", RecommendationImpactState.RequiresReview)).ToArray()); }
 public sealed class NarrowResourceScopeRule : RecommendationRuleBase { public override string RuleId => "CIEM-004"; public override RecommendationType RecommendationType => RecommendationType.NarrowResourceScope; public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RecommendationModel>>(Findings(c, RuleId).Select(f => Create(c, f, "Narrow resource scope", "Review reducing the assignment to only the resources evidenced by effective access.", Entitlement(c, f)?.Scope.OriginalScope ?? "unknown", Resource(c, f.ResourceId), "Broad scope is evidenced, but required business coverage must be validated.", RecommendationImpactState.RequiresReview)).ToArray()); }
 public sealed class ReplaceBroadRoleRule : RecommendationRuleBase { public override string RuleId => "CIEM-001"; public override RecommendationType RecommendationType => RecommendationType.ReplaceBroadRole; public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(RecommendationContext c, CancellationToken t = default) => Task.FromResult<IReadOnlyCollection<RecommendationModel>>(Findings(c, RuleId).Select(f => Create(c, f, "Review broad privileged role", "Evaluate replacing the current role with a narrower role that preserves required access.", "Privileged role or permission", "Provider-supported least-privilege role", "Required permissions and business ownership require review before approval.", RecommendationImpactState.HighPotentialImpact)).ToArray()); }

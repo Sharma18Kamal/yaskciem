@@ -45,6 +45,6 @@ Kubernetes workload traces add Pod/Deployment → ServiceAccount → Kubernetes 
 
 ## Persistence and Performance
 
-`AccessPath`, `AccessPathNode`, and `AccessPathEdge` are relationally persisted with provider, principal, resource, permission, effective-access, status, and path-type indexes. Evidence and diagnostics are retained as JSON/text metadata. The engine builds adjacency lookups in memory and does not access cloud APIs.
+`AccessPath`, `AccessPathNode`, and `AccessPathEdge` are relationally persisted with provider, principal, resource, permission, effective-access, status, and path-type indexes. Evidence and diagnostics are retained as JSON/text metadata. The engine builds adjacency lookups in memory and does not access cloud APIs. Provider trust metadata is retained, but a complete cross-account and cross-cloud chain that stitches a source identity, federation/role assumption, and downstream target-resource access is not yet resolved end-to-end. Such links must not be inferred solely from matching names or incomplete trust evidence.
 
 The graph is modeled from effective-access evidence, not observed attacker activity. Provider scan adapters do not yet populate the optional resource-security signal/coverage inputs. Advanced WPF rendering, full AssumeRole resolution where trust evidence is incomplete, and feeding live provider signals into the risk engine remain deferred.
