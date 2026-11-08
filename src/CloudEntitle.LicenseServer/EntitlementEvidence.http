@@ -1,0 +1,57 @@
+@baseUrl = https://license.example.invalid
+@organizationId = 00000000-0000-0000-0000-000000000000
+@snapshotId = 11111111-1111-1111-1111-111111111111
+@token = replace-with-delegated-api-token
+
+### Saved observations only; ViewInventory + ViewFindings and exact binding required.
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/entitlement-evidence?provider=Aws&accountId=123456789012
+Authorization: Bearer {{token}}
+
+### Saved selected observation; missing/foreign snapshot returns 404 within an authorized binding.
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/entitlement-evidence/{{snapshotId}}?provider=Aws&accountId=123456789012
+Authorization: Bearer {{token}}
+
+### Upload collected documents after client CLI connection and explicit Desktop consent.
+# Requires ManagePolicies + ViewInventory + ViewFindings and exact binding.
+# Replace dates with actual collection timestamps (duration <= 5 minutes, not future dates).
+# Source digest is an example, not cloud attestation. No effective authorization is asserted.
+# Identical replay is safe; a different payload under this snapshot ID returns 409.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/entitlement-evidence
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "snapshotId": "11111111-1111-1111-1111-111111111111",
+  "provider": 1,
+  "accountId": "123456789012",
+  "startedAtUtc": "2026-11-08T12:00:00Z",
+  "collectedAtUtc": "2026-11-08T12:01:00Z",
+  "grants": [
+    {
+      "principal": "arn:aws:iam::123456789012:user/example",
+      "sourcePrincipal": "arn:aws:iam::123456789012:user/example",
+      "role": "arn:aws:iam::123456789012:user/example",
+      "sourceId": "arn:aws:iam::123456789012:policy/example",
+      "sourceVersion": "v1",
+      "sourceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "statementId": "Read",
+      "scope": "arn:aws:iam::123456789012:root",
+      "action": "s3:GetObject",
+      "resourcePattern": "arn:aws:s3:::client-bucket/object",
+      "effect": "Allow",
+      "isExclusion": false,
+      "hasCondition": false,
+      "isDataAction": false
+    }
+  ],
+  "limitations": [
+    "Partial identity-policy document evidence only; historical validity and effective authorization are not established."
+  ]
+}
+
+### Malformed document returns safe 400; oversized bodies return 413.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/entitlement-evidence
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "snapshotId": "not-a-guid" }

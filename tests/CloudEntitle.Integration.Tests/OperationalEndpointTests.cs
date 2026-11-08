@@ -96,6 +96,60 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Equal(activity.SnapshotId, (await activityRead.Content.ReadFromJsonAsync<ApiEnvelope<CloudActivitySnapshot>>())!.Data.SnapshotId);
         using var activityConflict = await Send(HttpMethod.Post, prefix + "/cloud-activity", owner, activity with { Source = "Changed" });
         Assert.Equal(HttpStatusCode.Conflict, activityConflict.StatusCode);
+        var historyPath = prefix + "/cloud-activity/history?provider=Aws&accountId=123456789012";
+        using var activityHistory = await Send(HttpMethod.Get, historyPath, viewer);
+        Assert.Equal(HttpStatusCode.OK, activityHistory.StatusCode);
+        var history = (await activityHistory.Content.ReadFromJsonAsync<ApiEnvelope<CloudActivityHistoryPage>>())!.Data;
+        Assert.Equal(activity.SnapshotId, Assert.Single(history.Snapshots).SnapshotId);
+        Assert.Equal(owner.UserId, history.Snapshots[0].UploadedBy);
+        Assert.Equal(1, history.Snapshots[0].EventCount);
+        var snapshotPath = prefix + $"/cloud-activity/history/{activity.SnapshotId:D}?provider=Aws&accountId=123456789012";
+        using var historicalRead = await Send(HttpMethod.Get, snapshotPath, viewer);
+        Assert.Equal(HttpStatusCode.OK, historicalRead.StatusCode);
+        Assert.Equal(activity.SnapshotId, (await historicalRead.Content.ReadFromJsonAsync<ApiEnvelope<CloudActivitySnapshot>>())!.Data.SnapshotId);
+        using var missingCursor = await Send(HttpMethod.Get, historyPath + $"&beforeSnapshotId={Guid.NewGuid():D}", viewer);
+        Assert.Equal(HttpStatusCode.BadRequest, missingCursor.StatusCode);
+        using var invalidHistoryLimit = await Send(HttpMethod.Get, historyPath + "&limit=51", viewer);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidHistoryLimit.StatusCode);
+        using var unboundHistory = await Send(HttpMethod.Get, prefix + "/cloud-activity/history?provider=Aws&accountId=999999999999", viewer);
+        Assert.Equal(HttpStatusCode.Forbidden, unboundHistory.StatusCode);
+        using var missingHistorical = await Send(HttpMethod.Get, prefix + $"/cloud-activity/history/{Guid.NewGuid():D}?provider=Aws&accountId=123456789012", viewer);
+        Assert.Equal(HttpStatusCode.NotFound, missingHistorical.StatusCode);
+        var foreignActor = new OrganizationIdentity(viewer.UserId, "foreign", Guid.NewGuid().ToString(), viewer.Email);
+        using var foreignHistory = await Send(HttpMethod.Get, historyPath, foreignActor);
+        Assert.NotEqual(HttpStatusCode.OK, foreignHistory.StatusCode);
+        var permissions = new EntitlementEvidenceSnapshot(Guid.NewGuid(), CloudProvider.Aws, "123456789012",
+            activityTime.AddMinutes(-1), activityTime, [new("arn:aws:iam::123456789012:user/reader",
+                "arn:aws:iam::123456789012:user/reader", "user/reader", "policy", "v1", new string('A', 64),
+                "Read", "AWS account", "s3:GetObject", "arn:aws:s3:::source/object", "Allow", false, false, false)], ["Partial"]);
+        using var permissionDenied = await Send(HttpMethod.Post, prefix + "/entitlement-evidence", viewer, permissions);
+        Assert.Equal(HttpStatusCode.Forbidden, permissionDenied.StatusCode);
+        using var permissionUnbound = await Send(HttpMethod.Post, prefix + "/entitlement-evidence", owner, permissions with { AccountId = "999999999999" });
+        Assert.Equal(HttpStatusCode.Forbidden, permissionUnbound.StatusCode);
+        using var permissionSaved = await Send(HttpMethod.Post, prefix + "/entitlement-evidence", owner, permissions);
+        Assert.Equal(HttpStatusCode.Created, permissionSaved.StatusCode);
+        Assert.NotNull(permissionSaved.Headers.Location);
+        using var permissionRead = await Send(HttpMethod.Get, permissionSaved.Headers.Location!.OriginalString, viewer);
+        Assert.Equal(HttpStatusCode.OK, permissionRead.StatusCode);
+        Assert.Equal(permissions.Grants[0], Assert.Single((await permissionRead.Content.ReadFromJsonAsync<ApiEnvelope<EntitlementEvidenceSnapshot>>())!.Data.Grants));
+        using var permissionSummary = await Send(HttpMethod.Get, prefix + "/entitlement-evidence?provider=Aws&accountId=123456789012", viewer);
+        Assert.Equal(owner.UserId, Assert.Single((await permissionSummary.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<EntitlementEvidenceHistoryEntry>>>())!.Data).UploadedBy);
+        using var permissionConflict = await Send(HttpMethod.Post, prefix + "/entitlement-evidence", owner, permissions with { Grants = [] });
+        Assert.Equal(HttpStatusCode.Conflict, permissionConflict.StatusCode);
+        using var permissionForeign = await Send(HttpMethod.Get, permissionSaved.Headers.Location.OriginalString, foreignActor);
+        Assert.NotEqual(HttpStatusCode.OK, permissionForeign.StatusCode);
+        using var permissionInvalid = await Send(HttpMethod.Post, prefix + "/entitlement-evidence", owner,
+            permissions with { SnapshotId = Guid.NewGuid(), Grants = [permissions.Grants[0] with { IsExclusion = true }] });
+        Assert.Equal(HttpStatusCode.BadRequest, permissionInvalid.StatusCode);
+        foreach (var (body, expectedStatus) in new[] { ("{invalid", HttpStatusCode.BadRequest), (new string(' ', 8 * 1024 * 1024 + 1), HttpStatusCode.RequestEntityTooLarge) })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, prefix + "/entitlement-evidence")
+                { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+            SetIdentityHeaders(request, tenant, owner.UserId, owner.Email);
+            using var response = await client.SendAsync(request);
+            Assert.Equal(expectedStatus, response.StatusCode);
+            Assert.DoesNotContain("JsonException", await response.Content.ReadAsStringAsync());
+        }
         using var eventRead = await Send(HttpMethod.Get, prefix + "/operational-events", viewer);
         Assert.Equal(value.EventId, Assert.Single((await eventRead.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SharedDriftEventDto>>>())!.Data).EventId);
         var ticketPath = prefix + $"/operational-events/{value.EventId:D}/ticket";

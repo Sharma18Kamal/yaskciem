@@ -45,5 +45,29 @@ public static partial class SharedWorkspaceEndpoints
             })).RequireAuthorization("CiemApiAccess").WithName("GetCloudActivity")
             .WithSummary("Read the latest scoped snapshot, without initiating any live endpoint call. All sources have partial coverage.")
             .Produces<ApiEnvelope<CloudActivitySnapshot>>().Produces(403).Produces(404);
+        app.MapGet(prefix + "/history", (ClaimsPrincipal principal, Guid organizationId, CloudProvider provider,
+            string accountId, int? limit, Guid? beforeSnapshotId, CancellationToken token) =>
+            WithMonitoringAccess(principal, organizationId, store, false, async tenant =>
+            {
+                if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+                if (!CreateService(store, identity).GetTenantBindings(organizationId, identity).Any(binding => binding.Provider == provider
+                    && binding.ExternalTenantId == accountId)) return Results.Forbid();
+                return Results.Ok(Envelope(await store.GetCloudActivityHistoryAsync(tenant, organizationId, provider, accountId,
+                    limit ?? 20, beforeSnapshotId, token)));
+            })).RequireAuthorization("CiemApiAccess").WithName("GetCloudActivityHistory")
+            .WithSummary("Page saved snapshot metadata for a bound account; never merges evidence or calls a cloud.")
+            .Produces<ApiEnvelope<CloudActivityHistoryPage>>().Produces(400).Produces(403).Produces(404);
+        app.MapGet(prefix + "/history/{snapshotId:guid}", (ClaimsPrincipal principal, Guid organizationId, CloudProvider provider,
+            string accountId, Guid snapshotId, CancellationToken token) =>
+            WithMonitoringAccess(principal, organizationId, store, false, async tenant =>
+            {
+                if (!TryGetIdentity(principal, out var identity)) return Results.Forbid();
+                if (!CreateService(store, identity).GetTenantBindings(organizationId, identity).Any(binding => binding.Provider == provider
+                    && binding.ExternalTenantId == accountId)) return Results.Forbid();
+                var result = await store.GetCloudActivitySnapshotAsync(tenant, organizationId, provider, accountId, snapshotId, token);
+                return result is null ? Results.NotFound() : Results.Ok(Envelope(result));
+            })).RequireAuthorization("CiemApiAccess").WithName("GetCloudActivitySnapshot")
+            .WithSummary("Read one historical saved partial-coverage snapshot without live cloud calls or historical grant inference.")
+            .Produces<ApiEnvelope<CloudActivitySnapshot>>().Produces(403).Produces(404);
     }
 }

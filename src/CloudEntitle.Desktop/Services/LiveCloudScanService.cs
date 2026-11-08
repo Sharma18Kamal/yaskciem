@@ -633,7 +633,8 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         var graphResult = new LiveResourceRiskGraphResult(Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(), Array.Empty<string>());
         var hasWorkloadIdentities = identityRecords.Any(principal => principal.IdentityType is IdentityType.ServicePrincipal
             or IdentityType.ServiceAccount or IdentityType.ManagedIdentity or IdentityType.Application);
-        if ((graphAssignments.Count > 0 && resourceRecords.Count > 0) || hasWorkloadIdentities)
+        if ((graphAssignments.Count > 0 && resourceRecords.Count > 0) || hasWorkloadIdentities
+            || identityRecords.Any(principal => principal.CredentialInventoryComplete == true))
         {
             try
             {

@@ -25,7 +25,11 @@ public sealed partial class CloudActivityCollector(ICloudCommandRunner runner) :
         try
         {
             if (query.SourceKind != CloudActivitySource.Default)
-                return await CollectDataPlaneAsync(query, start, end, timeout.Token);
+            {
+                var snapshot = await CollectDataPlaneAsync(query, start, end, timeout.Token);
+                timeout.Token.ThrowIfCancellationRequested();
+                return snapshot;
+            }
             switch (query.Provider)
             {
                 case CloudProvider.Aws:
@@ -109,7 +113,9 @@ public sealed partial class CloudActivityCollector(ICloudCommandRunner runner) :
                         foreach (var entry in page.RootElement.EnumerateArray().Take(MaximumEvents))
                         {
                             var logName = RequiredText(entry, "logName");
-                            if (!logName.StartsWith($"projects/{query.AccountId}/logs/cloudaudit.googleapis.com", StringComparison.Ordinal))
+                            var auditPrefix = $"projects/{query.AccountId}/logs/cloudaudit.googleapis.com%2F";
+                            if (!logName.StartsWith(auditPrefix, StringComparison.Ordinal)
+                                || logName[auditPrefix.Length..] is not ("activity" or "data_access" or "system_event" or "policy"))
                                 throw new InvalidOperationException("GCP returned evidence outside the selected project.");
                             if (!entry.TryGetProperty("protoPayload", out var payload))
                                 throw new InvalidOperationException("GCP audit evidence is missing.");
@@ -148,6 +154,7 @@ public sealed partial class CloudActivityCollector(ICloudCommandRunner runner) :
         {
             throw new InvalidOperationException("The cloud CLI returned malformed audit JSON; no successful snapshot was published.");
         }
+        timeout.Token.ThrowIfCancellationRequested();
         return new(Guid.NewGuid(), query.Provider, query.AccountId, start, end, source, details, truncated,
             events.DistinctBy(item => (item.EventId, item.Principal, item.Action, item.PermissionAction, item.Resource)).OrderByDescending(item => item.Timestamp).ToArray());
     }

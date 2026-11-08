@@ -1,6 +1,19 @@
 @baseUrl = https://license.example.invalid
 @organizationId = 00000000-0000-0000-0000-000000000000
 @token = replace-with-delegated-api-token
+@snapshotId = 11111111-1111-1111-1111-111111111111
+
+### Page saved metadata only; cursor is exclusive and scoped to this exact bound account.
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/cloud-activity/history?provider=Aws&accountId=123456789012&limit=20
+Authorization: Bearer {{token}}
+
+### Follow nextBeforeSnapshotId from the previous page (unknown/foreign cursor returns 400).
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/cloud-activity/history?provider=Aws&accountId=123456789012&limit=20&beforeSnapshotId={{snapshotId}}
+Authorization: Bearer {{token}}
+
+### Load a selected historical partial snapshot; missing ID returns 404.
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/cloud-activity/history/{{snapshotId}}?provider=Aws&accountId=123456789012
+Authorization: Bearer {{token}}
 
 ### Load saved evidence only (ViewInventory + ViewFindings; exact bound account required)
 GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/cloud-activity?provider=Aws&accountId=123456789012

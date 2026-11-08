@@ -3,12 +3,61 @@ using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.Integration.Contracts;
 using Xunit;
 
 namespace CloudEntitle.Desktop.Tests;
 
 public sealed class LiveResourceRiskGraphTests
 {
+    [Fact]
+    public async Task PermissionDocuments_DetectActualToxicPairAsPotentialAndRejectDisplayNameMatching()
+    {
+        var account = new CloudAccount { Id = Guid.NewGuid(), CloudProvider = CloudProviderType.Aws, ExternalId = "123456789012" };
+        var principal = new CloudPrincipal { Id = Guid.NewGuid(), AccountId = account.Id, CloudProvider = CloudProviderType.Aws,
+            PrincipalId = "arn:aws:iam::123456789012:user/reader", Name = "reader" };
+        var resource = new CloudResource { Id = Guid.NewGuid(), AccountId = account.Id, Type = "AWS::S3::Bucket",
+            ResourceId = "arn:aws:s3:::source", Tags = new() { ["DataClassification"] = "confidential" } };
+        var grants = new[] { "s3:GetObject", "s3:PutBucketPolicy" }.Select(action => new ObservedPermissionGrant(principal.PrincipalId,
+            principal.PrincipalId, "reader", action, "v1", new string('A', 64), action, "AWS account", action,
+            resource.ResourceId, "Allow", false, false, false)).ToArray();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new EntitlementEvidenceSnapshot(Guid.NewGuid(), CloudProvider.Aws, account.ExternalId!, now.AddMinutes(-1), now, grants, ["Partial"]);
+        var evaluator = new LiveResourceRiskGraphEvaluator();
+        var result = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource], snapshot);
+        Assert.Contains(result.Findings, finding => finding.Title == "Sensitive storage access plus public-access control");
+        Assert.All(result.Findings, finding => Assert.Equal(RiskEvaluationState.Potential, finding.EvaluationState));
+        Assert.All(result.AccessPaths, path => Assert.NotEqual(AccessPathStatus.Complete, path.PathStatus));
+        resource.ResourceUri = resource.ResourceId;
+        resource.ResourceId = null;
+        var uriOnly = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource], snapshot);
+        Assert.Contains(uriOnly.Findings, finding => finding.Title == "Sensitive storage access plus public-access control");
+        var conditional = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource],
+            snapshot with { Grants = [grants[0], grants[1] with { HasCondition = true }] });
+        Assert.DoesNotContain(conditional.Findings, finding => finding.Title == "Sensitive storage access plus public-access control");
+        var denied = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource],
+            snapshot with { Grants = [grants[0], grants[1] with { Effect = "Deny" }] });
+        Assert.DoesNotContain(denied.Findings, finding => finding.Title == "Sensitive storage access plus public-access control");
+        principal.Name = principal.PrincipalId;
+        principal.PrincipalId = "arn:aws:iam::123456789012:user/other";
+        var nameOnly = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource], snapshot);
+        Assert.Empty(nameOnly.Findings);
+        await Assert.ThrowsAsync<ArgumentException>(() => evaluator.EvaluateDocumentsAsync(account, [principal], [resource], snapshot with { AccountId = "999999999999" }));
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, false)]
+    public async Task LiveScan_CredentialOnlyUserRequiresCompleteProviderInventory(bool complete, bool expired, bool expected)
+    {
+        var provider = new TaggedResourceProvider();
+        provider.SetCredentialEvidence(complete, expired);
+        var result = await new LiveCloudScanService([provider]).ScanAsync();
+        Assert.Empty(result.ResourceRecords);
+        Assert.Equal(expected, result.ResourceRiskFindings.Any(item => item.Title == (expired ? "Expired identity credential" : "Stale identity credential")));
+    }
     [Fact]
     public async Task LiveScan_ShouldCarryTaggedAssetSignalsThroughModeledPathIntoRiskFinding()
     {
@@ -82,6 +131,7 @@ public sealed class LiveResourceRiskGraphTests
         };
         private readonly CloudPrincipal _principal;
         private readonly CloudResource _resource;
+        private bool _credentialsOnly;
 
         public TaggedResourceProvider()
         {
@@ -105,14 +155,23 @@ public sealed class LiveResourceRiskGraphTests
         }
 
         public CloudProviderType ProviderType => CloudProviderType.Aws;
+        public void SetCredentialEvidence(bool complete, bool expired)
+        {
+            _credentialsOnly = true;
+            _principal.IdentityType = IdentityType.User;
+            _principal.CredentialInventoryComplete = complete;
+            _principal.CredentialLastRotatedAtUtc = DateTime.UtcNow.AddDays(expired ? -1 : -180);
+            _principal.CredentialExpiresAtUtc = expired ? DateTime.UtcNow.AddDays(-1) : null;
+            _principal.CredentialEvidenceSource = "Provider complete credential metadata";
+        }
         public Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<IReadOnlyList<CloudAccount>> DiscoverAccountsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudAccount>>(new[] { _account });
         public Task<IReadOnlyList<CloudPrincipal>> DiscoverIdentitiesAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudPrincipal>>(new[] { _principal });
         public Task<IReadOnlyList<CloudRole>> DiscoverRolesAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudRole>>(new[] { new CloudRole { Id = Guid.NewGuid(), AccountId = _account.Id, Name = "AdministratorAccess", RoleId = "AdministratorAccess", IsPrivileged = true } });
         public Task<IReadOnlyList<CloudPermission>> DiscoverPermissionsAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudPermission>>(Array.Empty<CloudPermission>());
-        public Task<IReadOnlyList<CloudResource>> GetResourcesAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudResource>>(new[] { _resource });
+        public Task<IReadOnlyList<CloudResource>> GetResourcesAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<CloudResource>>(_credentialsOnly ? [] : new[] { _resource });
         public Task<IReadOnlyList<CloudEffectiveAccessAssignment>> DiscoverEffectiveAccessAsync(Guid accountId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<CloudEffectiveAccessAssignment>>(new[]
+            => Task.FromResult<IReadOnlyList<CloudEffectiveAccessAssignment>>(_credentialsOnly ? [] : new[]
             {
                 new CloudEffectiveAccessAssignment(_principal.PrincipalId!, "AdministratorAccess", "AWS account", "AWS IAM assignment", true)
             });

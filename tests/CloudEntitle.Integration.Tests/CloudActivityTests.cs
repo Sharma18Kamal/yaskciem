@@ -54,7 +54,7 @@ public sealed class CloudActivityTests
         var usage = Assert.Single(CloudActivityAnalysis.Analyze(snapshot));
         Assert.Equal(1, usage.Successful30Days);
         Assert.Equal(1, usage.Failed90Days);
-        Assert.Equal(usage.Action, usage.PermissionAction);
+        Assert.Null(usage.PermissionAction);
         var bad = new Runner(JsonSerializer.Serialize(new { value = Array.Empty<object>(), nextLink = "https://attacker.invalid/steal" }));
         await Assert.ThrowsAsync<InvalidOperationException>(() => new CloudActivityCollector(bad).CollectAsync(new(CloudProvider.Azure, account, "", "", now)));
         Assert.Single(bad.Calls);
@@ -174,5 +174,25 @@ public sealed class CloudActivityTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => collector.CollectAsync(
             new(CloudProvider.Gcp, "client-project", "", "", now), cancelled.Token));
         Assert.Single(runner.Calls);
+    }
+
+    [Fact]
+    public async Task AzurePermissionEvidenceUsesAuthorizationActionNotMethodAndGcpRejectsNonAuditLogNames()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var account = Guid.NewGuid().ToString();
+        var runner = new Runner(JsonSerializer.Serialize(new { value = new[] { new {
+            subscriptionId = account, eventDataId = "one", eventTimestamp = now.AddDays(-1),
+            operationName = new { value = "display-operation" }, authorization = new { action = "Microsoft.Compute/virtualMachines/read" },
+            status = new { value = "Succeeded" }, caller = "reader" } } }));
+        var snapshot = await new CloudActivityCollector(runner).CollectAsync(new(CloudProvider.Azure, account, "", "", now));
+        var item = Assert.Single(snapshot.Events);
+        Assert.Equal("display-operation", item.Action);
+        Assert.Equal("Microsoft.Compute/virtualMachines/read", item.PermissionAction);
+        Assert.Equal("Azure authorization.action", item.PermissionEvidenceSource);
+        var invalid = new Runner(JsonSerializer.Serialize(new[] { new {
+            logName = "projects/client-project/logs/cloudaudit.googleapis.com-not-audit", insertId = "one", timestamp = now,
+            protoPayload = new { methodName = "fake" } } }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new CloudActivityCollector(invalid).CollectAsync(new(CloudProvider.Gcp, "client-project", "", "", now)));
     }
 }

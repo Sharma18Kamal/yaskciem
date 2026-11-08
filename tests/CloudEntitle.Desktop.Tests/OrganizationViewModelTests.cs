@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net.Http;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
@@ -14,6 +15,157 @@ namespace CloudEntitle.Desktop.Tests;
 
 public sealed class OrganizationViewModelTests
 {
+    [Fact]
+    public async Task EntitlementDocuments_RequireExplicitConsentAndDiscardChangedContextAndNeverReadOnSavedLoad()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "YaskCiemEntitlementViewModelTests", Guid.NewGuid().ToString("N"));
+        var tenant = Guid.NewGuid().ToString();
+        var identity = new OrganizationIdentity(Guid.NewGuid(), "owner", tenant, "owner@example.invalid");
+        var service = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        var organization = service.CreateOrganization("Shared", "shared", tenant, identity);
+        service.BindCloudAccount(organization.Id, identity, CloudProvider.Gcp, Guid.NewGuid(), "client-project", "GCP");
+        try
+        {
+            var api = new TestMonitoringApi();
+            var collector = new TestEntitlementCollector();
+            var viewModel = new OrganizationViewModel(new TestDemoDataService(), service, new TestSsoService(identity),
+                new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(),
+                sharedMonitoringApi: api, entitlementCollector: collector);
+            await viewModel.SignInAsync();
+            Assert.Equal(0, collector.Reads);
+            viewModel.SelectedActivityBinding = Assert.Single(viewModel.Bindings);
+            await viewModel.CollectEntitlementEvidenceAsync();
+            Assert.Equal(0, collector.Reads);
+            Assert.Contains("explicit on-demand", viewModel.EntitlementEvidenceStatus);
+            viewModel.EntitlementReadConsent = true;
+            await viewModel.CollectEntitlementEvidenceAsync();
+            Assert.Equal(1, collector.Reads);
+            Assert.Equal(1, api.EntitlementUploads);
+            Assert.Single(viewModel.ObservedGrants);
+            Assert.False(viewModel.EntitlementReadConsent);
+            await viewModel.LoadEntitlementHistoryAsync();
+            viewModel.SelectedEntitlementSnapshot = Assert.Single(viewModel.EntitlementHistory);
+            await viewModel.LoadEntitlementSnapshotAsync();
+            Assert.Single(viewModel.ObservedGrants);
+            Assert.Equal(1, collector.Reads);
+            Assert.Contains("No live cloud call", viewModel.EntitlementEvidenceStatus);
+            await viewModel.EvaluateDocumentRiskAsync();
+            Assert.Contains("Matching non-demo", viewModel.EntitlementEvidenceStatus);
+            Assert.Empty(viewModel.DocumentRiskCandidates);
+            collector.Pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            viewModel.EntitlementReadConsent = true;
+            var pending = viewModel.CollectEntitlementEvidenceAsync();
+            viewModel.ActivityProfile = "different-context";
+            collector.Pending.SetResult(collector.Snapshot!);
+            await pending;
+            Assert.Equal(1, api.EntitlementUploads);
+            Assert.Empty(viewModel.ObservedGrants);
+            Assert.Empty(viewModel.EntitlementHistory);
+            Assert.False(viewModel.EntitlementReadConsent);
+            collector.Pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            collector.Pending.SetException(new InvalidOperationException("Provider document read unavailable."));
+            viewModel.EntitlementReadConsent = true;
+            await viewModel.CollectEntitlementEvidenceAsync();
+            Assert.Contains("Provider document read unavailable", viewModel.EntitlementEvidenceStatus);
+            Assert.Empty(viewModel.ObservedGrants);
+            await viewModel.SignOutAsync();
+            Assert.Empty(viewModel.ObservedGrants);
+            Assert.Empty(viewModel.HistoricalGrantCorrelations);
+            Assert.Empty(viewModel.DocumentRiskCandidates);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private sealed class TestEntitlementCollector : IEntitlementEvidenceCollector
+    {
+        public int Reads { get; private set; }
+        public TaskCompletionSource<EntitlementEvidenceSnapshot>? Pending { get; set; }
+        public EntitlementEvidenceSnapshot? Snapshot { get; private set; }
+        public Task<EntitlementEvidenceSnapshot> CollectAsync(EntitlementEvidenceQuery query, CancellationToken token = default)
+        {
+            Reads++;
+            var now = DateTimeOffset.UtcNow;
+            Snapshot ??= new(Guid.NewGuid(), query.Provider, query.AccountId, now.AddMinutes(-1), now,
+                [new("serviceAccount:reader@example.invalid", "serviceAccount:reader@example.invalid", "roles/viewer", "project-iam",
+                    "v1", new string('A', 64), "Read", "projects/client-project", "storage.objects.get", "projects/client-project",
+                    "Allow", false, false, false)], ["Partial document evidence only"]);
+            return Pending?.Task ?? Task.FromResult(Snapshot);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InboundAlerts_ReadOnlyOnDemandAndDiscardResponsesAfterContextChanges(bool signOut)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "YaskCiemInboundViewModelTests", Guid.NewGuid().ToString("N"));
+        var tenant = Guid.NewGuid().ToString();
+        var identity = new OrganizationIdentity(Guid.NewGuid(), "owner", tenant, "owner@example.invalid");
+        var service = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        var organization = service.CreateOrganization("Shared", "shared", tenant, identity);
+        try
+        {
+            var api = new TestMonitoringApi();
+            var viewModel = new OrganizationViewModel(new TestDemoDataService(), service, new TestSsoService(identity),
+                new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(),
+                sharedMonitoringApi: api);
+            await viewModel.SignInAsync();
+            Assert.Equal(0, api.AlertReads);
+            viewModel.SecurityAlertChannel = "https://invalid.example.invalid";
+            await viewModel.RefreshSecurityAlertsAsync();
+            Assert.Equal(0, api.AlertReads);
+            Assert.Contains("safe configured channel", viewModel.SecurityAlertStatus);
+            viewModel.SecurityAlertChannel = "client-security";
+            viewModel.SecurityAlertProduct = "Sentinel";
+            await viewModel.RefreshSecurityAlertsAsync();
+            Assert.Equal((organization.Id, "Sentinel", "client-security"), api.LastAlertScope);
+            Assert.Single(viewModel.SecurityAlerts);
+            Assert.Contains("Untrusted SIEM evidence", viewModel.SecurityAlertStatus);
+            api.PendingAlerts = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var refresh = viewModel.RefreshSecurityAlertsAsync();
+            if (signOut) await viewModel.SignOutAsync();
+            else viewModel.SecurityAlertProduct = "QRadar";
+            api.PendingAlerts.SetResult(api.SavedAlerts);
+            await refresh;
+            Assert.Empty(viewModel.SecurityAlerts);
+            Assert.DoesNotContain("1 saved", viewModel.SecurityAlertStatus);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InboundAlerts_ReportApiFailureWithoutSuccessFallback()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "YaskCiemInboundFailureTests", Guid.NewGuid().ToString("N"));
+        var tenant = Guid.NewGuid().ToString();
+        var identity = new OrganizationIdentity(Guid.NewGuid(), "owner", tenant, "owner@example.invalid");
+        var service = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        service.CreateOrganization("Shared", "shared", tenant, identity);
+        try
+        {
+            var api = new TestMonitoringApi { PendingAlerts = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+            api.PendingAlerts.SetException(new HttpRequestException("Shared server is unavailable."));
+            var viewModel = new OrganizationViewModel(new TestDemoDataService(), service, new TestSsoService(identity),
+                new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(),
+                sharedMonitoringApi: api);
+            await viewModel.SignInAsync();
+            await viewModel.RefreshSecurityAlertsAsync();
+            Assert.Contains("Inbound alert read failed", viewModel.SecurityAlertStatus);
+            Assert.Contains("Shared server is unavailable", viewModel.SecurityAlertStatus);
+            Assert.Empty(viewModel.SecurityAlerts);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("verified", true)]
     [InlineData("mismatch", false)]
@@ -226,6 +378,7 @@ public sealed class OrganizationViewModelTests
                 sharedMonitoringApi: api, activityCollector: collector);
             await viewModel.SignInAsync();
             Assert.Equal(0, collector.Reads);
+            Assert.Equal(0, api.ActivityHistoryReads);
             viewModel.SelectedActivityBinding = Assert.Single(viewModel.Bindings);
             viewModel.ActivityRegion = "us-east-1";
             await viewModel.CollectCloudActivityAsync();
@@ -240,11 +393,63 @@ public sealed class OrganizationViewModelTests
             await viewModel.LoadCloudActivityAsync();
             Assert.Equal(1, collector.Reads);
             Assert.Contains("No live cloud call", viewModel.ActivityStatus);
+            await viewModel.LoadCloudActivityHistoryAsync();
+            viewModel.SelectedActivitySnapshot = Assert.Single(viewModel.ActivityHistory);
+            await viewModel.LoadCloudActivityAsync();
+            Assert.Equal(collector.LastSnapshot!.SnapshotId, api.LastHistoricalSnapshotId);
+            Assert.Equal(1, collector.Reads);
             viewModel.ActivityReadConsent = true;
             viewModel.ActivityRegion = "us-west-2";
             Assert.False(viewModel.ActivityReadConsent);
+            Assert.Contains(CloudActivitySource.AwsCloudTrailLake, viewModel.ActivitySources);
+            Assert.Contains(CloudActivitySource.AwsS3Archive, viewModel.ActivitySources);
+            viewModel.ActivityReadConsent = true;
+            viewModel.ActivitySourceKind = CloudActivitySource.AwsCloudTrailLake;
+            Assert.False(viewModel.ActivityReadConsent);
+            Assert.Contains("BILLABLE", viewModel.ActivitySetupInstructions);
+            viewModel.ActivityReadConsent = true;
+            viewModel.ActivityDestination = Guid.NewGuid().ToString();
+            Assert.False(viewModel.ActivityReadConsent);
+            await viewModel.CollectCloudActivityAsync();
+            Assert.Equal(1, collector.Reads);
+            viewModel.ActivityReadConsent = true;
+            await viewModel.CollectCloudActivityAsync();
+            Assert.Equal(CloudActivitySource.AwsCloudTrailLake, collector.LastQuery!.SourceKind);
+            Assert.Equal(viewModel.ActivityDestination, collector.LastQuery.Destination);
+            Assert.Equal(2, collector.Reads);
+            Assert.Contains("no matching non-demo", viewModel.ActivityAttributionStatus);
+            await viewModel.LoadCloudActivityHistoryAsync();
+            Assert.True(viewModel.HasOlderActivityHistory);
+            await viewModel.LoadCloudActivityHistoryAsync(true);
+            Assert.Equal(2, viewModel.ActivityHistory.Count);
+            Assert.False(viewModel.HasOlderActivityHistory);
+            api.PendingHistory = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var pendingHistory = viewModel.LoadCloudActivityHistoryAsync();
+            viewModel.ActivityPrefix = "changed-history-context";
+            api.PendingHistory.SetResult(new CloudActivityHistoryPage(
+                [new(Guid.NewGuid(), DateTimeOffset.UtcNow, "Stale response", null, false, 0, Guid.Empty)], null));
+            await pendingHistory;
+            Assert.Empty(viewModel.ActivityHistory);
+            api.PendingHistory = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            api.PendingHistory.SetException(new HttpRequestException("History endpoint unavailable."));
+            await viewModel.LoadCloudActivityHistoryAsync();
+            Assert.Contains("Saved activity history read failed", viewModel.ActivityStatus);
+            Assert.Empty(viewModel.ActivityHistory);
+            api.PendingHistory = null;
+            collector.PendingRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            viewModel.ActivityReadConsent = true;
+            var pending = viewModel.CollectCloudActivityAsync();
+            viewModel.ActivityDestination = "changed-destination";
+            collector.PendingRead.SetResult(collector.LastSnapshot!);
+            await pending;
+            Assert.Equal(2, api.ActivityUploads);
+            Assert.Empty(viewModel.ActivityActions);
             await viewModel.SignOutAsync();
             Assert.Empty(viewModel.ActivityActions);
+            Assert.Empty(viewModel.ActivityCorrelations);
+            Assert.Empty(viewModel.ActivityProvenance);
+            Assert.Empty(viewModel.ActivityHistory);
+            Assert.Null(viewModel.SelectedActivitySnapshot);
             Assert.Null(viewModel.SelectedActivityBinding);
         }
         finally
@@ -256,12 +461,17 @@ public sealed class OrganizationViewModelTests
     private sealed class TestActivityCollector : ICloudActivityCollector
     {
         public int Reads { get; private set; }
+        public CloudActivityQuery? LastQuery { get; private set; }
+        public TaskCompletionSource<CloudActivitySnapshot>? PendingRead { get; set; }
+        public CloudActivitySnapshot? LastSnapshot { get; private set; }
         public Task<CloudActivitySnapshot> CollectAsync(CloudActivityQuery query, CancellationToken cancellationToken = default)
         {
             Reads++;
-            return Task.FromResult(new CloudActivitySnapshot(Guid.NewGuid(), query.Provider, query.AccountId,
+            LastQuery = query;
+            LastSnapshot = new CloudActivitySnapshot(Guid.NewGuid(), query.Provider, query.AccountId,
                 query.ThroughUtc.AddDays(-90), query.ThroughUtc, "CloudTrail regional event history", "Partial management only", false,
-                new[] { new CloudActivityEvent("event", "reader", "GetObject", null, null, query.ThroughUtc.AddDays(-1), true) }));
+                new[] { new CloudActivityEvent("event", "reader", "GetObject", null, null, query.ThroughUtc.AddDays(-1), true) });
+            return PendingRead?.Task ?? Task.FromResult(LastSnapshot);
         }
     }
 
@@ -406,13 +616,61 @@ public sealed class OrganizationViewModelTests
         public string? ChooseLocalBackupOpenPath() => null;
     }
 
-    private sealed class TestMonitoringApi : ISharedMonitoringApi, ISharedOperationalApi, ISharedCloudActivityApi
+    private sealed class TestMonitoringApi : ISharedMonitoringApi, ISharedOperationalApi, ISharedCloudActivityApi, ISharedSecurityAlertApi, ISharedCloudActivityHistoryApi, ISharedEntitlementEvidenceApi
     {
+        private EntitlementEvidenceSnapshot? _entitlement;
+        public int EntitlementUploads { get; private set; }
+        public Task<EntitlementEvidenceSnapshot> UploadEntitlementEvidenceAsync(Guid organizationId, EntitlementEvidenceSnapshot snapshot, CancellationToken token = default)
+        {
+            EntitlementUploads++;
+            _entitlement = snapshot;
+            return Task.FromResult(snapshot);
+        }
+        public Task<IReadOnlyList<EntitlementEvidenceHistoryEntry>> GetEntitlementEvidenceHistoryAsync(Guid organizationId, CloudProvider provider, string account, CancellationToken token = default)
+            => Task.FromResult<IReadOnlyList<EntitlementEvidenceHistoryEntry>>(_entitlement is null ? [] :
+                [new(_entitlement.SnapshotId, _entitlement.StartedAtUtc, _entitlement.CollectedAtUtc, _entitlement.Grants.Count, Guid.Empty)]);
+        public Task<EntitlementEvidenceSnapshot> GetEntitlementEvidenceAsync(Guid organizationId, CloudProvider provider, string account, Guid snapshotId, CancellationToken token = default)
+            => Task.FromResult(_entitlement ?? throw new InvalidOperationException("No saved entitlement documents."));
+        public int AlertReads { get; private set; }
+        public (Guid Organization, string Product, string Channel) LastAlertScope { get; private set; }
+        public TaskCompletionSource<IReadOnlyList<StoredSecurityAlert>>? PendingAlerts { get; set; }
+        public IReadOnlyList<StoredSecurityAlert> SavedAlerts { get; } =
+            [new("Sentinel", "client-security", Guid.NewGuid(), DateTimeOffset.UtcNow,
+                new("incident-1", DateTimeOffset.UtcNow, "Review", "High", "Open", null, null, null))];
+        public Task<IReadOnlyList<StoredSecurityAlert>> GetSecurityAlertsAsync(Guid organizationId, string product, string channel, CancellationToken token = default)
+        {
+            AlertReads++;
+            LastAlertScope = (organizationId, product, channel);
+            return PendingAlerts?.Task ?? Task.FromResult(SavedAlerts);
+        }
         private CloudActivitySnapshot? _activity;
+        private readonly List<CloudActivitySnapshot> _savedActivity = new();
+        public int ActivityHistoryReads { get; private set; }
+        public Guid? LastHistoricalSnapshotId { get; private set; }
+        public TaskCompletionSource<CloudActivityHistoryPage>? PendingHistory { get; set; }
+        public Task<CloudActivityHistoryPage> GetCloudActivityHistoryAsync(Guid organizationId, CloudProvider provider,
+            string accountId, Guid? beforeSnapshotId, CancellationToken token = default)
+        {
+            ActivityHistoryReads++;
+            if (PendingHistory is not null) return PendingHistory.Task;
+            var index = beforeSnapshotId is null ? _savedActivity.Count - 1 : _savedActivity.FindIndex(item => item.SnapshotId == beforeSnapshotId) - 1;
+            if (index < 0) return Task.FromResult(new CloudActivityHistoryPage([], null));
+            var item = _savedActivity[index];
+            return Task.FromResult(new CloudActivityHistoryPage(
+                [new(item.SnapshotId, item.ThroughUtc, item.Source, item.SourceScope, item.Truncated, item.Events.Count, Guid.Empty)],
+                index > 0 ? item.SnapshotId : null));
+        }
+        public Task<CloudActivitySnapshot> GetCloudActivitySnapshotAsync(Guid organizationId, CloudProvider provider,
+            string accountId, Guid snapshotId, CancellationToken token = default)
+        {
+            LastHistoricalSnapshotId = snapshotId;
+            return Task.FromResult(_savedActivity.Single(item => item.SnapshotId == snapshotId));
+        }
         public int ActivityUploads { get; private set; }
         public Task<CloudActivitySnapshot> UploadCloudActivityAsync(Guid organizationId, CloudActivitySnapshot snapshot, CancellationToken cancellationToken = default)
         {
             _activity = snapshot;
+            _savedActivity.Add(snapshot);
             ActivityUploads++;
             return Task.FromResult(snapshot);
         }

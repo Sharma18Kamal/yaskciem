@@ -12,15 +12,15 @@ This milestone exports organization-scoped operational events to client-owned re
 | Other SIEM/SOAR | `SignedWebhook` | Existing signed HTTPS webhook to a client-managed bridge |
 | Carbon Black | Not selectable | Deferred until the client confirms edition and API requirements |
 
-These are **outbound event exports**, not bidirectional integrations. Reading SIEM alerts, creating Sentinel incidents, invoking SOAR playbooks, and applying approved cloud responses are not implemented here. Receiving an event must not authorize permission removal, credential changes, or cloud writes. Existing Jira ticket creation remains available separately.
+These transports are **outbound event exports**, not native bidirectional integrations. A separate, explicitly enabled [inbound normalized client bridge](#7-inbound-normalized-client-bridge) accepts alerts from Splunk, QRadar, Sentinel or another client bridge. Native product API polling, creating Sentinel incidents, invoking SOAR playbooks and applying approved cloud responses are not implemented by these connectors. Receiving an event or alert must not authorize permission removal, credential changes or cloud writes. Existing Jira ticket creation remains available separately.
 
 The shared server worker, not Desktop, sends events. A client administrator provisions the receiver and a deployment administrator configures the server channel. Organization policy administrators select only the channel alias and event filters. Different clients can use different products without sharing endpoints or credentials.
 
 ## 1. Upgrade and provision
 
 1. Back up PostgreSQL, including operational events, notification rules, deliveries and attempts. Pause notification workers during the coordinated upgrade.
-2. Using the DBA identity, apply migrations `001` through `005`, then [006-security-connectors.sql](../../infra/postgres/006-security-connectors.sql) and [007-cloud-activity.sql](../../infra/postgres/007-cloud-activity.sql). Production startup does not migrate schemas. Migration 006 expands the delivery-kind constraint; 007 adds on-demand activity snapshots. Readiness requires both. Existing SignedWebhook/Jira deliveries are preserved.
-3. Deploy the updated server and Desktop. The staging bundle includes migrations 006 and 007. Resume workers after readiness succeeds.
+2. Using the DBA identity, apply migrations `001` through `005`, then [006-security-connectors.sql](../../infra/postgres/006-security-connectors.sql), [007-cloud-activity.sql](../../infra/postgres/007-cloud-activity.sql) and [008-inbound-security.sql](../../infra/postgres/008-inbound-security.sql). Production startup does not migrate schemas. Migration 006 expands the delivery-kind constraint; 007 adds on-demand activity snapshots; 008 adds bridge cursors and evidence. Readiness requires all three, including enabled inbound append-only guards and the latest-revision index. Existing SignedWebhook/Jira deliveries are preserved.
+3. Apply [009-entitlement-evidence.sql](../../infra/postgres/009-entitlement-evidence.sql), then deploy the updated server and Desktop. The staging bundle includes migrations 001 through 009. Readiness also requires the permission-document table, valid account/time index and enabled append-only guards. Resume workers after readiness succeeds. See [document setup](cloud-activity.md#on-demand-permission-documents-and-saved-observations).
 4. Provision the chosen receiver below and permit only the necessary network egress. Require valid TLS certificates and approved host trust. Never bypass hostname/chain validation.
 5. Configure each alias at:
 
@@ -118,7 +118,7 @@ In the Desktop Organizations workspace, select the native connector kind, enter 
 
 The app now shows product-specific **please create/configure the receiver** instructions when a connector is selected. Before saving an enabled rule, the user must confirm the client-created receiver and organization server alias are configured. Selecting another kind/channel/rule resets confirmation. Disabling a rule remains available without setup confirmation. This is an on-demand setup guard, not a connectivity test or a replacement for server-side authorization/configuration checks; existing enabled policies continue independently on the server.
 
-The same workspace has an on-demand cloud activity panel. It explains required read/logging permissions for the selected account and requests explicit consent before one read. Regional CloudTrail history and Azure Activity Log require no new log endpoint; fuller data-plane evidence may require the client to provision trails/diagnostic destinations or enable GCP Data Access logging. The app does not create those resources, enable logging, or grant permissions. Saved-evidence loading does not contact live cloud APIs. See [activity collection](../architecture/continuous-monitoring.md#on-demand-cloud-activity-collection) for coverage limits.
+The same workspace has an on-demand cloud activity panel. It explains required read/logging permissions for the selected source and requests explicit consent before one read. Regional CloudTrail history and Azure Activity Log require no new log endpoint. The source selector also supports existing CloudTrail Lake stores, CloudTrail S3 archives, Azure Log Analytics workspaces and diagnostic Blob archives; GCP project reads include enabled Data Access logs. Clients provision those destinations and logging, then supply the scoped source identifiers. CloudTrail Lake queries can incur charges and are unavailable to new customers after May 2026. The app does not create those resources, enable logging, or grant permissions. Saved-evidence loading does not contact live cloud APIs. See [data-plane setup](cloud-activity.md) and [activity collection](../architecture/continuous-monitoring.md#on-demand-cloud-activity-collection) for actual coverage and attribution limits.
 
 The [HTTP examples](../../src/CloudEntitle.LicenseServer/OperationalIntegrations.http) include catalog, health and an opt-in Splunk rule. For QRadar or Sentinel, use a distinct rule ID and replace `connectorKind` and `channel` with `QRadarTls`/`qradar` or `SentinelLogs`/`sentinel`. Keep `allowAutomaticTickets: false` for exports.
 
@@ -151,7 +151,7 @@ Events contain identifiers and hashes, not full finding evidence, raw cloud logs
 
 ## 6. Acceptance and operational checks
 
-1. Verify server readiness and the organization catalog. The catalog explicitly reports `ImportAlerts: false` and `ExecuteResponseActions: false`; Carbon Black exports are also false.
+1. Verify server readiness and the organization catalog. Outbound transports report `ImportAlerts: false`; the distinct `InboundClientBridge` entry reports `ImportAlerts: true`, `ExportEvents: false` and client-owned product polling. All entries report `ExecuteResponseActions: false`; Carbon Black exports/imports remain deferred.
 2. Enable a low-risk test rule in an approved test organization/account. Run comparable complete scans to produce controlled changes. Confirm the correct tenant/account/delivery IDs in the client receiver.
 3. Check delivery status and attempt history. `/connectors/health` is **passive**, not an endpoint probe: configuration validity, delivery totals, retries, dead letters and historical latency do not prove live receiver connectivity.
 4. Splunk/Sentinel use at-least-once delivery with bounded retries (up to five) for network failures, timeouts and HTTP 408/429/5xx. Neither receiver is assumed to honor `Idempotency-Key`. Deduplicate by delivery ID. Malformed/nonzero/oversized HEC success acknowledgements are terminal `outcome_unknown`; reconcile before manual resend.
@@ -166,3 +166,83 @@ Automated tests cover formatting, acknowledgement handling, safe configuration f
 - [IBM QRadar TLS syslog configuration](https://www.ibm.com/docs/en/qsip/7.5.0?topic=options-tls-syslog-protocol-configuration)
 - [Azure Monitor Logs Ingestion overview](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview)
 - [Azure Monitor Logs Ingestion code samples](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-code)
+
+## 7. Inbound normalized client bridge
+
+### Provision on demand
+
+Nothing polls a SIEM at sign-in, during a scan or when reading saved alerts. The Desktop panel asks the administrator to create/configure a client bridge and server alias before use. The client owns the SIEM endpoint, polling/playbook automation, product credentials and source pagination. The application supplies a canonical HTTPS batch endpoint, not a vendor polling adapter or bridge deployment service.
+
+1. The client administrator selects exact product `Splunk`, `QRadar`, `Sentinel` or `ClientBridge` and an organization-specific alias (1-64 ASCII letters/digits/`-`/`_`, beginning with a letter/digit).
+2. The deployment administrator enables that organization alias:
+
+   ```text
+   InboundSecurity:Organizations:<tenant-guid>:<organization-guid>:Channels:<alias>:Enabled=true
+   InboundSecurity:Organizations:<tenant-guid>:<organization-guid>:Channels:<alias>:Product=Sentinel
+   ```
+
+   Use GUIDs in canonical hyphenated format. Environment settings replace `:` with `__`. Aliases are disabled by default and must match the submitted product exactly. This configuration contains no SIEM URLs or credentials.
+3. Approve the shared server's HTTPS endpoint and TLS trust. Acquire an Entra bearer token for the existing CIEM API audience/access policy. The authenticated identity must be a member of the selected organization; importing requires `ManagePolicies`, `ViewFindings` and `ViewInventory`. Saved reads/cursor reads require `ViewFindings` and `ViewInventory`. A SIEM token is not a CIEM token; having a cloud or product administrator role alone does not authorize the organization API.
+4. Implement/test the client mapping and checkpoint persistence below in an approved test environment. Do not upload credentials, raw event bodies, unnecessary personal data or signed evidence links. Never log Authorization headers.
+5. Only after explicit client approval should the bridge call the endpoint. Disable the alias to stop further imports; saved evidence remains readable. This does not revoke permissions or close findings.
+
+### Product mapping boundary
+
+| Source | Client mapping responsibility |
+|---|---|
+| Splunk | Read approved saved-search/Enterprise Security notable results or use a client alert action. Supply a stable notable ID and the actual revision/update time, not the polling time. Normalize local urgency and investigation state with an agreed mapping. |
+| QRadar | Read authorized offense API results. Map offense ID, actual last-updated time, severity and status. Severity scale and ID namespace are client/version-specific; use `Unknown` when not established. |
+| Sentinel | Read workspace incidents or use a client incident playbook. Map stable incident ARM ID, `lastModifiedTimeUtc`, title, severity and state (`New` to `Open`, `Active` to `Investigating`, `Closed` to `Closed`). Keep the workspace/source stable within the alias. |
+| ClientBridge | Map another approved product into the same contract; no arbitrary cloud response instructions are accepted. Carbon Black requires edition/API and client mapping confirmation first. |
+
+The bridge must follow the source's pagination and retain a durable client checkpoint. A timestamp alone can miss equal-timestamp events: use source-defined continuation plus an overlap/deduplication strategy, and ingest status updates/closures as new revisions. The server cursor is opaque and **not proof of complete source collection**. Native paging/rate-limit handling, source availability monitoring and bridge restart recovery are the client's responsibility.
+
+See [Sentinel incident list API](https://learn.microsoft.com/en-us/rest/api/securityinsights/incidents/list?view=rest-securityinsights-2024-03-01) for workspace incidents and continuation links. Product API versions/permissions must be confirmed for the deployed client edition.
+
+### API and atomic checkpoint contract
+
+Use the examples in [SecurityAlerts.http](../../src/CloudEntitle.LicenseServer/SecurityAlerts.http), replacing server URL, GUIDs, token and timestamps.
+
+```text
+GET  /api/v1/organizations/<org>/security-alerts/<product>/<alias>/cursor
+POST /api/v1/organizations/<org>/security-alerts/<product>/<alias>/batches
+GET  /api/v1/organizations/<org>/security-alerts/<product>/<alias>?limit=100
+```
+
+POST body:
+
+```json
+{
+  "batchId": "00000000-0000-0000-0000-000000000010",
+  "previousCursor": null,
+  "cursor": "client-checkpoint-1",
+  "alerts": [{
+    "alertId": "source-incident-1001",
+    "updatedAtUtc": "2026-11-08T12:00:00Z",
+    "title": "Privileged identity activity requires review",
+    "severity": "High",
+    "status": "Open",
+    "principal": null,
+    "resource": null,
+    "evidenceUrl": "https://siem.example.invalid/incident/1001"
+  }]
+}
+```
+
+- Each batch has a new nonempty GUID, at most 500 alerts and at most 2 MiB of request/serialized payload. Unknown-length/chunked oversized requests are also rejected before JSON deserialization. Use JSON Content-Type; malformed/invalid payloads return 400, oversize 413 and unsupported Content-Type 415.
+- Severity: `Critical`, `High`, `Medium`, `Low`, `Informational`, `Unknown`. Status: `Open`, `Investigating`, `Closed`, `Unknown`. Do not invent a severity or identity association from missing evidence.
+- Revision time must be between Unix epoch and current server time plus one minute. Key: tenant/organization/product/alias/alert ID/update timestamp. PostgreSQL timestamps have microsecond precision; use UTC microsecond timestamps consistently. Different submicrosecond timestamps or representations for the same key can conservatively conflict; do not change payloads on retries.
+- Evidence URLs, if present, must be HTTPS without userinfo, query strings or fragments. They are stored references, never fetched or executed. Principal/resource are untrusted strings, not cloud bindings or proof of exploitation.
+- Initial `previousCursor` is null. Later requests must match the current server cursor exactly and advance to a different nonempty opaque cursor (maximum 2048 characters). Empty alert batches can commit a checkpoint without asserting coverage.
+- Alert revisions, the receipt and cursor advancement commit in one transaction. A stale cursor, reused batch ID with different content or conflicting existing revision returns 409 and commits nothing. Concurrent first imports have one winner.
+- On timeout/unknown HTTP outcome, retry the **same batch ID and payload**. Exact replay returns the original receipt even if another batch advanced the cursor meanwhile; reread the server cursor before preparing another batch. Never blindly change a failed batch's cursor to bypass conflicts.
+- A 201 receipt's `revisions` counts accepted entries, including exact already stored revisions; it does not count newly inserted rows, resolved findings or executed actions.
+- Saved GET returns at most 500 latest revisions (default 100) ordered by update time. Older imported revisions cannot rewind an alert. This is a bounded saved view, not a complete historical alert export.
+
+### Evidence and response safety
+
+The receiving actor and reception time are retained. Runtime has no UPDATE/DELETE/TRUNCATE grants on alert revisions or receipts; row and statement triggers reject those mutations. A database administrator can alter guards/data; these tables are **not WORM, cloud-attested evidence or a tamper-proof audit archive**. No automated alert/receipt pruning is implemented; coordinate retention, backups and storage monitoring under the client's evidence policy.
+
+SIEM imports do not enqueue outbound responses, mutate CIEM finding state, create recommendations, approve remediation, execute playbooks, grant JIT access or change cloud permissions. Manual cloud administration remains a separate preview/confirmation/verification workflow. Complete activity/entitlement attribution and operational dependency evidence are still required before automated least-privilege removal.
+
+Acceptance: verify unauthorized/foreign-tenant denial, disabled/product-mismatch alias denial, exact replay, cursor conflict, whole-batch rollback, older revision handling, Desktop sign-out/selection race guards and explicit failures. Passing local tests is not acceptance against a live vendor deployment. Client-approved native polling and approved SOAR execution remain separate work.

@@ -3,10 +3,12 @@ using System.Text;
 using CloudEntitle.AccessPath.Models;
 using CloudEntitle.AccessPath.Services;
 using CloudEntitle.Application.Interfaces;
+using CloudEntitle.Application.Services;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.Normalization.Models;
 using CloudEntitle.RiskEngine.Models;
+using CloudEntitle.Integration.Contracts;
 using GraphRiskEngine = CloudEntitle.RiskEngine.Services.RiskEngine;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
@@ -24,6 +26,97 @@ public sealed class LiveResourceRiskGraphEvaluator
 {
     private readonly AccessPathEngine _accessPathEngine = new();
     private readonly GraphRiskEngine _riskEngine = new();
+
+    public async Task<LiveResourceRiskGraphResult> EvaluateDocumentsAsync(CloudAccount account,
+        IReadOnlyList<CloudPrincipal> principals, IReadOnlyList<CloudResource> resources,
+        EntitlementEvidenceSnapshot documents, CancellationToken token = default)
+    {
+        if (account.Provider != documents.Provider || !string.Equals(account.ExternalId, documents.AccountId,
+            documents.Provider == CloudProvider.Azure ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new ArgumentException("Permission document risk evaluation requires matching non-demo account inventory.");
+        var permissions = new List<CloudPermission>();
+        var entitlements = new List<NormalizedEntitlement>();
+        var access = new List<DomainEffectiveAccess>();
+        var scopedPrincipals = principals.Where(item => item.AccountId == account.Id && (int)item.CloudProvider == (int)documents.Provider).ToArray();
+        var scopedResources = resources.Where(item => item.AccountId == account.Id).ToArray();
+        foreach (var grant in documents.Grants.Where(item => item.Effect == "Allow" && !item.IsExclusion && !item.HasCondition))
+        {
+            token.ThrowIfCancellationRequested();
+            if (documents.Grants.Any(block => block.Principal == grant.Principal && block.SourceId == grant.SourceId
+                && (block.IsExclusion || block.Effect == "Deny" || block.HasCondition))) continue;
+            var matches = scopedPrincipals.Where(item => PrincipalMatches(documents.Provider, grant.Principal, item)).ToArray();
+            if (matches.Length != 1) continue;
+            var principal = matches[0];
+            var targets = scopedResources.Where(resource => DocumentResourceMatches(documents.Provider, grant, resource)).ToArray();
+            var permissionId = StableId($"document-permission|{documents.Provider}|{documents.AccountId}|{grant.SourceId}|{grant.StatementId}|{grant.Action}|{grant.ResourcePattern}");
+            if (permissions.All(item => item.Id != permissionId))
+                permissions.Add(new CloudPermission
+                {
+                    Id = permissionId, AccountId = account.Id, Action = grant.Action, Name = grant.Action,
+                    Scope = grant.Scope, Resource = grant.ResourcePattern, Source = grant.SourceId, AccessType = AccessType.Allow
+                });
+            var evidence = new ProviderEvidence(documents.Provider, "ObservedPermissionDocument", grant.SourceId, grant.Role,
+                null, null, grant.Scope, "Observed document statement", documents.CollectedAtUtc.UtcDateTime,
+                new Dictionary<string, string> { ["sourceSha256"] = grant.SourceSha256, ["sourceVersion"] = grant.SourceVersion, ["evaluation"] = "partial" });
+            foreach (var resource in targets)
+            {
+                if (access.Count >= 20_000) throw new InvalidOperationException("Document risk candidate limit exceeded; narrow the inventory. No complete risk result was produced.");
+                var id = StableId($"document-access|{permissionId}|{principal.Id}|{resource.Id}");
+                if (access.Any(item => item.Id == id)) continue;
+                entitlements.Add(new(id, documents.Provider, account.Id, principal.Id, resource.Id, null, null, permissionId,
+                    new(documents.Provider, NormalizedScopeType.Resource, grant.Scope, grant.Scope, resource.ResourceId, false),
+                    AssignmentType.Policy, NormalizedAccessType.Allow, true, false, false, null, NormalizationStatus.PartiallyNormalized,
+                    evidence, documents.CollectedAtUtc.UtcDateTime, null, grant.ResourcePattern));
+                access.Add(new()
+                {
+                    Id = id, Provider = documents.Provider, CloudAccountId = account.Id, PrincipalId = principal.Id,
+                    ResourceId = resource.Id, PermissionId = permissionId, Decision = AccessDecision.Allow,
+                    EvaluationStatus = EvaluationStatus.PartiallyEvaluated, Scope = grant.Scope, AssignmentType = AssignmentType.Policy,
+                    AccessType = AccessType.Allow, IsDirect = true, IsPrivileged = grant.Action is "*" or "iam:*",
+                    Evidence = $"Observed source {grant.SourceId}; version {grant.SourceVersion}; SHA256 {grant.SourceSha256}. Partial candidate, not effective authorization.",
+                    AccessSource = grant.SourceId, CalculatedAt = documents.CollectedAtUtc.UtcDateTime
+                });
+            }
+        }
+        var mapped = scopedResources.Select(resource => ResourceSecuritySignalMapper.MapTags(resource, account.CloudProvider)).ToArray();
+        var signals = mapped.SelectMany(item => item.Signals).ToArray();
+        var coverage = mapped.SelectMany(item => item.Coverage).ToArray();
+        var normalized = new NormalizationResult(scopedPrincipals, [], [], permissions, entitlements, [],
+            ["Observed documents are partial candidates, not effective authorization."], new(entitlements.Count, 0, entitlements.Count, 0, 0));
+        var paths = await _accessPathEngine.BuildAsync(new(access, normalized, scopedResources, [], ResourceSecuritySignals: signals,
+            ResourceSecurityCoverage: coverage, EvaluatedAt: documents.CollectedAtUtc.UtcDateTime), token);
+        var risk = await _riskEngine.EvaluateAsync(new([account], scopedPrincipals, scopedResources, [], [], permissions,
+            entitlements, access, paths.Paths, [], EvaluatedAt: documents.CollectedAtUtc.UtcDateTime,
+            Options: new(EnabledRules: new HashSet<string> { "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-021" }),
+            ResourceSecuritySignals: signals, ResourceSecurityCoverage: coverage), token);
+        foreach (var finding in risk.Findings)
+            finding.EvaluationState = RiskEvaluationState.Potential;
+        return new(paths.Paths, risk.Findings,
+            documents.Limitations.Concat(paths.Diagnostics.Select(item => item.Message)).Concat(risk.Diagnostics.Select(item => item.Message))
+                .Append("Document-based review candidates only. Uncollected denies, runtime conditions and resource controls may block these paths; no confirmed exploitation or remediation approval is asserted.").ToArray());
+    }
+
+    private static bool PrincipalMatches(CloudProvider provider, string external, CloudPrincipal principal)
+    {
+        var comparison = provider == CloudProvider.Azure ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (string.Equals(external, principal.ExternalId, comparison) || string.Equals(external, principal.PrincipalId, comparison)) return true;
+        return provider == CloudProvider.Gcp && external.StartsWith("serviceAccount:", StringComparison.Ordinal)
+            && (string.Equals(external["serviceAccount:".Length..], principal.ExternalId, StringComparison.Ordinal)
+                || string.Equals(external["serviceAccount:".Length..], principal.Email, StringComparison.Ordinal));
+    }
+
+    private static bool DocumentResourceMatches(CloudProvider provider, ObservedPermissionGrant grant, CloudResource resource)
+    {
+        var external = string.IsNullOrWhiteSpace(resource.ExternalId) ? resource.ResourceUri : resource.ExternalId;
+        if (string.IsNullOrWhiteSpace(external)) return false;
+        if (provider == CloudProvider.Aws)
+            return System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(grant.ResourcePattern, external, ignoreCase: false);
+        if (provider == CloudProvider.Azure)
+            return external.Equals(grant.Scope, StringComparison.OrdinalIgnoreCase)
+                || external.StartsWith(grant.Scope.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase);
+        return external.Equals(grant.Scope, StringComparison.Ordinal)
+            || external.StartsWith(grant.Scope + "/", StringComparison.Ordinal);
+    }
 
     public async Task<LiveResourceRiskGraphResult> EvaluateAsync(
         IReadOnlyList<CloudAccount> accounts,
@@ -170,7 +263,7 @@ public sealed class LiveResourceRiskGraphEvaluator
 
         var options = new RiskRuleOptions(EnabledRules: new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020"
+            "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-022"
         });
         var riskResult = await _riskEngine.EvaluateAsync(new RiskEvaluationRequest(
             accounts, principals.Values.ToArray(), resources, roles.Values.ToArray(), Array.Empty<CloudPolicy>(),

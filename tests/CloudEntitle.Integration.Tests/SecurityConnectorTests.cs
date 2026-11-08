@@ -160,7 +160,11 @@ public sealed class SecurityConnectorTests
             Assert.True(Assert.Single(SecurityConnectorCatalog.Capabilities, item => item.Kind == kind).ExportEvents);
         }
         Assert.All(SecurityConnectorCatalog.Capabilities, item => Assert.False(item.ExecuteResponseActions));
-        Assert.All(SecurityConnectorCatalog.Capabilities, item => Assert.False(item.ImportAlerts));
+        Assert.All(SecurityConnectorCatalog.Capabilities.Where(item => item.Kind != "InboundClientBridge"), item => Assert.False(item.ImportAlerts));
+        var inbound = Assert.Single(SecurityConnectorCatalog.Capabilities, item => item.Kind == "InboundClientBridge");
+        Assert.True(inbound.ImportAlerts);
+        Assert.False(inbound.ExportEvents);
+        Assert.DoesNotContain(inbound.Kind, SecurityConnectorCatalog.OutboundKinds);
         Assert.Throws<ArgumentException>(() => SharedWorkspaceStore.ValidateNotificationRule(
             new(Guid.NewGuid(), "Not supported", true, SharedAlertSeverity.High, true, true, true, true, true, "client-security")
             { ConnectorKind = "CarbonBlackCloud" }));

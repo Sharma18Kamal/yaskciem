@@ -26,6 +26,8 @@ public static class SecurityConnectorCatalog
         new SecurityConnectorCapability(Sentinel, "Microsoft Sentinel", "Azure Monitor Logs Ingestion API", true, false, false),
         new SecurityConnectorCapability("SignedWebhook", "Client-managed SIEM/SOAR bridge", "HTTPS HMAC webhook", true, false, false),
         new SecurityConnectorCapability("Jira", "Jira Software Cloud", "HTTPS REST v3 issue creation", true, false, false),
+        new SecurityConnectorCapability("InboundClientBridge", "Splunk / QRadar / Microsoft Sentinel / client bridge",
+            "Authenticated normalized HTTPS batch push (client-owned product polling)", false, true, false),
         new SecurityConnectorCapability("CarbonBlackCloud", "Carbon Black Cloud (deferred)", "Not configured", false, false, false)
     });
 }

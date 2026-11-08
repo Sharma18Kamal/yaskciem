@@ -33,6 +33,8 @@
     <EmbeddedResource Include="..\..\infra\postgres\005-operations-scale.sql" LogicalName="CloudEntitle.LicenseServer.ScaleSchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\006-security-connectors.sql" LogicalName="CloudEntitle.LicenseServer.SecurityConnectorSchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\007-cloud-activity.sql" LogicalName="CloudEntitle.LicenseServer.CloudActivitySchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\008-inbound-security.sql" LogicalName="CloudEntitle.LicenseServer.InboundSecuritySchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\009-entitlement-evidence.sql" LogicalName="CloudEntitle.LicenseServer.EntitlementEvidenceSchema.sql" />
   </ItemGroup>
 
   <Target Name="BuildOperationsConsole" BeforeTargets="PrepareForBuild" Condition="'$(BuildWebConsole)' == 'true'">

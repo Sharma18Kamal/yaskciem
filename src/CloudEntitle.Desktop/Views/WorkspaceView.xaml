@@ -820,20 +820,105 @@
                             <StackPanel>
                                 <TextBlock Text="ON-DEMAND CLOUD ACTIVITY (30 / 60 / 90 DAYS)" Style="{StaticResource CardLabel}"/>
                                 <ComboBox ItemsSource="{Binding Bindings}" SelectedItem="{Binding SelectedActivityBinding, Mode=TwoWay}" DisplayMemberPath="DisplayName" Margin="0,8,0,0" ToolTip="Select the bound account for explicit read-only audit collection"/>
+                                <ComboBox ItemsSource="{Binding ActivitySources}" SelectedItem="{Binding ActivitySourceKind, Mode=TwoWay}" Margin="0,8,0,0" ToolTip="Select existing regional/project logs, a client-owned query destination, or diagnostic archive"/>
                                 <TextBlock Text="{Binding ActivitySetupInstructions}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <TextBlock Text="Client destination (Lake UUID / S3 bucket / Azure workspace or storage-account ARM ID)" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding ActivityDestination, UpdateSourceTrigger=PropertyChanged}" ToolTip="Existing client-provisioned audit destination, not a token or endpoint credential"/>
+                                <TextBlock Text="Azure archive container (insights-logs-*)" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding ActivityContainer, UpdateSourceTrigger=PropertyChanged}" ToolTip="Diagnostic Blob archive container; unused for other sources"/>
+                                <TextBlock Text="Archive resource/date prefix" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding ActivityPrefix, UpdateSourceTrigger=PropertyChanged}" ToolTip="Narrow archive object prefix. AWS must contain AWSLogs/bound-account/CloudTrail/. Maximum 128 files per collection."/>
                                 <WrapPanel Margin="0,8,0,0">
                                     <TextBlock Text="AWS region:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                     <TextBox Text="{Binding ActivityRegion, UpdateSourceTrigger=PropertyChanged}" Width="140" ToolTip="AWS region (required for CloudTrail event history)"/>
                                     <TextBlock Text="AWS profile:" VerticalAlignment="Center" Margin="8,0,6,0"/>
                                     <TextBox Text="{Binding ActivityProfile, UpdateSourceTrigger=PropertyChanged}" Width="180" Margin="8,0,0,0" ToolTip="AWS CLI profile; blank uses the default. Never enter secrets."/>
                                 </WrapPanel>
-                                <CheckBox Content="I have prepared logging/read access and authorize one live read for this account" IsChecked="{Binding ActivityReadConsent}" Margin="0,8,0,0" ToolTip="Authorize one bounded read of client-provisioned cloud audit logs; no permissions are changed"/>
+                                <CheckBox Content="I have prepared logging/read access and authorize one live read (including client query charges)" IsChecked="{Binding ActivityReadConsent}" Margin="0,8,0,0" ToolTip="Authorize one bounded read. CloudTrail Lake starts a billable query; cancellation does not cancel the AWS query. No permissions or log destinations are changed."/>
                                 <WrapPanel Margin="0,8,0,0">
                                     <Button Content="Collect and save 90-day activity" Command="{Binding CollectActivityCommand}" Style="{StaticResource QuietButton}" ToolTip="Read audit events with explicit consent and save the partial-coverage snapshot"/>
-                                    <Button Content="Load saved (no cloud call)" Command="{Binding LoadActivityCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="View the saved activity snapshot without contacting cloud APIs"/>
+                                    <Button Content="Load selected/latest saved" Command="{Binding LoadActivityCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="View the selected historical snapshot, or latest when none is selected. No cloud APIs are contacted."/>
+                                    <Button Content="Refresh saved history" Command="{Binding RefreshActivityHistoryCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Read saved snapshot summaries only"/>
+                                    <Button Content="Older saved history" Command="{Binding OlderActivityHistoryCommand}" IsEnabled="{Binding HasOlderActivityHistory}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Read the next bounded page of older saved summaries"/>
                                     <Button Content="Cancel read" Command="{Binding CancelActivityCommand}" IsEnabled="{Binding ActivityBusy}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Cancel the in-progress audit collection"/>
                                 </WrapPanel>
+                                <DataGrid ItemsSource="{Binding ActivityHistory}" SelectedItem="{Binding SelectedActivitySnapshot}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="150" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Saved evidence through UTC" Binding="{Binding ThroughUtc, StringFormat={}{0:u}}" Width="180"/>
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="*"/>
+                                        <DataGridTextColumn Header="Source scope" Binding="{Binding SourceScope}" Width="*"/>
+                                        <DataGridTextColumn Header="Rows" Binding="{Binding EventCount}" Width="60"/>
+                                        <DataGridCheckBoxColumn Header="Truncated" Binding="{Binding Truncated}" Width="80"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
                                 <TextBlock Text="{Binding ActivityStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <TextBlock Text="Provider permission documents and observed history" FontWeight="SemiBold" Margin="0,12,0,0"/>
+                                <TextBlock Text="{Binding EntitlementSetupInstructions}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <CheckBox Content="I configured/connected the account and authorize one live permission-document read" IsChecked="{Binding EntitlementReadConsent}" Margin="0,8,0,0"
+                                          ToolTip="Authorize one read of current provider permission documents using the connected account. No policies or endpoints are changed; consent resets after use or selection changes."/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Content="Read and save permission documents" Command="{Binding CollectEntitlementsCommand}" Style="{StaticResource QuietButton}"
+                                            ToolTip="Read actual provider permission documents after explicit consent and save partial evidence to the organization. Requires ManagePolicies and inventory/finding access."/>
+                                    <Button Content="Refresh saved document history" Command="{Binding LoadEntitlementHistoryCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"
+                                            ToolTip="Read the latest 50 saved document observation summaries from the organization API without contacting cloud endpoints."/>
+                                    <Button Content="Load selected documents (saved)" Command="{Binding LoadEntitlementSnapshotCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"
+                                            ToolTip="Load the selected saved document snapshot. Observation time is not historical grant validity; no live cloud read occurs."/>
+                                    <Button Content="Compare historical observations (saved)" Command="{Binding CorrelateHistoricalGrantsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"
+                                            ToolTip="Compare loaded activity against at most five prior saved document observations. Exact compatibility is not proof of the authorizing grant."/>
+                                    <Button Content="Evaluate document risk candidates" Command="{Binding EvaluateDocumentRiskCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"
+                                            ToolTip="Model potential toxic combinations and paths from observed actions and matching non-demo inventory. Partial candidates never approve remediation or establish complete effective access."/>
+                                </WrapPanel>
+                                <TextBlock Text="{Binding EntitlementEvidenceStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <DataGrid ItemsSource="{Binding DocumentRiskCandidates}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="150" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Review candidate (not confirmed access)" Binding="{Binding Title}" Width="*"/>
+                                        <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="80"/>
+                                        <DataGridTextColumn Header="Evaluation" Binding="{Binding EvaluationState}" Width="90"/>
+                                        <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence.Summary}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <DataGrid ItemsSource="{Binding EntitlementHistory}" SelectedItem="{Binding SelectedEntitlementSnapshot}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="120" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Observed UTC (not valid-from)" Binding="{Binding CollectedAtUtc, StringFormat={}{0:u}}" Width="*"/>
+                                        <DataGridTextColumn Header="Permission statements" Binding="{Binding GrantCount}" Width="150"/>
+                                        <DataGridTextColumn Header="Snapshot" Binding="{Binding SnapshotId}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <DataGrid ItemsSource="{Binding ObservedGrants}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="*"/>
+                                        <DataGridTextColumn Header="Actual action/pattern" Binding="{Binding Action}" Width="*"/>
+                                        <DataGridTextColumn Header="Scope/resource" Binding="{Binding ResourcePattern}" Width="*"/>
+                                        <DataGridTextColumn Header="Effect" Binding="{Binding Effect}" Width="70"/>
+                                        <DataGridCheckBoxColumn Header="Exclusion" Binding="{Binding IsExclusion}" Width="80"/>
+                                        <DataGridCheckBoxColumn Header="Conditional" Binding="{Binding HasCondition}" Width="85"/>
+                                        <DataGridTextColumn Header="Source version/digest" Binding="{Binding SourceVersion}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <DataGrid ItemsSource="{Binding HistoricalGrantCorrelations}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="150" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Event" Binding="{Binding EventId}" Width="*"/>
+                                        <DataGridTextColumn Header="Permission evidence" Binding="{Binding Permission}" Width="*"/>
+                                        <DataGridTextColumn Header="Prior observed UTC" Binding="{Binding ObservedAtUtc, StringFormat={}{0:u}}" Width="170"/>
+                                        <DataGridTextColumn Header="Compatibility (not historical proof)" Binding="{Binding Status}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <TextBlock Text="{Binding ActivityAttributionStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <DataGrid ItemsSource="{Binding ActivityCorrelations}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="*"/>
+                                        <DataGridTextColumn Header="Permission evidence" Binding="{Binding Permission}" Width="*"/>
+                                        <DataGridTextColumn Header="Current grant correlation (not proven usage)" Binding="{Binding Status}" Width="*"/>
+                                        <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <DataGrid ItemsSource="{Binding ActivityProvenance}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="100" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Source identity" Binding="{Binding SourceId}" Width="*"/>
+                                        <DataGridTextColumn Header="Content SHA-256 (not attestation)" Binding="{Binding Sha256}" Width="*"/>
+                                        <DataGridTextColumn Header="Source records" Binding="{Binding SourceRecords}" Width="90"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
                                 <DataGrid ItemsSource="{Binding ActivityActions}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="220" Margin="0,8,0,12">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="*"/>
@@ -937,6 +1022,26 @@
                                         <DataGridTextColumn Header="Completed (UTC)" Binding="{Binding CompletedAtUtc, StringFormat=g}" Width="140"/>
                                         <DataGridTextColumn Header="HTTP status" Binding="{Binding HttpStatus}" Width="100"/>
                                         <DataGridTextColumn Header="Failure code" Binding="{Binding FailureCode}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="INBOUND SIEM ALERTS (CLIENT BRIDGE)" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="Provision a client Splunk saved-search action, QRadar offense bridge or Sentinel playbook on demand. Authenticate it to the scoped import API and have the server administrator enable the alias. No SIEM credentials are stored in this editor; imported alerts never authorize cloud responses." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <ComboBox ItemsSource="{Binding SecurityAlertProducts}" SelectedItem="{Binding SecurityAlertProduct, Mode=TwoWay}" Margin="0,8,0,0" ToolTip="Client SIEM product supplying normalized alerts through an authenticated bridge"/>
+                                <TextBox Text="{Binding SecurityAlertChannel, UpdateSourceTrigger=PropertyChanged}" Margin="0,8,0,0" ToolTip="Server-configured organization inbound channel alias; not a URL or token"/>
+                                <Button Content="Refresh saved SIEM alerts" Command="{Binding RefreshSecurityAlertsCommand}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Read imported alerts from the organization API without contacting a live SIEM or changing cloud permissions"/>
+                                <TextBlock Text="{Binding SecurityAlertStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <DataGrid ItemsSource="{Binding SecurityAlerts}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Product}" Width="80"/>
+                                        <DataGridTextColumn Header="Alert ID" Binding="{Binding Alert.AlertId}" Width="*"/>
+                                        <DataGridTextColumn Header="Title" Binding="{Binding Alert.Title}" Width="*"/>
+                                        <DataGridTextColumn Header="Severity" Binding="{Binding Alert.Severity}" Width="90"/>
+                                        <DataGridTextColumn Header="SIEM status" Binding="{Binding Alert.Status}" Width="90"/>
+                                        <DataGridTextColumn Header="Updated UTC" Binding="{Binding Alert.UpdatedAtUtc, StringFormat=u}" Width="150"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
                             </StackPanel>

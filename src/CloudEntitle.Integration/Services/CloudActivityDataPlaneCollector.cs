@@ -44,7 +44,7 @@ public sealed partial class CloudActivityCollector
                 || !SafeArgument(parts[4], 90) || !SafeArgument(parts[8], 63))
                 throw new ArgumentException("Destination must be an exact workspace/storage-account ARM resource ID in the bound subscription.");
             if (query.SourceKind == CloudActivitySource.AzureBlobArchive && (!SafeArgument(query.Container, 63)
-                || !query.Container.StartsWith("insights-logs-", StringComparison.Ordinal)))
+                || !query.Container.StartsWith("insights-logs-", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(query.Prefix)))
                 throw new ArgumentException("Select a client-provisioned insights-logs-* diagnostic archive container.");
         }
         if (query.Prefix.Length > 1024 || query.Prefix.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '/' or '-' or '_' or '.' or '='))
@@ -77,7 +77,7 @@ public sealed partial class CloudActivityCollector
             if (arn != $"arn:aws:cloudtrail:{q.Region}:{q.AccountId}:eventdatastore/{q.Destination}")
                 throw new InvalidOperationException("CloudTrail Lake event data store is outside the selected account/region.");
         }
-        var sql = $"SELECT eventID,eventTime,eventSource,eventName,recipientAccountId,userIdentity,resources,errorCode FROM {q.Destination}"
+        var sql = $"SELECT eventID,eventTime,eventSource,eventName,recipientAccountId,userIdentity.arn AS principalArn,errorCode FROM {q.Destination}"
             + $" WHERE eventTime >= '{start.UtcDateTime:yyyy-MM-dd HH:mm:ss}' AND eventTime <= '{end.UtcDateTime:yyyy-MM-dd HH:mm:ss}'"
             + $" AND recipientAccountId = '{q.AccountId}' ORDER BY eventTime DESC LIMIT {MaximumEvents + 1}";
         using var initiated = await RunAsync("aws", AwsArguments(q, ["cloudtrail", "start-query", "--query-statement", sql, "--output", "json"]), token);
@@ -110,11 +110,8 @@ public sealed partial class CloudActivityCollector
                 foreach (var column in row.EnumerateArray())
                     foreach (var value in column.EnumerateObject())
                         values.Add(value.Name, value.Value.ValueKind == JsonValueKind.Null ? null : value.Value.GetString());
-                // CloudTrail Lake complex columns are string-encoded JSON, not action-to-IAM mappings.
-                var normalized = new Dictionary<string, object?>(StringComparer.Ordinal);
-                foreach (var value in values)
-                    normalized[value.Key] = value.Key is "userIdentity" or "resources" && value.Value is not null
-                        ? JsonSerializer.Deserialize<JsonElement>(value.Value) : value.Value;
+                var normalized = values.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal);
+                normalized["userIdentity"] = new { arn = values.GetValueOrDefault("principalArn") };
                 using var entry = JsonDocument.Parse(JsonSerializer.Serialize(normalized));
                 AddAwsAudit(events, entry.RootElement, q.AccountId, start, end);
             }
@@ -122,7 +119,7 @@ public sealed partial class CloudActivityCollector
             next = Text(page.RootElement, "NextToken");
             if (next is not null && !seen.Add(next)) throw new InvalidOperationException("CloudTrail Lake repeated a continuation token.");
         } while (!truncated && (next is not null || sourceCount == 0 && provenance.Count == 0));
-        return Snapshot(q, start, end, "CloudTrail Lake", "Partial: selected event data store, enabled event selectors and retained history only. Queries incur client charges; gaps and grant attribution remain unknown.", truncated, events, provenance);
+        return Snapshot(q, start, end, "CloudTrail Lake", "Partial: selected event data store, enabled selectors and retained history only. Queries incur client charges. Resource/grant attribution is unavailable for this scalar-column query.", truncated, events, provenance);
     }
 
     private async Task<CloudActivitySnapshot> CollectWorkspaceAsync(CloudActivityQuery q, DateTimeOffset start, DateTimeOffset end, CancellationToken token)
@@ -174,8 +171,10 @@ public sealed partial class CloudActivityCollector
         string? next = null;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var truncated = false;
+        var pageCount = 0;
         do
         {
+            if (++pageCount > 64) { truncated = true; break; }
             IReadOnlyList<string> args;
             if (aws)
             {
@@ -184,16 +183,30 @@ public sealed partial class CloudActivityCollector
                 if (next is not null) list.AddRange(["--continuation-token", next]);
                 args = AwsArguments(q, list);
             }
-            else args = ["storage", "blob", "list", "--account-name", accountName, "--container-name", q.Container, "--prefix", q.Prefix,
-                "--auth-mode", "login", "--num-results", "1000", "--show-next-marker", "--output", "json"];
+            else
+            {
+                var list = new List<string> { "storage", "blob", "list", "--account-name", accountName, "--container-name", q.Container, "--prefix", q.Prefix,
+                    "--auth-mode", "login", "--num-results", "1000", "--show-next-marker", "--output", "json" };
+                if (next is not null) list.AddRange(["--marker", next]);
+                args = list;
+            }
             using var page = await RunAsync(aws ? "aws" : "az", args, token);
             var entries = aws ? page.RootElement.TryGetProperty("Contents", out var contents) ? contents : default : page.RootElement;
             if (entries.ValueKind is not (JsonValueKind.Array or JsonValueKind.Undefined)) throw new InvalidOperationException("Invalid archive listing.");
+            string? azureMarker = null;
+            var markerSeen = false;
             if (entries.ValueKind == JsonValueKind.Array)
                 foreach (var item in entries.EnumerateArray())
                 {
                     if (!aws && item.TryGetProperty("nextMarker", out var marker))
-                    { truncated = !string.IsNullOrEmpty(marker.GetString()); continue; }
+                    {
+                        if (markerSeen || marker.ValueKind is not (JsonValueKind.Null or JsonValueKind.String))
+                            throw new InvalidOperationException("Archive returned invalid continuation evidence.");
+                        markerSeen = true;
+                        azureMarker = marker.ValueKind == JsonValueKind.String ? marker.GetString() : null;
+                        if (azureMarker?.Length == 0) azureMarker = null;
+                        continue;
+                    }
                     var name = RequiredText(item, aws ? "Key" : "name");
                     if (!name.StartsWith(q.Prefix, StringComparison.Ordinal) || name.Length > 2048 || name.Any(char.IsControl))
                         throw new InvalidOperationException("Archive returned an invalid or out-of-prefix object.");
@@ -206,11 +219,12 @@ public sealed partial class CloudActivityCollector
                     files.Add((name, size, version));
                     if (files.Count > MaximumArchiveFiles) { truncated = true; break; }
                 }
-            next = aws ? Text(page.RootElement, "NextContinuationToken") : null;
+            next = aws ? Text(page.RootElement, "NextContinuationToken") : azureMarker;
             if (aws && page.RootElement.TryGetProperty("IsTruncated", out var more) && more.ValueKind == JsonValueKind.True && next is null)
                 throw new InvalidOperationException("Archive pagination evidence is incomplete.");
-            if (next is not null && !seen.Add(next)) throw new InvalidOperationException("Archive repeated a continuation token.");
-        } while (aws && next is not null && !truncated);
+            if (next is not null && (next.Length > 4096 || next.Any(char.IsControl) || !seen.Add(next)))
+                throw new InvalidOperationException("Archive returned an invalid or repeated continuation token.");
+        } while (next is not null && !truncated);
         var events = new List<CloudActivityEvent>();
         var provenance = new List<CloudActivityProvenance>();
         var decodedTotal = 0;
@@ -246,7 +260,7 @@ public sealed partial class CloudActivityCollector
             finally { if (File.Exists(path)) File.Delete(path); }
         }
         return Snapshot(q, start, end, aws ? "CloudTrail S3 archive" : "Azure Blob diagnostic archive",
-            "Partial: selected client archive prefix only; missing objects/categories, delivery lag, retention and unattributed permissions remain unknown. Maximum 128 files; use a date/resource-specific prefix. No source completeness is inferred.", truncated, events, provenance);
+            "Partial: selected client archive prefix only; missing objects/categories, delivery lag, retention and unattributed permissions remain unknown. Maximum 128 files and 64 listing pages; use a date/resource-specific prefix. No source completeness is inferred.", truncated, events, provenance);
     }
 
     private static async Task<byte[]> ReadBoundedAsync(Stream stream, CancellationToken token)
@@ -286,7 +300,14 @@ public sealed partial class CloudActivityCollector
         var operation = RequiredText(entry, workspaceRow ? "Operation" : "operationName");
         var principal = workspaceRow ? Text(entry, "Principal")
             : NestedText(entry, "properties", "requesterObjectId") ?? NestedText(entry, "identity", "principalId");
+        if (!workspaceRow && string.IsNullOrWhiteSpace(principal)
+            && entry.TryGetProperty("identity", out var identity) && identity.ValueKind == JsonValueKind.Object)
+            principal = NestedText(identity, "claim", "http://schemas.microsoft.com/identity/claims/objectidentifier");
         var outcome = workspaceRow ? Text(entry, "Outcome") : Text(entry, "resultType") ?? NestedText(entry, "properties", "statusCode");
+        if (!workspaceRow && string.IsNullOrWhiteSpace(outcome) && entry.TryGetProperty("properties", out var properties)
+            && properties.ValueKind == JsonValueKind.Object && properties.TryGetProperty("statusCode", out var numericStatus)
+            && numericStatus.ValueKind == JsonValueKind.Number)
+            outcome = numericStatus.GetRawText();
         var known = int.TryParse(outcome, NumberStyles.None, CultureInfo.InvariantCulture, out var code) && code is >= 200 and <= 599
             || outcome is "Success" or "Succeeded" or "Failed" or "Failure";
         var success = known && (code is >= 200 and <= 299 || outcome is "Success" or "Succeeded");
@@ -302,5 +323,6 @@ public sealed partial class CloudActivityCollector
         string details, bool truncated, List<CloudActivityEvent> events, IReadOnlyList<CloudActivityProvenance> provenance)
         => new(Guid.NewGuid(), q.Provider, q.AccountId, start, end, source, details, truncated,
             events.DistinctBy(item => (item.EventId, item.Principal, item.Action, item.PermissionAction, item.Resource))
-                .OrderByDescending(item => item.Timestamp).ToArray()) { Provenance = provenance };
+                .OrderByDescending(item => item.Timestamp).ToArray())
+        { Provenance = provenance, SourceScope = $"{q.Destination}/{q.Container}/{q.Prefix}" };
 }

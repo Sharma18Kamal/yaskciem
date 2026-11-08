@@ -227,6 +227,16 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         using var activityReader = new StreamReader(activitySchema);
         await using var activityCommand = new NpgsqlCommand(await activityReader.ReadToEndAsync(cancellationToken), connection);
         await activityCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var inboundSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.InboundSecuritySchema.sql")
+            ?? throw new InvalidOperationException("The inbound security schema resource is missing.");
+        using var inboundReader = new StreamReader(inboundSchema);
+        await using var inboundCommand = new NpgsqlCommand(await inboundReader.ReadToEndAsync(cancellationToken), connection);
+        await inboundCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var entitlementSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.EntitlementEvidenceSchema.sql")
+            ?? throw new InvalidOperationException("The entitlement evidence schema resource is missing.");
+        using var entitlementReader = new StreamReader(entitlementSchema);
+        await using var entitlementCommand = new NpgsqlCommand(await entitlementReader.ReadToEndAsync(cancellationToken), connection);
+        await entitlementCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
@@ -271,6 +281,22 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                          AND to_regclass('sharednotificationdeliveries') IS NOT NULL
                          AND to_regclass('sharednotificationattempts') IS NOT NULL
                          AND to_regclass('sharedcloudactivitysnapshots') IS NOT NULL
+                         AND to_regclass('sharedsecurityalertcursors') IS NOT NULL
+                         AND to_regclass('sharedsecurityalertbatches') IS NOT NULL
+                         AND to_regclass('sharedsecurityalertrevisions') IS NOT NULL
+                         AND to_regclass('sharedentitlementevidencesnapshots') IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedentitlementevidencesnapshots_accounttime') AND indisvalid AND indisready)
+                         AND (SELECT count(*) = 2 FROM pg_trigger WHERE tgrelid=to_regclass('sharedentitlementevidencesnapshots')
+                             AND tgname IN ('tr_sharedentitlementevidencesnapshots_appendonly','tr_sharedentitlementevidencesnapshots_notruncate')
+                             AND NOT tgisinternal AND tgenabled='O')
+                         AND EXISTS (SELECT 1 FROM pg_index
+                             WHERE indexrelid=to_regclass('ix_sharedsecurityalertrevisions_recent') AND indisvalid AND indisready)
+                         AND (SELECT count(*) = 4 FROM pg_trigger
+                             WHERE (tgrelid=to_regclass('sharedsecurityalertrevisions') AND tgname IN
+                                     ('tr_sharedsecurityalertrevisions_appendonly','tr_sharedsecurityalertrevisions_notruncate')
+                                 OR tgrelid=to_regclass('sharedsecurityalertbatches') AND tgname IN
+                                     ('tr_sharedsecurityalertbatches_appendonly','tr_sharedsecurityalertbatches_notruncate'))
+                             AND NOT tgisinternal AND tgenabled='O')
                          AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharednotificationdeliveries')
                              AND attname='connectorkind' AND NOT attisdropped)
                          AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharednotificationdeliveries')

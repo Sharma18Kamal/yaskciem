@@ -12,6 +12,41 @@ public sealed class CiemApiClient
 
     public CiemApiClient(HttpClient httpClient) => _httpClient = httpClient;
 
+    public Task<ApiEnvelope<EntitlementEvidenceSnapshot>?> UploadEntitlementEvidenceAsync(Guid organizationId,
+        EntitlementEvidenceSnapshot snapshot, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<EntitlementEvidenceSnapshot>(HttpMethod.Post,
+            $"api/v1/organizations/{organizationId:D}/entitlement-evidence", accessToken, snapshot, token);
+
+    public Task<ApiEnvelope<IReadOnlyList<EntitlementEvidenceHistoryEntry>>?> GetEntitlementEvidenceHistoryAsync(Guid organizationId,
+        CloudEntitle.Domain.CloudProvider provider, string account, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<IReadOnlyList<EntitlementEvidenceHistoryEntry>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/entitlement-evidence?provider={provider}&accountId={Uri.EscapeDataString(account)}",
+            accessToken, cancellationToken: token);
+
+    public Task<ApiEnvelope<EntitlementEvidenceSnapshot>?> GetEntitlementEvidenceAsync(Guid organizationId,
+        CloudEntitle.Domain.CloudProvider provider, string account, Guid snapshotId, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<EntitlementEvidenceSnapshot>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/entitlement-evidence/{snapshotId:D}?provider={provider}&accountId={Uri.EscapeDataString(account)}",
+            accessToken, cancellationToken: token);
+
+    public Task<ApiEnvelope<SecurityAlertImportReceipt>?> ImportSecurityAlertsAsync(Guid organizationId, string product,
+        string channel, ImportSecurityAlertsRequest request, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<SecurityAlertImportReceipt>(HttpMethod.Post,
+            $"api/v1/organizations/{organizationId:D}/security-alerts/{Uri.EscapeDataString(product)}/{Uri.EscapeDataString(channel)}/batches",
+            accessToken, request, cancellationToken);
+
+    public Task<ApiEnvelope<IReadOnlyList<StoredSecurityAlert>>?> GetSecurityAlertsAsync(Guid organizationId, string product,
+        string channel, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<StoredSecurityAlert>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/security-alerts/{Uri.EscapeDataString(product)}/{Uri.EscapeDataString(channel)}?limit=100",
+            accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<SecurityAlertCursor>?> GetSecurityAlertCursorAsync(Guid organizationId, string product,
+        string channel, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<SecurityAlertCursor>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/security-alerts/{Uri.EscapeDataString(product)}/{Uri.EscapeDataString(channel)}/cursor",
+            accessToken, cancellationToken: cancellationToken);
+
     public Task<ApiEnvelope<IReadOnlyList<ConnectorHealthDto>>?> GetConnectorHealthAsync(Guid organizationId,
         string accessToken, CancellationToken cancellationToken = default)
         => SendForEnvelopeAsync<IReadOnlyList<ConnectorHealthDto>>(HttpMethod.Get,
@@ -58,6 +93,18 @@ public sealed class CiemApiClient
         Guid organizationId, string accessToken, CancellationToken cancellationToken = default)
         => SendForEnvelopeAsync<IReadOnlyList<SecurityConnectorCapability>>(HttpMethod.Get,
             $"api/v1/organizations/{organizationId:D}/connectors/catalog", accessToken, cancellationToken: cancellationToken);
+
+    public Task<ApiEnvelope<CloudActivityHistoryPage>?> GetCloudActivityHistoryAsync(Guid organizationId,
+        CloudEntitle.Domain.CloudProvider provider, string accountId, Guid? beforeSnapshotId, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<CloudActivityHistoryPage>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/cloud-activity/history?provider={provider}&accountId={Uri.EscapeDataString(accountId)}&limit=20"
+                + (beforeSnapshotId is null ? "" : $"&beforeSnapshotId={beforeSnapshotId.Value:D}"), accessToken, cancellationToken: token);
+
+    public Task<ApiEnvelope<CloudActivitySnapshot>?> GetCloudActivitySnapshotAsync(Guid organizationId,
+        CloudEntitle.Domain.CloudProvider provider, string accountId, Guid snapshotId, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<CloudActivitySnapshot>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/cloud-activity/history/{snapshotId:D}?provider={provider}&accountId={Uri.EscapeDataString(accountId)}",
+            accessToken, cancellationToken: token);
 
     public Task<ApiEnvelope<SharedNotificationRuleDto>?> SaveNotificationRuleAsync(Guid organizationId,
         SharedNotificationRuleDto rule, string accessToken, CancellationToken cancellationToken = default)

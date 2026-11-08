@@ -24,6 +24,9 @@ The desktop client currently supports:
 - Provider-filtered findings and identity views
 - Read-only Azure CLI, AWS CLI, and gcloud discovery adapters
 - Separate [native cloud administration](docs/deployment/cloud-administration.md) for Azure role assignments/custom roles, AWS policy attachments/inline Allow/Deny policies, and GCP project IAM/deny policies; scans and recommendation simulations remain read-only
+- Explicitly consented [cloud activity sources](docs/deployment/cloud-activity.md): CloudTrail history/Lake/S3, Azure Activity Log/Log Analytics/Blob archives, and GCP audit logs; partial evidence and current-grant correlations never authorize automatic permission removal
+- On-demand [permission-document observations](docs/deployment/cloud-activity.md#on-demand-permission-documents-and-saved-observations): Azure role definitions, AWS IAM policies and GCP role permissions, saved observation history and potential document-based risk candidates; not complete effective access or historical authorization proof
+- [Client SIEM connectors](docs/deployment/security-connectors.md): outbound Splunk HEC, QRadar TLS/LEEF and Sentinel Logs Ingestion; separately enabled inbound normalized client-bridge alerts with durable cursors and a saved-alert Desktop view, not native product polling or SOAR execution
 - Azure Entra users, groups, service principals, and active/eligible PIM schedules through the signed-in Azure CLI's Graph access
 - Graceful reporting when a CLI is missing or unauthenticated
 - JSON report export under `%LocalAppData%\\YASK-CIEM\\reports`

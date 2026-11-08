@@ -1,0 +1,36 @@
+@baseUrl = https://localhost:7043
+### Override baseUrl with the explicitly approved HTTPS shared-server endpoint.
+@organizationId = 00000000-0000-0000-0000-000000000001
+@accessToken = REPLACE_WITH_ENTRA_ACCESS_TOKEN
+
+### Read latest scoped alerts (does not contact Splunk)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/security-alerts/Splunk/security?limit=100
+Authorization: Bearer {{accessToken}}
+
+### Read the last committed opaque connector cursor
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/security-alerts/Splunk/security/cursor
+Authorization: Bearer {{accessToken}}
+
+### Client bridge sends a bounded batch; enable this organization alias first.
+### Replace batch ID, timestamps and cursors; retry exactly this payload after an ambiguous HTTP response.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/security-alerts/Splunk/security/batches
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "batchId": "00000000-0000-0000-0000-000000000010",
+  "previousCursor": null,
+  "cursor": "client-checkpoint-1",
+  "alerts": [
+    {
+      "alertId": "client-notable-1001",
+      "updatedAtUtc": "2026-11-08T12:00:00Z",
+      "title": "Privileged identity activity requires review",
+      "severity": "High",
+      "status": "Open",
+      "principal": "client-identity",
+      "resource": null,
+      "evidenceUrl": "https://splunk.example.invalid/client-notable-1001"
+    }
+  ]
+}

@@ -83,7 +83,8 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
         ICloudAuthenticationLauncher? cloudAuthentication = null,
         ICloudActivityCollector? activityCollector = null,
         ICloudAdministrationService? administration = null,
-        IDialogService? administrationDialogs = null) : base(demoData)
+        IDialogService? administrationDialogs = null,
+        IEntitlementEvidenceCollector? entitlementCollector = null) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
@@ -96,6 +97,8 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
         _sharedScanSummaryPublisher = sharedScanSummaryPublisher;
         _sharedMonitoringApi = sharedMonitoringApi;
         _activityCollector = activityCollector;
+        _entitlementCollector = entitlementCollector;
+        _activityInventory = demoData;
         _administration = administration;
         _administrationDialogs = administrationDialogs;
         RefreshMonitoringCommand = new AsyncRelayCommand(RefreshMonitoringAsync);

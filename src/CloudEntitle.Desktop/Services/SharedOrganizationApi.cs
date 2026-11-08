@@ -65,8 +65,44 @@ public interface ISharedCloudActivityApi
     Task<CloudActivitySnapshot> GetCloudActivityAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string accountId, CancellationToken cancellationToken = default);
 }
 
-public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi, ISharedGovernanceApi, ISharedOperationalApi, ISharedCloudActivityApi
+public interface ISharedSecurityAlertApi
 {
+    Task<IReadOnlyList<StoredSecurityAlert>> GetSecurityAlertsAsync(Guid organizationId, string product, string channel, CancellationToken token = default);
+}
+
+public interface ISharedCloudActivityHistoryApi
+{
+    Task<CloudActivityHistoryPage> GetCloudActivityHistoryAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider,
+        string accountId, Guid? beforeSnapshotId, CancellationToken token = default);
+    Task<CloudActivitySnapshot> GetCloudActivitySnapshotAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider,
+        string accountId, Guid snapshotId, CancellationToken token = default);
+}
+
+public interface ISharedEntitlementEvidenceApi
+{
+    Task<EntitlementEvidenceSnapshot> UploadEntitlementEvidenceAsync(Guid organizationId, EntitlementEvidenceSnapshot snapshot, CancellationToken token = default);
+    Task<IReadOnlyList<EntitlementEvidenceHistoryEntry>> GetEntitlementEvidenceHistoryAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string account, CancellationToken token = default);
+    Task<EntitlementEvidenceSnapshot> GetEntitlementEvidenceAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string account, Guid snapshotId, CancellationToken token = default);
+}
+
+public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi, ISharedGovernanceApi, ISharedOperationalApi, ISharedCloudActivityApi, ISharedSecurityAlertApi, ISharedCloudActivityHistoryApi, ISharedEntitlementEvidenceApi
+{
+    public async Task<EntitlementEvidenceSnapshot> UploadEntitlementEvidenceAsync(Guid organizationId, EntitlementEvidenceSnapshot snapshot, CancellationToken token = default)
+        => await RequireDataAsync(client.UploadEntitlementEvidenceAsync(organizationId, snapshot, await TokenAsync(token), token));
+    public async Task<IReadOnlyList<EntitlementEvidenceHistoryEntry>> GetEntitlementEvidenceHistoryAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string account, CancellationToken token = default)
+        => await RequireDataAsync(client.GetEntitlementEvidenceHistoryAsync(organizationId, provider, account, await TokenAsync(token), token));
+    public async Task<EntitlementEvidenceSnapshot> GetEntitlementEvidenceAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string account, Guid snapshotId, CancellationToken token = default)
+        => await RequireDataAsync(client.GetEntitlementEvidenceAsync(organizationId, provider, account, snapshotId, await TokenAsync(token), token));
+    public async Task<CloudActivityHistoryPage> GetCloudActivityHistoryAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider,
+        string accountId, Guid? beforeSnapshotId, CancellationToken token = default)
+        => await RequireDataAsync(client.GetCloudActivityHistoryAsync(organizationId, provider, accountId, beforeSnapshotId, await TokenAsync(token), token));
+
+    public async Task<CloudActivitySnapshot> GetCloudActivitySnapshotAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider,
+        string accountId, Guid snapshotId, CancellationToken token = default)
+        => await RequireDataAsync(client.GetCloudActivitySnapshotAsync(organizationId, provider, accountId, snapshotId, await TokenAsync(token), token));
+    public async Task<IReadOnlyList<StoredSecurityAlert>> GetSecurityAlertsAsync(Guid organizationId, string product, string channel, CancellationToken token = default)
+        => await RequireDataAsync(client.GetSecurityAlertsAsync(organizationId, product, channel, await TokenAsync(token), token));
+
     public async Task<CloudActivitySnapshot> UploadCloudActivityAsync(Guid organizationId, CloudActivitySnapshot snapshot, CancellationToken cancellationToken = default)
         => await RequireDataAsync(client.UploadCloudActivityAsync(organizationId, snapshot, await TokenAsync(cancellationToken), cancellationToken));
 
