@@ -192,8 +192,11 @@ Include the table in coordinated backups. No retention/pruning is implemented.
 **Automatic least-privilege removal and SOAR response execution remain disabled.**
 Complete category/resource/time coverage, authoritative grant attribution and
 provider-attested historical entitlement validity are still required. Complete
-cross-account/federated paths, lifecycle coverage, approved SOAR execution and
-native time-limited JIT remain pending.
+cross-account/federated paths, lifecycle coverage and approved SOAR execution
+remain pending. Separate opt-in [Azure PIM/GCP PAM and client-broker AWS
+request/approval workflows](priority-two.md) are available; document/behavior
+candidates never approve their grants. [Trust/credential metadata observations](trust-credential-monitoring.md)
+remain partial and on-demand, not a complete continuous cloud change feed.
 
 ## Client acceptance
 

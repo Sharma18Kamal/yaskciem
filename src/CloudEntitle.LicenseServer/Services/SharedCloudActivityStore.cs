@@ -71,6 +71,8 @@ public sealed partial class SharedWorkspaceStore
                 || item.PermissionAction is not null && !SafeActivityText(item.PermissionAction, 2048)
                 || item.Resource is not null && !SafeActivityText(item.Resource, 4096)
                 || item.PermissionEvidenceSource is not null && !SafeActivityText(item.PermissionEvidenceSource, 128)
+                || item.SourceIp is not null && !SafeActivityText(item.SourceIp, 128)
+                || item.CountryCode is not null && (item.CountryCode.Length != 2 || !item.CountryCode.All(char.IsAsciiLetter))
                 || item.Success && !item.OutcomeKnown
                 || item.Timestamp < snapshot.FromUtc || item.Timestamp > snapshot.ThroughUtc)
                 throw new ArgumentException("Invalid activity event or timestamp.");

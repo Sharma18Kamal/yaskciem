@@ -546,7 +546,7 @@ public sealed partial class SharedWorkspaceEndpointTests
                 new Claim("oid", userId.ToString("D")),
                 new Claim("sub", userId.ToString("N")),
                 new Claim("preferred_username", email),
-                new Claim("scp", "access_as_user")
+                new Claim("scp", Request.Headers.ContainsKey("X-Test-Scope") ? Request.Headers["X-Test-Scope"].ToString() : "access_as_user")
             };
             var identity = new ClaimsIdentity(claims, Scheme.Name);
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));

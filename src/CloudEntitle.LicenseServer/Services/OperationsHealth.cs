@@ -15,6 +15,7 @@ public sealed class OperationsReadinessHealthCheck(
         ["scan"] = TimeSpan.FromSeconds(45),
         ["notifications"] = TimeSpan.FromSeconds(45),
         ["governance"] = TimeSpan.FromSeconds(90),
+        ["continuous-change-feeds"] = TimeSpan.FromSeconds(90),
         ["operations"] = TimeSpan.FromSeconds(60),
         ["retention"] = TimeSpan.FromHours(36)
     };

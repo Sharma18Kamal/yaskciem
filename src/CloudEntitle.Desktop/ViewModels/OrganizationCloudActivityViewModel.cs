@@ -32,6 +32,7 @@ public sealed partial class OrganizationViewModel
         set
         {
             if (!SetProperty(ref _selectedActivitySnapshot, value)) return;
+            ResetPriorityTwo();
             _activityCancellation?.Cancel();
             ActivityReadConsent = false;
             ActivityActions = Array.Empty<CloudActivityActionUsage>();

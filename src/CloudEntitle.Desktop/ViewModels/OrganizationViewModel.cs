@@ -84,7 +84,8 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
         ICloudActivityCollector? activityCollector = null,
         ICloudAdministrationService? administration = null,
         IDialogService? administrationDialogs = null,
-        IEntitlementEvidenceCollector? entitlementCollector = null) : base(demoData)
+        IEntitlementEvidenceCollector? entitlementCollector = null,
+        ITrustCredentialEvidenceCollector? trustCredentialCollector = null) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
@@ -98,6 +99,7 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
         _sharedMonitoringApi = sharedMonitoringApi;
         _activityCollector = activityCollector;
         _entitlementCollector = entitlementCollector;
+        _trustCredentialCollector = trustCredentialCollector;
         _activityInventory = demoData;
         _administration = administration;
         _administrationDialogs = administrationDialogs;

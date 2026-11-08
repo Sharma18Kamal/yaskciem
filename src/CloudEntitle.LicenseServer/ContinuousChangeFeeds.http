@@ -1,0 +1,44 @@
+@baseUrl = https://license-server.example.invalid
+@accessToken = REPLACE_WITH_CLIENT_API_ACCESS_TOKEN
+@organizationId = 11111111-1111-1111-1111-111111111111
+@alias = client-iam
+
+# Examples only. No bridge/provider is contacted by GET endpoints.
+# Requires authenticated CiemApiAccess and active organization account binding.
+
+### Refresh safe server alias status and per-category source coverage (200)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/continuous-change-feeds
+Authorization: Bearer {{accessToken}}
+
+### Explicit enable and connect (200; ManageConnections + ManagePolicies)
+PUT {{baseUrl}}/api/v1/organizations/{{organizationId}}/continuous-change-feeds/{{alias}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"enabled":true,"connected":true,"resetSource":false}
+
+### Explicit source replacement/backfill epoch reset (200; old evidence retained)
+PUT {{baseUrl}}/api/v1/organizations/{{organizationId}}/continuous-change-feeds/{{alias}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"enabled":true,"connected":true,"resetSource":true}
+
+### Pause worker and fence in-flight attempts (204)
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/continuous-change-feeds/{{alias}}/pause
+Authorization: Bearer {{accessToken}}
+
+### Read latest 100 saved immutable normalized revisions across epochs (200)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/continuous-change-feeds/{{alias}}/changes?limit=100
+Authorization: Bearer {{accessToken}}
+
+### Out-of-bounds limit (400)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/continuous-change-feeds/{{alias}}/changes?limit=501
+Authorization: Bearer {{accessToken}}
+
+### Unconfigured server alias cannot be connected (400)
+PUT {{baseUrl}}/api/v1/organizations/{{organizationId}}/continuous-change-feeds/missing-alias
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"enabled":true,"connected":true,"resetSource":false}

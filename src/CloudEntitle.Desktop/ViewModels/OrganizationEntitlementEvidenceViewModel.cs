@@ -33,6 +33,7 @@ public sealed partial class OrganizationViewModel
         set
         {
             if (!SetProperty(ref _selectedEntitlementSnapshot, value)) return;
+            ResetPriorityTwo();
             _activityCancellation?.Cancel();
             ObservedGrants = Array.Empty<ObservedPermissionGrant>();
             _loadedEntitlementDocuments = null;
@@ -54,6 +55,7 @@ public sealed partial class OrganizationViewModel
 
     private void ResetEntitlementEvidence()
     {
+        ResetPriorityTwo();
         EntitlementReadConsent = false;
         SelectedEntitlementSnapshot = null;
         ObservedGrants = Array.Empty<ObservedPermissionGrant>();

@@ -106,7 +106,7 @@ public sealed partial class SharedWorkspaceStore
 
     private static bool Matches(SharedNotificationRuleDto rule, SharedDriftEventDto drift)
         => rule.Enabled && drift.Severity >= rule.MinimumSeverity
-            && (rule.ConnectorKind != "Jira" || rule.AllowAutomaticTickets)
+            && (rule.ConnectorKind is not ("Jira" or SecurityConnectorCatalog.ServiceNow) || rule.AllowAutomaticTickets)
             && (rule.EventTypes.Count > 0 ? rule.EventTypes.Contains(drift.EventType, StringComparer.Ordinal)
                 : drift.Kind is "finding" or "resource-finding" or "effective-access"
                     && (drift.Kind == "effective-access" ? rule.EffectiveAccess : rule.Findings)
@@ -129,7 +129,7 @@ public sealed partial class SharedWorkspaceStore
             || rule.EventTypes.Any(type => !OperationalEventTypes.All.Contains(type, StringComparer.Ordinal))
             || !SecurityConnectorCatalog.OutboundKinds.Contains(rule.ConnectorKind, StringComparer.Ordinal)
             || rule.EventTypes.Count == 0 && (!(rule.Findings || rule.EffectiveAccess) || !(rule.Added || rule.Removed || rule.Changed))
-            || rule.ConnectorKind == "Jira" && rule.AllowAutomaticTickets && rule.EventTypes.Count == 0
+            || rule.ConnectorKind is "Jira" or SecurityConnectorCatalog.ServiceNow && rule.AllowAutomaticTickets && rule.EventTypes.Count == 0
             || string.IsNullOrEmpty(rule.Channel) || rule.Channel.Length > 64
             || rule.Channel.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '-' or '_')))
             throw new ArgumentException("Rules require an ID, name, severity, source/change selection, and a channel alias (letters, digits, - or _).");

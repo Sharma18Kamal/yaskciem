@@ -97,6 +97,16 @@ builder.Services.AddHostedService(serviceProvider => new ScanOrchestrationWorker
 	serviceProvider.GetRequiredService<WorkerHealthRegistry>(),
 	serviceProvider.GetRequiredService<OperationsMetrics>()));
 builder.Services.AddSingleton<ICentralNotificationTransport, CentralWebhookTransport>();
+builder.Services.AddSingleton<AzurePimTransport>();
+builder.Services.AddSingleton<IAzurePimTransport>(serviceProvider => new MultiCloudJitTransport(
+    serviceProvider.GetRequiredService<AzurePimTransport>(), serviceProvider.GetRequiredService<IConfiguration>()));
+builder.Services.AddHostedService<PrivilegedAccessWorker>();
+builder.Services.AddHttpClient("ContinuousChangeBridge")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
+builder.Services.AddSingleton<IContinuousChangeBridge, HttpsContinuousChangeBridge>();
+builder.Services.AddSingleton<IContinuousChangeFeedService, ContinuousChangeFeedService>();
+builder.Services.AddHostedService<ContinuousChangeFeedWorker>();
+builder.Services.AddAuthoritativeDecisionServices(builder.Configuration);
 builder.Services.AddHostedService(serviceProvider => new CentralNotificationWorker(
 	sharedWorkspaceStore, serviceProvider.GetRequiredService<ICentralNotificationTransport>(),
 	serviceProvider.GetRequiredService<ILogger<CentralNotificationWorker>>(),

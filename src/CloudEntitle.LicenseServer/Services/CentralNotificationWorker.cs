@@ -43,6 +43,8 @@ public sealed partial class CentralWebhookTransport : ICentralNotificationTransp
             return new(false, false, null, "channel_invalid");
         if (lease.Delivery.ConnectorKind == "Jira")
             return await SendJiraAsync(lease, section, cancellationToken);
+        if (lease.Delivery.ConnectorKind is SecurityConnectorCatalog.ServiceNow or SecurityConnectorCatalog.Teams)
+            return await SendCollaborationAsync(lease, section, cancellationToken);
         if (lease.Delivery.ConnectorKind is SecurityConnectorCatalog.Splunk or SecurityConnectorCatalog.Sentinel)
             return await SendSecurityEventAsync(lease, section, cancellationToken);
         if (lease.Delivery.ConnectorKind == SecurityConnectorCatalog.QRadar)
@@ -141,9 +143,18 @@ public static class ConnectorConfiguration
         if (kind is SecurityConnectorCatalog.Splunk or SecurityConnectorCatalog.QRadar or SecurityConnectorCatalog.Sentinel)
             return SecurityConnectorConfiguration.Status(section, kind);
         if (section["Url"] is null) return "Unconfigured";
-        if (Kind(section) != kind || kind is not ("SignedWebhook" or "Jira")
+        if (Kind(section) != kind || kind is not ("SignedWebhook" or "Jira" or SecurityConnectorCatalog.ServiceNow or SecurityConnectorCatalog.Teams)
             || !Uri.TryCreate(section["Url"], UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps
             || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment)) return "Invalid";
+        if (kind == SecurityConnectorCatalog.Teams)
+            return uri.Host.EndsWith(".environment.api.powerplatform.com", StringComparison.OrdinalIgnoreCase)
+                && uri.AbsolutePath.StartsWith("/powerautomate/automations/direct/workflows/", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(uri.Query) ? "Configured" : "Invalid";
+        if (kind == SecurityConnectorCatalog.ServiceNow)
+            return uri.Host.EndsWith(".service-now.com", StringComparison.OrdinalIgnoreCase)
+                && uri.AbsolutePath == "/" && string.IsNullOrEmpty(uri.Query)
+                && !string.IsNullOrWhiteSpace(section["UserName"]) && !section["UserName"]!.Contains(':')
+                && !string.IsNullOrWhiteSpace(section["ApiToken"]) ? "Configured" : "Invalid";
         return kind == "SignedWebhook"
             ? Encoding.UTF8.GetByteCount(section["SigningKey"] ?? "") >= 32 ? "Configured" : "Invalid"
             : string.IsNullOrEmpty(uri.Query) && uri.AbsolutePath == "/"

@@ -1,0 +1,89 @@
+@baseUrl = https://license.example.invalid
+@organizationId = 00000000-0000-0000-0000-000000000000
+@requestId = 11111111-1111-1111-1111-111111111111
+@activitySnapshotId = 22222222-2222-2222-2222-222222222222
+@documentSnapshotId = 33333333-3333-3333-3333-333333333333
+@requesterToken = replace-with-requester-delegated-token
+@managerToken = replace-with-configured-manager-delegated-token
+@securityToken = replace-with-configured-security-delegated-token
+
+### Client must explicitly configure/connect the target first. Role/principal are never submitted.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access
+Authorization: Bearer {{requesterToken}}
+Content-Type: application/json
+
+{ "target": "investigation", "durationMinutes": 60, "emergency": false, "reason": "Time-limited incident investigation" }
+
+### Saved request list, no cloud call.
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access
+Authorization: Bearer {{requesterToken}}
+
+### Selected saved request; use the requestId returned by creation. Missing/foreign request returns 404.
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access/{{requestId}}
+Authorization: Bearer {{requesterToken}}
+
+### First configured approver, not requester. Use the current response version.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access/{{requestId}}/approve
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{ "expectedVersion": 0, "reason": "Manager verified operational need" }
+
+### Second distinct configured approver; stale or duplicate approval returns 409.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access/{{requestId}}/approve
+Authorization: Bearer {{securityToken}}
+Content-Type: application/json
+
+{ "expectedVersion": 1, "reason": "Security verified scope and duration" }
+
+### Requester-only activation after approvals, explicit consent and fresh client configuration checks.
+# Queues a LIVE native Azure PIM / client-owned AWS human-session broker / GCP PAM operation.
+# Provider and mapped human are server configuration, never caller-submitted.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access/{{requestId}}/activate
+Authorization: Bearer {{requesterToken}}
+Content-Type: application/json
+
+{ "expectedVersion": 2, "reason": "Explicitly activate approved incident access", "liveConsent": true }
+
+### Reject an unactivated request instead; update version to the selected request. Not early cloud revocation.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access/{{requestId}}/reject
+Authorization: Bearer {{securityToken}}
+Content-Type: application/json
+
+{ "expectedVersion": 1, "reason": "Operational need no longer exists" }
+
+### Requester ends own grant OR either current configured authorized approver revokes (no second approval).
+# Use the latest saved version; missing consent/stale version is 409, missing reason 400.
+# Pending/unissued cancels with zero native calls. RevokeQueued/RevokeIssuing/RevokeOutcomeUnknown are NOT verified success.
+# Security approver can still revoke saved exact targets after Disabled/disconnect or requester membership removal.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access/{{requestId}}/revoke
+Authorization: Bearer {{securityToken}}
+Content-Type: application/json
+
+{ "expectedVersion": 5, "reason": "Incident contained; terminate exact temporary grant", "liveConsent": true }
+
+### AWS/GCP aliases use the same API, dual approvals and explicit activation.
+# AWS broker HTTPS/auth and GCP native human OAuth mapping must already be configured by the client.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access
+Authorization: Bearer {{requesterToken}}
+Content-Type: application/json
+
+{ "target": "aws-investigation", "durationMinutes": 15, "emergency": true, "reason": "Bounded native human incident session" }
+
+### Saved append-only audit, no cloud call.
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/privileged-access/{{requestId}}/audit
+Authorization: Bearer {{managerToken}}
+
+### Analyze selected saved snapshots. Requires ManageRemediations and inventory/finding access.
+# Potential review events may queue client-configured SIEM/notification/ticket deliveries.
+# Provider enum remains numeric for existing API compatibility (Azure=0, Aws=1, Gcp=2).
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/security-analysis
+Authorization: Bearer {{securityToken}}
+Content-Type: application/json
+
+{
+  "provider": 1,
+  "accountId": "123456789012",
+  "activitySnapshotId": "{{activitySnapshotId}}",
+  "entitlementSnapshotId": "{{documentSnapshotId}}"
+}

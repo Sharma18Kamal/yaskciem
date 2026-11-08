@@ -1,0 +1,40 @@
+<UserControl x:Class="CloudEntitle.Desktop.Views.BreakGlassReportsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Expander Header="Client-owned emergency access: post-outage reports" Margin="0,12,0,12"
+              ToolTip="Use independently managed client emergency accounts during an outage. This retrospective workflow never issues offline credentials or bypasses approvals.">
+        <StackPanel Margin="8">
+            <TextBlock Text="During an outage use the client's tested emergency-account runbook. After reconnecting, select the bound activity account and report the incident. Never enter passwords, tokens or signed URLs." TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <WrapPanel>
+                <TextBox Text="{Binding EmergencyPrincipal, UpdateSourceTrigger=PropertyChanged}" Width="230" Margin="0,0,8,8" ToolTip="Exact cloud audit principal, not a guessed email/object-ID translation."/>
+                <TextBox Text="{Binding EmergencyStartUtc, UpdateSourceTrigger=PropertyChanged}" Width="190" Margin="0,0,8,8" ToolTip="Incident start UTC: yyyy-MM-ddTHH:mm:ssZ."/>
+                <TextBox Text="{Binding EmergencyEndUtc, UpdateSourceTrigger=PropertyChanged}" Width="190" Margin="0,0,8,8" ToolTip="Completed incident end UTC: yyyy-MM-ddTHH:mm:ssZ; at most seven days after start."/>
+                <TextBox Text="{Binding EmergencyReason, UpdateSourceTrigger=PropertyChanged}" Width="250" Margin="0,0,8,8" ToolTip="Single-line business justification. Do not include secrets."/>
+                <TextBox Text="{Binding EmergencyIncidentReference, UpdateSourceTrigger=PropertyChanged}" Width="180" Margin="0,0,8,8" ToolTip="Opaque client incident reference, e.g. INC-12345, not a token or signed URL."/>
+            </WrapPanel>
+            <WrapPanel>
+                <Button Content="Report completed emergency access" Command="{Binding ReportEmergencyCommand}" Margin="0,0,8,8" ToolTip="Persist a retrospective report; match the loaded saved activity snapshot if present. Requires ManageRemediations; no cloud call or access grant."/>
+                <Button Content="Refresh emergency reports" Command="{Binding RefreshEmergencyCommand}" Margin="0,0,8,8" ToolTip="Read the latest 100 saved organization reports, without contacting cloud endpoints."/>
+            </WrapPanel>
+            <DataGrid ItemsSource="{Binding EmergencyReports}" SelectedItem="{Binding SelectedEmergencyReport, Mode=TwoWay}"
+                      AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="220" ToolTip="Select an incident for independent security review. Activity matches are partial evidence, not revocation proof.">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Report" Binding="{Binding ReportId}"/>
+                    <DataGridTextColumn Header="Cloud" Binding="{Binding Provider}"/>
+                    <DataGridTextColumn Header="Account" Binding="{Binding AccountId}"/>
+                    <DataGridTextColumn Header="Incident" Binding="{Binding ClientIncidentReference}"/>
+                    <DataGridTextColumn Header="Evidence" Binding="{Binding EvidenceStatus}"/>
+                    <DataGridTextColumn Header="Reviewer" Binding="{Binding Review.ReviewerId}"/>
+                    <DataGridCheckBoxColumn Header="Client closure attested" Binding="{Binding Review.ClientVerifiedClosure}"/>
+                </DataGrid.Columns>
+            </DataGrid>
+            <WrapPanel Margin="0,8,0,0">
+                <TextBox Text="{Binding EmergencyReviewReason, UpdateSourceTrigger=PropertyChanged}" Width="250" Margin="0,0,8,8" ToolTip="Independent security review rationale, including cleanup/rotation checks and outstanding risks; no secrets."/>
+                <TextBox Text="{Binding EmergencyClosureReference, UpdateSourceTrigger=PropertyChanged}" Width="190" Margin="0,0,8,8" ToolTip="Opaque client cleanup/credential-rotation evidence reference; not a credential or signed URL."/>
+                <CheckBox Content="Client verified cleanup/rotation" IsChecked="{Binding EmergencyClientVerifiedClosure}" Margin="0,0,8,8" ToolTip="Client attestation only, not provider-verified revocation. Changing review text or incident clears this selection."/>
+                <Button Content="Record independent security review" Command="{Binding ReviewEmergencyCommand}" Margin="0,0,8,8" ToolTip="A current configured security reviewer other than the reporter may append one immutable review. No cloud permission or credential mutation."/>
+            </WrapPanel>
+            <TextBlock Text="{Binding EmergencyReportStatus}" TextWrapping="Wrap" ToolTip="{Binding EmergencyReportStatus}"/>
+        </StackPanel>
+    </Expander>
+</UserControl>

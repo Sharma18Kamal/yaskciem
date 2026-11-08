@@ -8,6 +8,8 @@ public sealed record CloudActivityEvent(string EventId, string Principal, string
 {
     public bool OutcomeKnown { get; init; } = true;
     public string? PermissionEvidenceSource { get; init; }
+    public string? SourceIp { get; init; }
+    public string? CountryCode { get; init; }
 }
 
 public enum CloudActivitySource { Default, AwsCloudTrailLake, AwsS3Archive, AzureLogAnalytics, AzureBlobArchive }

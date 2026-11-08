@@ -8,6 +8,21 @@
   "ConnectionStrings": {
     "Postgres": "<set-through-secret-provider>"
   },
+  "PrivilegedAccess": {
+    "Organizations": {}
+  },
+  "BehaviorAnalysis": {
+    "Organizations": {}
+  },
+  "EmergencyAccessReview": {
+    "Organizations": {}
+  },
+  "ContinuousChangeFeeds": {
+    "Organizations": {}
+  },
+  "AuthoritativeDecisions": {
+    "Sources": []
+  },
   "AuditRetention": {
     "Provider": "Postgres",
     "MinimumRetentionDays": 2555,

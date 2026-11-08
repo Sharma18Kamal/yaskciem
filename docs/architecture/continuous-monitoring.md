@@ -33,6 +33,24 @@ The scheduled executor currently declares only effective-access scopes when coll
 
 ## On-demand cloud activity collection
 
+Continuous change feeds are a separate, client-configured server worker described
+in [continuous feed setup](../continuous-change-feeds.md). Azure/AWS/GCP cloud
+exports are normalized by a client-owned authenticated HTTPS bridge; this is not
+native Event Hubs, EventBridge or Pub/Sub consumption. Durable source epochs,
+cursors, bounded atomic batches, immutable event revisions, retry health and
+coverage/gap metadata survive restarts. Both server configuration and explicit
+organization enable/connect consent are required; Desktop sign-in never creates
+cloud resources or connects a feed. Coverage remains source-reported and
+unverified, so a working bridge does not prove comprehensive all-cloud coverage
+or effective privilege escalation. Saved feed reads do not contact that bridge.
+
+The [Priority Two extension](../deployment/priority-two.md) compares selected saved
+permission documents and analyzes behavior using explicitly configured action,
+baseline and business-hours policy. Deduplicated potential review events reuse
+the existing central SIEM/ticketing outbox. This does not automatically schedule
+document/activity polling or establish complete IAM trust/credential change
+coverage; source collection still requires client setup and consent.
+
 Inbound SIEM evidence is separate from scan drift and cloud activity. The [normalized client bridge](../deployment/security-connectors.md#7-inbound-normalized-client-bridge) stores organization/product/alias-scoped immutable alert revisions and advances ingestion cursors transactionally. It does not poll products, update drift baselines, resolve findings or authorize responses. Reading the Desktop's saved-alert panel never contacts a live SIEM.
 
 The Organizations workspace now provides a separate, explicitly consented 90-day audit read for a selected bound AWS account, Azure subscription or GCP project. It does not run at sign-in, during normal inventory scans, or in scheduled jobs. The user prepares read access/logging, selects AWS region/profile where applicable, and authorizes one read. Changing the account/region/profile resets consent; sign-out clears account evidence and cancels activity work. Loading saved evidence calls only the organization API, not a cloud endpoint.

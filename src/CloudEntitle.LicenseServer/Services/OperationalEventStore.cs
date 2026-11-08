@@ -54,9 +54,9 @@ public sealed partial class SharedWorkspaceStore
     }
 
     public async Task<SharedDeliveryStatusDto> RequestOperationalTicketAsync(Guid tenant, Guid organization, Guid eventId,
-        string channel, Guid actor, CancellationToken token = default)
+        string channel, Guid actor, CancellationToken token = default, string kind = "Jira")
     {
-        if (actor == Guid.Empty || string.IsNullOrEmpty(channel) || channel.Length > 64
+        if (kind is not ("Jira" or SecurityConnectorCatalog.ServiceNow) || actor == Guid.Empty || string.IsNullOrEmpty(channel) || channel.Length > 64
             || channel.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '-' or '_')))
             throw new ArgumentException("A channel alias and authenticated actor are required.");
         await using var connection = await OpenAsync(token);
@@ -68,12 +68,12 @@ public sealed partial class SharedWorkspaceStore
         check.Parameters.AddWithValue("organization", organization);
         check.Parameters.AddWithValue("event", eventId);
         if (await check.ExecuteScalarAsync(token) is null) throw new KeyNotFoundException();
-        await QueueOperationalDeliveryAsync(connection, transaction, tenant, organization, eventId, Guid.Empty, channel, "Jira", actor, token);
+        await QueueOperationalDeliveryAsync(connection, transaction, tenant, organization, eventId, Guid.Empty, channel, kind, actor, token);
         await transaction.CommitAsync(token);
         var status = await GetNotificationDeliveryStatusAsync(tenant, organization, OperationalId($"{eventId:D}|{channel}"), token)
             ?? throw new InvalidOperationException("The queued ticket delivery is missing.");
-        if (status.Delivery.ConnectorKind != "Jira")
-            throw new InvalidOperationException("This event/channel already belongs to a webhook delivery. Use a separate Jira alias.");
+        if (status.Delivery.ConnectorKind != kind)
+            throw new InvalidOperationException("This event/channel already belongs to a different connector. Use a separate ticketing alias.");
         return status;
     }
 

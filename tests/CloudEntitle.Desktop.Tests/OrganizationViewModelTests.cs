@@ -13,8 +13,48 @@ using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 
 namespace CloudEntitle.Desktop.Tests;
 
-public sealed class OrganizationViewModelTests
+public sealed partial class OrganizationViewModelTests
 {
+    [Fact]
+    public async Task PriorityTwo_RequiresExplicitActivationAndClearsConsentAndLateResultsOnContextChange()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "YaskCiemPriorityTwoTests", Guid.NewGuid().ToString("N"));
+        var tenant = Guid.NewGuid().ToString();
+        var identity = new OrganizationIdentity(Guid.NewGuid(), "owner", tenant, "owner@example.invalid");
+        var service = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        var organization = service.CreateOrganization("Shared", "shared", tenant, identity);
+        try
+        {
+            var api = new TestMonitoringApi { JitRequesterId = identity.UserId };
+            var viewModel = new OrganizationViewModel(new TestDemoDataService(), service, new TestSsoService(identity),
+                new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(), sharedMonitoringApi: api);
+            await viewModel.SignInAsync();
+            Assert.Equal(0, api.JitWrites);
+            viewModel.JitTarget = "target";
+            viewModel.JitReason = "Investigation";
+            await viewModel.RunPriorityTwoAsync("request");
+            Assert.Equal(1, api.JitWrites);
+            viewModel.SelectedJitRequest = Assert.Single(viewModel.JitRequests);
+            await viewModel.RunPriorityTwoAsync("activate");
+            Assert.Equal(1, api.JitWrites);
+            Assert.Contains("explicit live consent", viewModel.PriorityTwoStatus);
+            viewModel.JitLiveConsent = true;
+            await viewModel.RunPriorityTwoAsync("activate");
+            Assert.Equal(2, api.JitWrites);
+            Assert.False(viewModel.JitLiveConsent);
+            api.PendingJit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var pending = viewModel.RunPriorityTwoAsync("refresh");
+            await viewModel.SignOutAsync();
+            api.PendingJit.SetResult([new(Guid.NewGuid(), identity.UserId, "foreign-context", "", "", "", 60, false, "Late",
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(30), "Approved", 2, [])]);
+            await pending;
+            Assert.Empty(viewModel.JitRequests);
+            Assert.Empty(viewModel.JitAudit);
+            Assert.Empty(viewModel.BehaviorAnomalies);
+            Assert.False(viewModel.JitLiveConsent);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
     [Fact]
     public async Task EntitlementDocuments_RequireExplicitConsentAndDiscardChangedContextAndNeverReadOnSavedLoad()
     {
@@ -616,8 +656,50 @@ public sealed class OrganizationViewModelTests
         public string? ChooseLocalBackupOpenPath() => null;
     }
 
-    private sealed class TestMonitoringApi : ISharedMonitoringApi, ISharedOperationalApi, ISharedCloudActivityApi, ISharedSecurityAlertApi, ISharedCloudActivityHistoryApi, ISharedEntitlementEvidenceApi
+    private sealed partial class TestMonitoringApi : ISharedMonitoringApi, ISharedOperationalApi, ISharedCloudActivityApi, ISharedSecurityAlertApi, ISharedCloudActivityHistoryApi, ISharedEntitlementEvidenceApi, ISharedPriorityTwoApi, ISharedBreakGlassApi
     {
+        public int EmergencyWrites { get; private set; }
+        public TaskCompletionSource<IReadOnlyList<BreakGlassReport>>? PendingEmergencyReports { get; set; }
+        private BreakGlassReport? _emergencyReport;
+        public Task<IReadOnlyList<BreakGlassReport>> GetBreakGlassReportsAsync(Guid organization, CancellationToken token = default)
+            => PendingEmergencyReports?.Task ?? Task.FromResult<IReadOnlyList<BreakGlassReport>>(_emergencyReport is null ? [] : [_emergencyReport]);
+        public Task<BreakGlassReport> ReportBreakGlassAsync(Guid organization, CreateBreakGlassReportRequest request, CancellationToken token = default)
+        {
+            EmergencyWrites++;
+            _emergencyReport = new(request.ReportId, request.Provider, request.AccountId, request.ExternalPrincipal, request.StartedAtUtc,
+                request.EndedAtUtc, request.Reason, request.ClientIncidentReference, JitRequesterId, DateTimeOffset.UtcNow,
+                request.ActivitySnapshotId, [], "ClientAttestationOnly");
+            return Task.FromResult(_emergencyReport);
+        }
+        public Task<BreakGlassReport> ReviewBreakGlassAsync(Guid organization, Guid reportId, ReviewBreakGlassReportRequest request, CancellationToken token = default)
+        {
+            EmergencyWrites++;
+            return Task.FromResult(_emergencyReport! with { Review = new(Guid.NewGuid(), DateTimeOffset.UtcNow, request.Reason, request.ClientClosureReference, request.ClientVerifiedClosure) });
+        }
+        public int JitWrites { get; private set; }
+        private PrivilegedAccessRequest? _jitRequest;
+        public TaskCompletionSource<IReadOnlyList<PrivilegedAccessRequest>>? PendingJit { get; set; }
+        public Task<IReadOnlyList<PrivilegedAccessRequest>> GetPrivilegedAccessAsync(Guid organization, CancellationToken token = default)
+            => PendingJit?.Task ?? Task.FromResult<IReadOnlyList<PrivilegedAccessRequest>>(_jitRequest is null ? [] : [_jitRequest]);
+        public Task<PrivilegedAccessRequest> RequestPrivilegedAccessAsync(Guid organization, CreatePrivilegedAccessRequest request, CancellationToken token = default)
+        {
+            JitWrites++;
+            var now = DateTimeOffset.UtcNow;
+            _jitRequest = new(Guid.NewGuid(), JitRequesterId, request.Target, "", "", "", request.DurationMinutes, request.Emergency,
+                request.Reason, now, now.AddMinutes(30), "Approved", 2, [Guid.NewGuid(), Guid.NewGuid()]);
+            return Task.FromResult(_jitRequest);
+        }
+        public Guid JitRequesterId { get; set; }
+        public Task<PrivilegedAccessRequest> DecidePrivilegedAccessAsync(Guid organization, Guid requestId, string action, PrivilegedAccessDecision request, CancellationToken token = default)
+        {
+            JitWrites++;
+            Assert.True(request.LiveConsent);
+            return Task.FromResult(_jitRequest! with { Status = "Queued", Version = 3 });
+        }
+        public Task<IReadOnlyList<PrivilegedAccessAudit>> GetPrivilegedAccessAuditAsync(Guid organization, Guid requestId, CancellationToken token = default)
+            => Task.FromResult<IReadOnlyList<PrivilegedAccessAudit>>([]);
+        public Task<SecurityAnalysisReport> AnalyzeSecurityEvidenceAsync(Guid organization, SecurityAnalysisRequest request, CancellationToken token = default)
+            => Task.FromResult(new SecurityAnalysisReport([], [], ["Partial saved evidence"]));
         private EntitlementEvidenceSnapshot? _entitlement;
         public int EntitlementUploads { get; private set; }
         public Task<EntitlementEvidenceSnapshot> UploadEntitlementEvidenceAsync(Guid organizationId, EntitlementEvidenceSnapshot snapshot, CancellationToken token = default)

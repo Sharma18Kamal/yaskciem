@@ -85,8 +85,33 @@ public interface ISharedEntitlementEvidenceApi
     Task<EntitlementEvidenceSnapshot> GetEntitlementEvidenceAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string account, Guid snapshotId, CancellationToken token = default);
 }
 
-public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi, ISharedGovernanceApi, ISharedOperationalApi, ISharedCloudActivityApi, ISharedSecurityAlertApi, ISharedCloudActivityHistoryApi, ISharedEntitlementEvidenceApi
+public interface ISharedPriorityTwoApi
 {
+    Task<IReadOnlyList<PrivilegedAccessRequest>> GetPrivilegedAccessAsync(Guid organization, CancellationToken token = default);
+    Task<PrivilegedAccessRequest> RequestPrivilegedAccessAsync(Guid organization, CreatePrivilegedAccessRequest request, CancellationToken token = default);
+    Task<PrivilegedAccessRequest> DecidePrivilegedAccessAsync(Guid organization, Guid requestId, string action, PrivilegedAccessDecision request, CancellationToken token = default);
+    Task<IReadOnlyList<PrivilegedAccessAudit>> GetPrivilegedAccessAuditAsync(Guid organization, Guid requestId, CancellationToken token = default);
+    Task<SecurityAnalysisReport> AnalyzeSecurityEvidenceAsync(Guid organization, SecurityAnalysisRequest request, CancellationToken token = default);
+}
+
+public sealed partial class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi, ISharedGovernanceApi, ISharedOperationalApi, ISharedCloudActivityApi, ISharedSecurityAlertApi, ISharedCloudActivityHistoryApi, ISharedEntitlementEvidenceApi, ISharedPriorityTwoApi, ISharedBreakGlassApi
+{
+    public async Task<IReadOnlyList<BreakGlassReport>> GetBreakGlassReportsAsync(Guid organization, CancellationToken token = default)
+        => await RequireDataAsync(client.GetBreakGlassReportsAsync(organization, await TokenAsync(token), token));
+    public async Task<BreakGlassReport> ReportBreakGlassAsync(Guid organization, CreateBreakGlassReportRequest request, CancellationToken token = default)
+        => await RequireDataAsync(client.ReportBreakGlassAsync(organization, request, await TokenAsync(token), token));
+    public async Task<BreakGlassReport> ReviewBreakGlassAsync(Guid organization, Guid report, ReviewBreakGlassReportRequest request, CancellationToken token = default)
+        => await RequireDataAsync(client.ReviewBreakGlassAsync(organization, report, request, await TokenAsync(token), token));
+    public async Task<IReadOnlyList<PrivilegedAccessRequest>> GetPrivilegedAccessAsync(Guid organization, CancellationToken token = default)
+        => await RequireDataAsync(client.GetPrivilegedAccessAsync(organization, await TokenAsync(token), token));
+    public async Task<PrivilegedAccessRequest> RequestPrivilegedAccessAsync(Guid organization, CreatePrivilegedAccessRequest request, CancellationToken token = default)
+        => await RequireDataAsync(client.RequestPrivilegedAccessAsync(organization, request, await TokenAsync(token), token));
+    public async Task<PrivilegedAccessRequest> DecidePrivilegedAccessAsync(Guid organization, Guid requestId, string action, PrivilegedAccessDecision request, CancellationToken token = default)
+        => await RequireDataAsync(client.DecidePrivilegedAccessAsync(organization, requestId, action, request, await TokenAsync(token), token));
+    public async Task<IReadOnlyList<PrivilegedAccessAudit>> GetPrivilegedAccessAuditAsync(Guid organization, Guid requestId, CancellationToken token = default)
+        => await RequireDataAsync(client.GetPrivilegedAccessAuditAsync(organization, requestId, await TokenAsync(token), token));
+    public async Task<SecurityAnalysisReport> AnalyzeSecurityEvidenceAsync(Guid organization, SecurityAnalysisRequest request, CancellationToken token = default)
+        => await RequireDataAsync(client.AnalyzeSecurityEvidenceAsync(organization, request, await TokenAsync(token), token));
     public async Task<EntitlementEvidenceSnapshot> UploadEntitlementEvidenceAsync(Guid organizationId, EntitlementEvidenceSnapshot snapshot, CancellationToken token = default)
         => await RequireDataAsync(client.UploadEntitlementEvidenceAsync(organizationId, snapshot, await TokenAsync(token), token));
     public async Task<IReadOnlyList<EntitlementEvidenceHistoryEntry>> GetEntitlementEvidenceHistoryAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string account, CancellationToken token = default)

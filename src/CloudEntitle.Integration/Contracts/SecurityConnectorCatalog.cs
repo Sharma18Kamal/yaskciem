@@ -13,10 +13,12 @@ public static class SecurityConnectorCatalog
     public const string Splunk = "SplunkHec";
     public const string QRadar = "QRadarTls";
     public const string Sentinel = "SentinelLogs";
+    public const string ServiceNow = "ServiceNow";
+    public const string Teams = "TeamsWorkflow";
 
     public static IReadOnlyList<string> OutboundKinds { get; } = Array.AsReadOnly(new[]
     {
-        "SignedWebhook", "Jira", Splunk, QRadar, Sentinel
+        "SignedWebhook", "Jira", Splunk, QRadar, Sentinel, ServiceNow, Teams
     });
 
     public static IReadOnlyList<SecurityConnectorCapability> Capabilities { get; } = Array.AsReadOnly(new[]
@@ -26,6 +28,8 @@ public static class SecurityConnectorCatalog
         new SecurityConnectorCapability(Sentinel, "Microsoft Sentinel", "Azure Monitor Logs Ingestion API", true, false, false),
         new SecurityConnectorCapability("SignedWebhook", "Client-managed SIEM/SOAR bridge", "HTTPS HMAC webhook", true, false, false),
         new SecurityConnectorCapability("Jira", "Jira Software Cloud", "HTTPS REST v3 issue creation", true, false, false),
+        new SecurityConnectorCapability(ServiceNow, "ServiceNow", "HTTPS Table API incident creation", true, false, false),
+        new SecurityConnectorCapability(Teams, "Microsoft Teams", "Client-owned Workflows webhook / Adaptive Card", true, false, false),
         new SecurityConnectorCapability("InboundClientBridge", "Splunk / QRadar / Microsoft Sentinel / client bridge",
             "Authenticated normalized HTTPS batch push (client-owned product polling)", false, true, false),
         new SecurityConnectorCapability("CarbonBlackCloud", "Carbon Black Cloud (deferred)", "Not configured", false, false, false)

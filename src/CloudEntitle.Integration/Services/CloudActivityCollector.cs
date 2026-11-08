@@ -58,6 +58,7 @@ public sealed partial class CloudActivityCollector(ICloudCommandRunner runner) :
                             Add(events, Text(entry, "eventID"), principal,
                                 $"{RequiredText(entry, "eventSource")}/{RequiredText(entry, "eventName")}", null,
                                 null, RequiredTime(entry, "eventTime"), !entry.TryGetProperty("errorCode", out _), start, end);
+                            events[^1] = events[^1] with { SourceIp = Text(entry, "sourceIPAddress") };
                         }
                         next = Text(page.RootElement, "NextToken");
                         if (next is not null && !seen.Add(next)) throw new InvalidOperationException("CloudTrail repeated a pagination token.");
@@ -89,7 +90,8 @@ public sealed partial class CloudActivityCollector(ICloudCommandRunner runner) :
                             var permission = NestedText(entry, "authorization", "action");
                             Add(events, Text(entry, "eventDataId"), principal, action, permission,
                                 Text(entry, "resourceId"), RequiredTime(entry, "eventTimestamp"), status == "Succeeded", start, end);
-                            events[^1] = events[^1] with { PermissionEvidenceSource = permission is null ? null : "Azure authorization.action" };
+                            events[^1] = events[^1] with { PermissionEvidenceSource = permission is null ? null : "Azure authorization.action",
+                                SourceIp = Text(entry, "callerIpAddress") };
                         }
                         var link = Text(page.RootElement, "nextLink");
                         if (string.IsNullOrEmpty(link)) break;
@@ -127,6 +129,8 @@ public sealed partial class CloudActivityCollector(ICloudCommandRunner runner) :
                             var id = $"{logName}|{RequiredText(entry, "insertId")}|{RequiredText(entry, "timestamp")}";
                             var time = RequiredTime(entry, "timestamp");
                             Add(events, id, principal, method, null, Text(payload, "resourceName"), time, success, start, end);
+                            var callerIp = NestedText(payload, "requestMetadata", "callerIp");
+                            events[^1] = events[^1] with { SourceIp = callerIp };
                             if (payload.TryGetProperty("authorizationInfo", out var permissions))
                             {
                                 if (permissions.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("GCP permission evidence is invalid.");
@@ -136,7 +140,7 @@ public sealed partial class CloudActivityCollector(ICloudCommandRunner runner) :
                                     var granted = permission.TryGetProperty("granted", out var grant) && grant.ValueKind == JsonValueKind.True;
                                     Add(events, id, principal, action, action, Text(permission, "resource") ?? Text(payload, "resourceName"),
                                         time, success && granted, start, end);
-                                    events[^1] = events[^1] with { PermissionEvidenceSource = "GCP authorizationInfo.permission" };
+                                    events[^1] = events[^1] with { PermissionEvidenceSource = "GCP authorizationInfo.permission", SourceIp = callerIp };
                                 }
                             }
                         }

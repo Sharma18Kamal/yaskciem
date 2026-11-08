@@ -86,6 +86,155 @@ public sealed class ComplianceTests
     }
 
     [Fact]
+    public void ComplianceStandardEnum_ShouldPreservePersistedValuesAndAppendNewStandards()
+    {
+        Assert.Equal(0, (int)ComplianceStandard.CisControlsV8_1);
+        Assert.Equal(1, (int)ComplianceStandard.Nist80053Rev5);
+        Assert.Equal(2, (int)ComplianceStandard.Iso27001_2022);
+        Assert.Equal(3, (int)ComplianceStandard.Soc2TrustServices);
+        Assert.Equal(4, (int)ComplianceStandard.NistCsf2_0);
+        Assert.Equal(5, (int)ComplianceStandard.PciDss4_0_1);
+        Assert.Equal(6, (int)ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0);
+        Assert.Equal(7, (int)ComplianceStandard.CisAwsFoundationsBenchmark3_0_0);
+        Assert.Equal(ComplianceStandard.CisControlsV8_1, JsonSerializer.Deserialize<ComplianceStandard>("0"));
+        Assert.Equal(ComplianceStandard.Soc2TrustServices, JsonSerializer.Deserialize<ComplianceStandard>("3"));
+        Assert.Equal(ComplianceStandard.NistCsf2_0, JsonSerializer.Deserialize<ComplianceStandard>("4"));
+        Assert.Equal(ComplianceStandard.PciDss4_0_1, JsonSerializer.Deserialize<ComplianceStandard>("5"));
+        Assert.Equal(ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, JsonSerializer.Deserialize<ComplianceStandard>("6"));
+        Assert.Equal(ComplianceStandard.CisAwsFoundationsBenchmark3_0_0, JsonSerializer.Deserialize<ComplianceStandard>("7"));
+    }
+
+    [Theory]
+    [InlineData("LP-002", ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, "1.23",
+        "https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0")]
+    [InlineData("AR-001", ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, "1.23",
+        "https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0")]
+    [InlineData("AR-002", ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, "5.1.2",
+        "https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0")]
+    [InlineData("LP-002", ComplianceStandard.CisAwsFoundationsBenchmark3_0_0, "1.15",
+        "https://docs.aws.amazon.com/securityhub/latest/userguide/iam-controls.html#iam-2")]
+    [InlineData("AR-001", ComplianceStandard.CisAwsFoundationsBenchmark3_0_0, "1.15",
+        "https://docs.aws.amazon.com/securityhub/latest/userguide/iam-controls.html#iam-2")]
+    [InlineData("IG-001", ComplianceStandard.CisAwsFoundationsBenchmark3_0_0, "1.12",
+        "https://docs.aws.amazon.com/securityhub/latest/userguide/iam-controls.html#iam-22")]
+    public void BroaderBenchmarkMappings_ShouldRetainExactSourceVersionAndLimits(
+        string controlId, ComplianceStandard standard, string reference, string sourceUri)
+    {
+        var mapping = Assert.Single(ComplianceStandardCatalog.GetMappings(controlId, new[] { standard }));
+        Assert.Equal(reference, mapping.Reference);
+        Assert.Equal(sourceUri, mapping.SourceUri);
+        Assert.Equal(controlId, mapping.SourceControlId);
+        Assert.Equal(ComplianceStandardCatalog.GetStandardVersion(standard), mapping.StandardVersion);
+        Assert.Equal("2026.11.2", mapping.MappingCatalogVersion);
+        Assert.Equal("Informative alignment", mapping.Relationship);
+        Assert.Contains("does not", mapping.Rationale, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(ComplianceStandardCatalog.GetMappings("CIEM-BASE-001", new[] { standard }));
+    }
+
+    [Fact]
+    public void AwsBenchmarkCrosswalk_ShouldExportWithoutChangingAssessmentResults()
+    {
+        var context = new ComplianceContext(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(),
+            Array.Empty<DomainEffectiveAccess>(), Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(),
+            Array.Empty<IdentityGovernanceRecord>(), Array.Empty<AuditEvent>());
+        var service = new ComplianceAssessmentService();
+        var baseline = service.Assess(context, ComplianceFramework.IdentityGovernance,
+            selectedStandards: new[] { ComplianceStandard.CisControlsV8_1 });
+        var assessment = service.Assess(context, ComplianceFramework.IdentityGovernance,
+            selectedStandards: new[] { ComplianceStandard.CisAwsFoundationsBenchmark3_0_0 });
+        Assert.Equal(baseline.Controls.Select(item => item.State), assessment.Controls.Select(item => item.State));
+        Assert.False(assessment.IsCertification);
+        using var signer = new TestComplianceBundleSigner();
+        var bundle = new ComplianceExportService().CreateBundle(assessment,
+            new ComplianceExportMetadata(Guid.NewGuid(), "Acme", Guid.NewGuid().ToString("D"), null), signer);
+        using var archive = new ZipArchive(new MemoryStream(bundle), ZipArchiveMode.Read);
+        var csv = ReadEntry(archive, "control-mappings.csv");
+        Assert.Contains("CisAwsFoundationsBenchmark3_0_0", csv);
+        Assert.Contains("CIS AWS Foundations Benchmark v3.0.0", csv);
+        Assert.Contains(",\"1.12\",", csv);
+        Assert.Contains("https://docs.aws.amazon.com/securityhub/latest/userguide/iam-controls.html#iam-22", csv);
+    }
+
+    [Fact]
+    public void CisAzureBenchmarkMapping_ShouldBeLimitedToVerifiedExternalGuestReviewRecommendation()
+    {
+        const string sourceUri = "https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0";
+        var standards = new[] { ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0 };
+        var context = new ComplianceContext(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(),
+            Array.Empty<DomainEffectiveAccess>(), Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(),
+            Array.Empty<IdentityGovernanceRecord>(), Array.Empty<AuditEvent>());
+
+        var assessment = new ComplianceAssessmentService().Assess(context, ComplianceFramework.IdentityGovernance, selectedStandards: standards);
+        var control = Assert.Single(assessment.Controls, item => item.ControlId == "IG-002");
+        var mapping = Assert.Single(control.Mappings);
+
+        Assert.Equal(ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, mapping.Standard);
+        Assert.Equal("1.5", mapping.Reference);
+        Assert.Equal("CIS Microsoft Azure Foundations Benchmark v2.0.0", mapping.StandardVersion);
+        Assert.Equal(sourceUri, mapping.SourceUri);
+        Assert.Equal("Informative alignment", mapping.Relationship);
+        Assert.Contains("does not establish that a regular review occurred", mapping.Rationale, StringComparison.Ordinal);
+        Assert.Equal(assessment.MappingCatalogVersion, mapping.MappingCatalogVersion);
+        Assert.All(assessment.Controls.Where(item => item.ControlId != "IG-002"), item => Assert.Empty(item.Mappings));
+
+        using var signer = new TestComplianceBundleSigner();
+        var bundle = new ComplianceExportService().CreateBundle(assessment,
+            new ComplianceExportMetadata(Guid.NewGuid(), "Acme", Guid.NewGuid().ToString("D"), null), signer);
+        using var archive = new ZipArchive(new MemoryStream(bundle), ZipArchiveMode.Read);
+        var mappingCsv = ReadEntry(archive, "control-mappings.csv");
+        Assert.Contains("CisMicrosoftAzureFoundationsBenchmark2_0_0", mappingCsv);
+        Assert.Contains(sourceUri, mappingCsv);
+        Assert.Contains(",\"1.5\",", mappingCsv);
+    }
+
+    [Fact]
+    public void NistCsfAndPciDssMappings_ShouldBeInformativeAndExportVersionedReferences()
+    {
+        var access = new DomainEffectiveAccess
+        {
+            Id = Guid.NewGuid(),
+            Provider = CloudProvider.Azure,
+            CloudAccountId = Guid.NewGuid(),
+            PrincipalId = Guid.NewGuid(),
+            Decision = AccessDecision.Allow,
+            EvaluationStatus = EvaluationStatus.FullyEvaluated,
+            Evidence = "Provider access evaluation"
+        };
+        var context = new ComplianceContext(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(),
+            new[] { access }, Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(),
+            Array.Empty<IdentityGovernanceRecord>(), Array.Empty<AuditEvent>());
+        var selectedStandards = new[] { ComplianceStandard.NistCsf2_0, ComplianceStandard.PciDss4_0_1 };
+        var assessment = new ComplianceAssessmentService().Assess(context, ComplianceFramework.LeastPrivilege, selectedStandards: selectedStandards);
+        var control = Assert.Single(assessment.Controls, item => item.ControlId == "LP-001");
+
+        Assert.Equal(selectedStandards, assessment.SelectedStandards);
+        Assert.Contains(control.Mappings, mapping => mapping.Standard == ComplianceStandard.NistCsf2_0
+            && mapping.Reference == "PR.AA-05"
+            && mapping.StandardVersion == "NIST Cybersecurity Framework (CSF) 2.0 (NIST CSWP 29, February 26, 2024)");
+        Assert.Contains(control.Mappings, mapping => mapping.Standard == ComplianceStandard.PciDss4_0_1
+            && mapping.Reference == "7.2.2"
+            && mapping.StandardVersion == "PCI DSS v4.0.1 (June 2024)");
+        Assert.All(control.Mappings.Where(mapping => selectedStandards.Contains(mapping.Standard)),
+            mapping => Assert.Equal("Informative alignment", mapping.Relationship));
+
+        using var signer = new TestComplianceBundleSigner();
+        var bundle = new ComplianceExportService().CreateBundle(assessment,
+            new ComplianceExportMetadata(Guid.NewGuid(), "Acme", Guid.NewGuid().ToString("D"), null), signer);
+        using var archive = new ZipArchive(new MemoryStream(bundle), ZipArchiveMode.Read);
+        using var manifest = JsonDocument.Parse(ReadEntry(archive, "manifest.json"));
+        var versions = manifest.RootElement.GetProperty("standardVersions");
+        var mappingCsv = ReadEntry(archive, "control-mappings.csv");
+
+        Assert.Equal(control.Mappings.First(mapping => mapping.Standard == ComplianceStandard.NistCsf2_0).StandardVersion,
+            versions.GetProperty(nameof(ComplianceStandard.NistCsf2_0)).GetString());
+        Assert.Equal(control.Mappings.First(mapping => mapping.Standard == ComplianceStandard.PciDss4_0_1).StandardVersion,
+            versions.GetProperty(nameof(ComplianceStandard.PciDss4_0_1)).GetString());
+        Assert.Contains("PR.AA-05", mappingCsv);
+        Assert.Contains("7.2.2", mappingCsv);
+        Assert.False(manifest.RootElement.GetProperty("isCertification").GetBoolean());
+    }
+
+    [Fact]
     public void ComplianceException_ShouldBeIncludedWithoutChangingControlState()
     {
         var now = new DateTime(2026, 10, 9, 0, 0, 0, DateTimeKind.Utc);
@@ -163,7 +312,7 @@ public sealed class ComplianceTests
 
         using var manifestJson = JsonDocument.Parse(manifest);
         using var assessmentJson = JsonDocument.Parse(exportedAssessment);
-        Assert.Equal("1.2", manifestJson.RootElement.GetProperty("schemaVersion").GetString());
+        Assert.Equal("1.3", manifestJson.RootElement.GetProperty("schemaVersion").GetString());
         Assert.Equal("EvidenceSnapshot", manifestJson.RootElement.GetProperty("assessmentType").GetString());
         Assert.False(manifestJson.RootElement.GetProperty("isCertification").GetBoolean());
         Assert.Equal(ComplianceStandardCatalog.MappingCatalogVersion, manifestJson.RootElement.GetProperty("mappingCatalogVersion").GetString());

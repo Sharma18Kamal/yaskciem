@@ -41,7 +41,7 @@ public sealed class ComplianceExportService
         var exceptionsBytes = JsonSerializer.SerializeToUtf8Bytes(assessment.Exceptions, JsonOptions);
         var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            schemaVersion = "1.2",
+            schemaVersion = "1.3",
             product = "YASK-CIEM",
             assessmentType = "EvidenceSnapshot",
             isCertification = false,
@@ -123,11 +123,11 @@ public sealed class ComplianceExportService
 
     private static string CreateMappingCsv(ComplianceAssessment assessment)
     {
-        var builder = new StringBuilder("ControlId,SourceControlId,Standard,StandardVersion,MappingCatalogVersion,Reference,Relationship,Rationale\r\n");
+        var builder = new StringBuilder("ControlId,SourceControlId,Standard,StandardVersion,MappingCatalogVersion,Reference,Relationship,SourceUri,Rationale\r\n");
         foreach (var control in assessment.Controls)
         foreach (var mapping in control.Mappings)
             builder.AppendLine(string.Join(",", new[] { control.ControlId, mapping.SourceControlId, mapping.Standard.ToString(), mapping.StandardVersion,
-                mapping.MappingCatalogVersion, mapping.Reference, mapping.Relationship, mapping.Rationale }.Select(EscapeCsv)));
+                mapping.MappingCatalogVersion, mapping.Reference, mapping.Relationship, mapping.SourceUri, mapping.Rationale }.Select(EscapeCsv)));
         return builder.ToString();
     }
 

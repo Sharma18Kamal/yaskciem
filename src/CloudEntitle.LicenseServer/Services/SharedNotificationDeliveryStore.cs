@@ -86,9 +86,9 @@ public sealed partial class SharedWorkspaceStore
                 UPDATE SharedNotificationAttempts SET CompletedAtUtc=@now, FailureCode='lease_expired'
                 WHERE TenantId=@tenant AND OrganizationId=@organization AND DeliveryId=@delivery AND AttemptId=@attempt;
                 UPDATE SharedNotificationDeliveries
-                SET Status=CASE WHEN AttemptCount >= 5 OR ConnectorKind IN ('Jira','QRadarTls') THEN 'Failed' ELSE 'Pending' END,
-                    NextAttemptAtUtc=CASE WHEN AttemptCount >= 5 OR ConnectorKind IN ('Jira','QRadarTls') THEN NULL ELSE @retry END,
-                    CompletedAtUtc=CASE WHEN AttemptCount >= 5 OR ConnectorKind IN ('Jira','QRadarTls') THEN @now ELSE NULL END,
+                SET Status=CASE WHEN AttemptCount >= 5 OR ConnectorKind IN ('Jira','QRadarTls','ServiceNow','TeamsWorkflow') THEN 'Failed' ELSE 'Pending' END,
+                    NextAttemptAtUtc=CASE WHEN AttemptCount >= 5 OR ConnectorKind IN ('Jira','QRadarTls','ServiceNow','TeamsWorkflow') THEN NULL ELSE @retry END,
+                    CompletedAtUtc=CASE WHEN AttemptCount >= 5 OR ConnectorKind IN ('Jira','QRadarTls','ServiceNow','TeamsWorkflow') THEN @now ELSE NULL END,
                     FailureCode='lease_expired', ActiveAttemptId=NULL, LeaseExpiresAtUtc=NULL
                 WHERE TenantId=@tenant AND OrganizationId=@organization AND DeliveryId=@delivery;
                 """, connection, transaction);
@@ -167,7 +167,7 @@ public sealed partial class SharedWorkspaceStore
         var now = DateTime.UtcNow;
         var retry = result.Retryable && lease.Delivery.AttemptCount < 5 && !result.Delivered && !result.Suppressed
             && (lease.Delivery.ConnectorKind != SecurityConnectorCatalog.QRadar || result.FailureCode != "outcome_unknown")
-            && (lease.Delivery.ConnectorKind != "Jira" || result.HttpStatus == 429);
+            && (lease.Delivery.ConnectorKind is not ("Jira" or SecurityConnectorCatalog.ServiceNow or SecurityConnectorCatalog.Teams) || result.HttpStatus == 429);
         await using var complete = new NpgsqlCommand("""
             UPDATE SharedNotificationDeliveries
             SET Status=@status, NextAttemptAtUtc=@retry, CompletedAtUtc=@completed, FailureCode=@failure,

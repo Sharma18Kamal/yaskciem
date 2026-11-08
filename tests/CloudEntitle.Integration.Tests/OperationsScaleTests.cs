@@ -12,6 +12,35 @@ namespace CloudEntitle.Integration.Tests;
 public sealed class OperationsScaleTests
 {
     [PostgreSqlFact]
+    public async Task MonitoringSchemas_ReadinessRequiresImmutableGuardsAndDecisionIndex()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        using var store = new SharedWorkspaceStore(database.ConnectionString);
+        await store.InitializeAsync();
+        Assert.True(await store.IsReadyAsync());
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        foreach (var (table, trigger) in new[]
+        {
+            ("SharedContinuousChangeBatches", "tr_sharedcontinuouschangebatches_appendonly"),
+            ("SharedContinuousChangeRevisions", "tr_sharedcontinuouschangerevisions_notruncate"),
+            ("SharedEffectiveDecisionSnapshots", "tr_sharedeffectivedecisionsnapshots_appendonly"),
+            ("SharedDecisionEscalationAnalyses", "tr_shareddecisionescalationanalyses_notruncate")
+        })
+        {
+            await using (var disable = new NpgsqlCommand($"ALTER TABLE {table} DISABLE TRIGGER {trigger}", connection))
+                await disable.ExecuteNonQueryAsync();
+            Assert.False(await store.IsReadyAsync());
+            await using (var enable = new NpgsqlCommand($"ALTER TABLE {table} ENABLE TRIGGER {trigger}", connection))
+                await enable.ExecuteNonQueryAsync();
+            Assert.True(await store.IsReadyAsync());
+        }
+        await using var drop = new NpgsqlCommand("DROP INDEX ix_sharedeffectivedecisionsnapshots_sourcetime", connection);
+        await drop.ExecuteNonQueryAsync();
+        Assert.False(await store.IsReadyAsync());
+    }
+
+    [PostgreSqlFact]
     public async Task TenantScanLimits_ShouldBeEnforcedAtomicallyAndRemainIsolated()
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
@@ -204,6 +233,10 @@ public sealed class OperationsScaleTests
         var healthCheck = new OperationsReadinessHealthCheck(
             store, metrics, workers, configuration, NullLogger<OperationsReadinessHealthCheck>.Instance);
 
+        var feedWorkerMissing = await healthCheck.CheckHealthAsync(new HealthCheckContext());
+        Assert.Equal(HealthStatus.Unhealthy, feedWorkerMissing.Status);
+        Assert.Contains("continuous-change-feeds", feedWorkerMissing.Description, StringComparison.Ordinal);
+        workers.Heartbeat("continuous-change-feeds", success: true);
         var healthy = await healthCheck.CheckHealthAsync(new HealthCheckContext());
         Assert.Equal(HealthStatus.Healthy, healthy.Status);
 

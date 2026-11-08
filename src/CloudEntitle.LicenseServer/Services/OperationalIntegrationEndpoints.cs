@@ -40,12 +40,13 @@ public static partial class SharedWorkspaceEndpoints
                     || !service.Authorize(organizationId, identity, OrganizationAction.ViewFindings).Allowed) return Results.Forbid();
                 if (request is null || string.IsNullOrEmpty(request.Channel) || request.Channel.Length > 64
                     || request.Channel.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
-                    return BadRequest("invalid_connector", "A configured Jira channel alias is required.");
+                    return BadRequest("invalid_connector", "A configured Jira or ServiceNow channel alias is required.");
                 var tenant = Guid.Parse(identity.TenantId);
                 var channel = configuration.GetSection($"CentralNotifications:Organizations:{tenant:D}:{organizationId:D}:Channels:{request.Channel}");
-                if (ConnectorConfiguration.Status(channel, "Jira") != "Configured")
-                    return BadRequest("invalid_connector", "The organization Jira channel is not configured.");
-                var status = await store.RequestOperationalTicketAsync(tenant, organizationId, eventId, request.Channel, identity.UserId, token);
+                var kind = ConnectorConfiguration.Kind(channel);
+                if (kind is not ("Jira" or SecurityConnectorCatalog.ServiceNow) || ConnectorConfiguration.Status(channel, kind) != "Configured")
+                    return BadRequest("invalid_connector", "The organization Jira or ServiceNow channel is not configured.");
+                var status = await store.RequestOperationalTicketAsync(tenant, organizationId, eventId, request.Channel, identity.UserId, token, kind);
                 return Results.Accepted($"/api/v1/organizations/{organizationId:D}/notification-deliveries/{status.Delivery.DeliveryId:D}", Envelope(status));
             }
             catch (KeyNotFoundException) { return Results.NotFound(); }
@@ -53,7 +54,7 @@ public static partial class SharedWorkspaceEndpoints
             catch (ArgumentException exception) { return BadRequest("invalid_ticket_request", exception.Message); }
             catch (InvalidOperationException exception) { return Results.Conflict(Error("ticket_conflict", exception.Message)); }
         }).RequireAuthorization("CiemApiAccess").WithName("RequestOperationalTicket")
-            .WithSummary("Explicitly queue a deduplicated Jira ticket for an existing event; never create tickets inside HTTP handlers.")
+            .WithSummary("Explicitly queue a deduplicated Jira or ServiceNow ticket for an existing event; never create tickets inside HTTP handlers.")
             .Produces<ApiEnvelope<SharedDeliveryStatusDto>>(202).Produces<ApiError>(400).Produces(403).Produces(404).Produces<ApiError>(409);
     }
 }

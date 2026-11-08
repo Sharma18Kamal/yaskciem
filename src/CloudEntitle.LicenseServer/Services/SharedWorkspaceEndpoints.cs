@@ -23,6 +23,12 @@ public static partial class SharedWorkspaceEndpoints
     app.MapSecurityAlertEndpoints(store);
     app.MapEntitlementEvidenceEndpoints(store);
     app.MapGovernanceEndpoints(store);
+    app.MapPrivilegedAccessEndpoints(store);
+    app.MapSecurityAnalysisEndpoints(store);
+    app.MapBreakGlassEndpoints(store);
+    app.MapTrustCredentialMonitoringEndpoints(store);
+    app.MapContinuousChangeFeedEndpoints(store);
+    app.MapAuthoritativeDecisionEndpoints(store);
         app.MapGet("/api/v1/organizations", (ClaimsPrincipal principal) => GetOrganizations(principal, store))
             .RequireAuthorization("CiemApiAccess");
         app.MapPost("/api/v1/organizations", (ClaimsPrincipal principal, CreateOrganizationRequest request) => CreateOrganization(principal, request, store))

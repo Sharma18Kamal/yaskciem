@@ -6,11 +6,33 @@ using CloudEntitle.OrganizationManagement.Models;
 
 namespace CloudEntitle.Integration.Clients;
 
-public sealed class CiemApiClient
+public sealed partial class CiemApiClient
 {
     private readonly HttpClient _httpClient;
 
     public CiemApiClient(HttpClient httpClient) => _httpClient = httpClient;
+
+    public Task<ApiEnvelope<IReadOnlyList<PrivilegedAccessRequest>>?> GetPrivilegedAccessAsync(Guid organization, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<IReadOnlyList<PrivilegedAccessRequest>>(HttpMethod.Get, $"api/v1/organizations/{organization:D}/privileged-access", accessToken, cancellationToken: token);
+    public Task<ApiEnvelope<PrivilegedAccessRequest>?> RequestPrivilegedAccessAsync(Guid organization, CreatePrivilegedAccessRequest request, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<PrivilegedAccessRequest>(HttpMethod.Post, $"api/v1/organizations/{organization:D}/privileged-access", accessToken, request, token);
+    public Task<ApiEnvelope<PrivilegedAccessRequest>?> DecidePrivilegedAccessAsync(Guid organization, Guid requestId, string action,
+        PrivilegedAccessDecision request, string accessToken, CancellationToken token = default)
+    {
+        if (action is not ("approve" or "reject" or "activate" or "revoke")) throw new ArgumentException("Invalid JIT decision.", nameof(action));
+        return SendForEnvelopeAsync<PrivilegedAccessRequest>(HttpMethod.Post, $"api/v1/organizations/{organization:D}/privileged-access/{requestId:D}/{action}", accessToken, request, token);
+    }
+    public Task<ApiEnvelope<IReadOnlyList<PrivilegedAccessAudit>>?> GetPrivilegedAccessAuditAsync(Guid organization, Guid requestId, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<IReadOnlyList<PrivilegedAccessAudit>>(HttpMethod.Get, $"api/v1/organizations/{organization:D}/privileged-access/{requestId:D}/audit", accessToken, cancellationToken: token);
+    public Task<ApiEnvelope<SecurityAnalysisReport>?> AnalyzeSecurityEvidenceAsync(Guid organization, SecurityAnalysisRequest request, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<SecurityAnalysisReport>(HttpMethod.Post, $"api/v1/organizations/{organization:D}/security-analysis", accessToken, request, token);
+
+    public Task<ApiEnvelope<IReadOnlyList<BreakGlassReport>>?> GetBreakGlassReportsAsync(Guid organization, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<IReadOnlyList<BreakGlassReport>>(HttpMethod.Get, $"api/v1/organizations/{organization:D}/break-glass-reports", accessToken, cancellationToken: token);
+    public Task<ApiEnvelope<BreakGlassReport>?> ReportBreakGlassAsync(Guid organization, CreateBreakGlassReportRequest request, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<BreakGlassReport>(HttpMethod.Post, $"api/v1/organizations/{organization:D}/break-glass-reports", accessToken, request, token);
+    public Task<ApiEnvelope<BreakGlassReport>?> ReviewBreakGlassAsync(Guid organization, Guid report, ReviewBreakGlassReportRequest request, string accessToken, CancellationToken token = default)
+        => SendForEnvelopeAsync<BreakGlassReport>(HttpMethod.Post, $"api/v1/organizations/{organization:D}/break-glass-reports/{report:D}/review", accessToken, request, token);
 
     public Task<ApiEnvelope<EntitlementEvidenceSnapshot>?> UploadEntitlementEvidenceAsync(Guid organizationId,
         EntitlementEvidenceSnapshot snapshot, string accessToken, CancellationToken token = default)

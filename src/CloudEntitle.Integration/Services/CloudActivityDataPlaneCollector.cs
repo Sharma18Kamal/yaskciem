@@ -287,7 +287,10 @@ public sealed partial class CloudActivityCollector
             ? resourceArray.EnumerateArray().Select(resource => Text(resource, "ARN")).OfType<string>().Distinct(StringComparer.Ordinal).ToArray() : [];
         var error = Text(entry, "errorCode");
         foreach (var resource in resources.Length == 0 ? new string?[] { null } : resources)
+        {
             Add(events, RequiredText(entry, "eventID"), principal, action, null, resource, time, string.IsNullOrEmpty(error), start, end);
+            events[^1] = events[^1] with { SourceIp = Text(entry, "sourceIPAddress") };
+        }
     }
 
     private static void AddAzureAudit(List<CloudActivityEvent> events, JsonElement entry, string account, DateTimeOffset start, DateTimeOffset end, bool workspaceRow)

@@ -12,7 +12,7 @@ try {
         'publish\CloudEntitle.LicenseServer.exe', 'publish\wwwroot\console\index.html',
         'infra\postgres\001-schema.sql', 'infra\postgres\002-central-monitoring.sql',
         'infra\postgres\003-governance-deadlines.sql', 'infra\postgres\004-operational-integrations.sql',
-        'infra\postgres\005-operations-scale.sql', 'infra\postgres\006-security-connectors.sql', 'infra\postgres\007-cloud-activity.sql', 'infra\postgres\008-inbound-security.sql', 'infra\postgres\009-entitlement-evidence.sql', 'infra\postgres\backup-roles.sql'
+        'infra\postgres\005-operations-scale.sql', 'infra\postgres\006-security-connectors.sql', 'infra\postgres\007-cloud-activity.sql', 'infra\postgres\008-inbound-security.sql', 'infra\postgres\009-entitlement-evidence.sql', 'infra\postgres\010-priority-two.sql', 'infra\postgres\011-trust-credential-monitoring.sql', 'infra\postgres\012-break-glass-reports.sql', 'infra\postgres\013-continuous-change-feeds.sql', 'infra\postgres\014-authoritative-decisions.sql', 'infra\postgres\backup-roles.sql'
     )
     foreach ($name in $files) {
         $path = Join-Path $bundle $name

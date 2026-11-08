@@ -237,6 +237,31 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         using var entitlementReader = new StreamReader(entitlementSchema);
         await using var entitlementCommand = new NpgsqlCommand(await entitlementReader.ReadToEndAsync(cancellationToken), connection);
         await entitlementCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var prioritySchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.PriorityTwoSchema.sql")
+            ?? throw new InvalidOperationException("The Priority Two schema resource is missing.");
+        using var priorityReader = new StreamReader(prioritySchema);
+        await using var priorityCommand = new NpgsqlCommand(await priorityReader.ReadToEndAsync(cancellationToken), connection);
+        await priorityCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var trustSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.TrustCredentialSchema.sql")
+            ?? throw new InvalidOperationException("The trust/credential schema resource is missing.");
+        using var trustReader = new StreamReader(trustSchema);
+        await using var trustCommand = new NpgsqlCommand(await trustReader.ReadToEndAsync(cancellationToken), connection);
+        await trustCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var emergencySchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.BreakGlassSchema.sql")
+            ?? throw new InvalidOperationException("The emergency-report schema resource is missing.");
+        using var emergencyReader = new StreamReader(emergencySchema);
+        await using var emergencyCommand = new NpgsqlCommand(await emergencyReader.ReadToEndAsync(cancellationToken), connection);
+        await emergencyCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var feedSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.ContinuousChangeFeedSchema.sql")
+            ?? throw new InvalidOperationException("The continuous change-feed schema resource is missing.");
+        using var feedReader = new StreamReader(feedSchema);
+        await using var feedCommand = new NpgsqlCommand(await feedReader.ReadToEndAsync(cancellationToken), connection);
+        await feedCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var decisionSchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.AuthoritativeDecisionSchema.sql")
+            ?? throw new InvalidOperationException("The authoritative decision schema resource is missing.");
+        using var decisionReader = new StreamReader(decisionSchema);
+        await using var decisionCommand = new NpgsqlCommand(await decisionReader.ReadToEndAsync(cancellationToken), connection);
+        await decisionCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
@@ -285,6 +310,64 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                          AND to_regclass('sharedsecurityalertbatches') IS NOT NULL
                          AND to_regclass('sharedsecurityalertrevisions') IS NOT NULL
                          AND to_regclass('sharedentitlementevidencesnapshots') IS NOT NULL
+                         AND to_regclass('sharedprivilegedaccessrequests') IS NOT NULL
+                         AND to_regclass('sharedprivilegedaccessaudit') IS NOT NULL
+                         AND to_regclass('sharedtrustcredentialsnapshots') IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedtrustcredentialsnapshots_accounttime') AND indisvalid AND indisready)
+                         AND (SELECT count(*) = 2 FROM pg_trigger WHERE tgrelid=to_regclass('sharedtrustcredentialsnapshots')
+                             AND tgname IN ('tr_sharedtrustcredentialsnapshots_appendonly','tr_sharedtrustcredentialsnapshots_notruncate')
+                             AND NOT tgisinternal AND tgenabled='O')
+                         AND to_regclass('sharedbreakglassreports') IS NOT NULL
+                         AND to_regclass('sharedbreakglassreviews') IS NOT NULL
+                         AND to_regclass('sharedcontinuouschangefeeds') IS NOT NULL
+                         AND to_regclass('sharedcontinuouschangeattempts') IS NOT NULL
+                         AND to_regclass('sharedcontinuouschangebatches') IS NOT NULL
+                         AND to_regclass('sharedcontinuouschangerevisions') IS NOT NULL
+                         AND to_regclass('sharedeffectivedecisionsnapshots') IS NOT NULL
+                         AND to_regclass('shareddecisionescalationanalyses') IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharedeffectivedecisionsnapshots')
+                             AND attname='collectedby' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharedeffectivedecisionsnapshots')
+                             AND attname='sourceid' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('shareddecisionescalationanalyses')
+                             AND attname='beforesnapshotid' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('shareddecisionescalationanalyses')
+                             AND attname='aftersnapshotid' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedeffectivedecisionsnapshots_sourcetime') AND indisvalid AND indisready)
+                         AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('sharedeffectivedecisionsnapshots')
+                             AND contype='p' AND convalidated)
+                         AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('shareddecisionescalationanalyses')
+                             AND contype='p' AND convalidated)
+                         AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('shareddecisionescalationanalyses')
+                             AND contype='u' AND convalidated)
+                         AND (SELECT count(*) = 2 FROM pg_constraint WHERE conrelid=to_regclass('shareddecisionescalationanalyses')
+                             AND confrelid=to_regclass('sharedeffectivedecisionsnapshots') AND contype='f' AND convalidated)
+                         AND (SELECT count(*) = 4 FROM pg_trigger WHERE
+                             (tgrelid=to_regclass('sharedeffectivedecisionsnapshots') AND tgname IN ('tr_sharedeffectivedecisionsnapshots_appendonly','tr_sharedeffectivedecisionsnapshots_notruncate')
+                              OR tgrelid=to_regclass('shareddecisionescalationanalyses') AND tgname IN ('tr_shareddecisionescalationanalyses_appendonly','tr_shareddecisionescalationanalyses_notruncate'))
+                             AND NOT tgisinternal AND tgenabled='O')
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharedcontinuouschangefeeds')
+                             AND attname='sourceepoch' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharedcontinuouschangefeeds')
+                             AND attname='configurationsha256' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharedcontinuouschangefeeds')
+                             AND attname='leaseexpiresatutc' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedcontinuouschangefeeds_due') AND indisvalid AND indisready)
+                         AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedcontinuouschangeattempts_history') AND indisvalid AND indisready)
+                         AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedcontinuouschangerevisions_history') AND indisvalid AND indisready)
+                         AND (SELECT count(*) = 4 FROM pg_trigger WHERE
+                             (tgrelid=to_regclass('sharedcontinuouschangebatches') AND tgname IN ('tr_sharedcontinuouschangebatches_appendonly','tr_sharedcontinuouschangebatches_notruncate')
+                              OR tgrelid=to_regclass('sharedcontinuouschangerevisions') AND tgname IN ('tr_sharedcontinuouschangerevisions_appendonly','tr_sharedcontinuouschangerevisions_notruncate'))
+                             AND NOT tgisinternal AND tgenabled='O')
+                         AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedbreakglassreports_orgtime') AND indisvalid AND indisready)
+                         AND (SELECT count(*) = 4 FROM pg_trigger WHERE
+                             (tgrelid=to_regclass('sharedbreakglassreports') AND tgname IN ('tr_sharedbreakglassreports_appendonly','tr_sharedbreakglassreports_notruncate')
+                              OR tgrelid=to_regclass('sharedbreakglassreviews') AND tgname IN ('tr_sharedbreakglassreviews_appendonly','tr_sharedbreakglassreviews_notruncate'))
+                             AND NOT tgisinternal AND tgenabled='O')
+                         AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedprivilegedaccessrequests_statustime') AND indisvalid AND indisready)
+                         AND (SELECT count(*) = 2 FROM pg_trigger WHERE tgrelid=to_regclass('sharedprivilegedaccessaudit')
+                             AND tgname IN ('tr_sharedprivilegedaccessaudit_appendonly','tr_sharedprivilegedaccessaudit_notruncate')
+                             AND NOT tgisinternal AND tgenabled='O')
                          AND EXISTS (SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('ix_sharedentitlementevidencesnapshots_accounttime') AND indisvalid AND indisready)
                          AND (SELECT count(*) = 2 FROM pg_trigger WHERE tgrelid=to_regclass('sharedentitlementevidencesnapshots')
                              AND tgname IN ('tr_sharedentitlementevidencesnapshots_appendonly','tr_sharedentitlementevidencesnapshots_notruncate')

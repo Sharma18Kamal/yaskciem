@@ -184,6 +184,38 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Equal(HttpStatusCode.NotFound, crossTicket.StatusCode);
         using var missingEvent = await Send(HttpMethod.Post, prefix + $"/operational-events/{Guid.NewGuid()}/ticket", owner, new CreateOperationalTicketRequest("jira"));
         Assert.Equal(HttpStatusCode.NotFound, missingEvent.StatusCode);
+        var analysisRoot = $"BehaviorAnalysis:Organizations:{tenant:D}:{organization.Id:D}:Aws";
+        builder.Configuration[$"{analysisRoot}:Enabled"] = "true";
+        builder.Configuration[$"{analysisRoot}:TimeZoneId"] = "UTC";
+        builder.Configuration[$"{analysisRoot}:PrivilegedActions:0"] = "iam.amazonaws.com/CreateUser";
+        var sunday = new DateTimeOffset(activityTime.UtcDateTime.Date.AddDays(-(int)activityTime.DayOfWeek), TimeSpan.Zero);
+        var reviewActivity = activity with { SnapshotId = Guid.NewGuid(), Events = [activity.Events[0] with { EventId = "weekend-call", Timestamp = sunday }] };
+        await store.SaveCloudActivityAsync(tenant, organization.Id, owner.UserId, reviewActivity);
+        var newTime = DateTimeOffset.UtcNow;
+        var changedDocuments = permissions with { SnapshotId = Guid.NewGuid(), StartedAtUtc = newTime, CollectedAtUtc = newTime,
+            Grants = [permissions.Grants[0] with { SourceSha256 = new string('B', 64), Action = "s3:PutBucketPolicy" }] };
+        await store.SaveEntitlementEvidenceAsync(tenant, organization.Id, owner.UserId, changedDocuments);
+        var analysisRequest = new SecurityAnalysisRequest(CloudProvider.Aws, "123456789012", reviewActivity.SnapshotId, changedDocuments.SnapshotId);
+        using var analysisDenied = await Send(HttpMethod.Post, prefix + "/security-analysis", viewer, analysisRequest);
+        Assert.Equal(HttpStatusCode.Forbidden, analysisDenied.StatusCode);
+        using var analysis = await Send(HttpMethod.Post, prefix + "/security-analysis", owner, analysisRequest);
+        Assert.True(analysis.StatusCode == HttpStatusCode.OK, await analysis.Content.ReadAsStringAsync());
+        var report = (await analysis.Content.ReadFromJsonAsync<ApiEnvelope<SecurityAnalysisReport>>())!.Data;
+        Assert.Contains(report.Anomalies, item => item.Kind == "PrivilegedActionOutsideBusinessHours");
+        Assert.Equal("ObservedPolicyOrAssignmentChange", Assert.Single(report.Changes).Kind);
+        var eventCount = (await store.GetDriftEventsAsync(tenant, organization.Id)).Count;
+        using var analysisReplay = await Send(HttpMethod.Post, prefix + "/security-analysis", owner, analysisRequest);
+        Assert.Equal(HttpStatusCode.OK, analysisReplay.StatusCode);
+        Assert.Equal(eventCount, (await store.GetDriftEventsAsync(tenant, organization.Id)).Count);
+        var snowRoot = $"CentralNotifications:Organizations:{tenant:D}:{organization.Id:D}:Channels:snow";
+        builder.Configuration[$"{snowRoot}:Kind"] = "ServiceNow";
+        builder.Configuration[$"{snowRoot}:Url"] = "https://client.service-now.com";
+        builder.Configuration[$"{snowRoot}:UserName"] = "bot";
+        builder.Configuration[$"{snowRoot}:ApiToken"] = "fixture-secret";
+        var reviewEvent = (await store.GetDriftEventsAsync(tenant, organization.Id)).First(item => item.EventType == "behavior.anomaly");
+        using var snow = await Send(HttpMethod.Post, prefix + $"/operational-events/{reviewEvent.EventId:D}/ticket", owner, new CreateOperationalTicketRequest("snow"));
+        Assert.Equal(HttpStatusCode.Accepted, snow.StatusCode);
+        Assert.Equal("ServiceNow", (await snow.Content.ReadFromJsonAsync<ApiEnvelope<SharedDeliveryStatusDto>>())!.Data.Delivery.ConnectorKind);
         await app.StopAsync();
     }
 }

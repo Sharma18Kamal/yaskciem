@@ -1,0 +1,66 @@
+<UserControl x:Class="CloudEntitle.Desktop.Views.ContinuousChangeFeedsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border Padding="14" Margin="0,10,0,0" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8">
+        <StackPanel>
+            <TextBlock Text="Continuous cloud IAM / trust / key-metadata change feeds" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding ContinuousFeedSetupInstructions}" Margin="0,6,0,10" TextWrapping="Wrap" />
+            <WrapPanel>
+                <Button Content="Refresh saved status" Command="{Binding RefreshContinuousFeedsCommand}" Padding="10,4" Margin="0,0,8,8" />
+                <ComboBox Width="280" ItemsSource="{Binding ContinuousFeeds}" SelectedItem="{Binding SelectedContinuousFeed}"
+                          DisplayMemberPath="Alias" Margin="0,0,8,8" />
+                <CheckBox Content="I consent to continuous server bridge reads" IsChecked="{Binding ContinuousFeedConsent}" Margin="0,4,8,8" />
+                <CheckBox Content="Reset source epoch (retain old evidence)" IsChecked="{Binding ContinuousFeedResetSource}" Margin="0,4,8,8" />
+                <Button Content="Enable and connect" Command="{Binding ConnectContinuousFeedCommand}"
+                        IsEnabled="{Binding CanManageContinuousFeeds}" Padding="10,4" Margin="0,0,8,8" />
+                <Button Content="Pause" Command="{Binding PauseContinuousFeedCommand}"
+                        IsEnabled="{Binding CanManageContinuousFeeds}" Padding="10,4" Margin="0,0,8,8" />
+                <Button Content="Load saved changes" Command="{Binding LoadContinuousChangesCommand}" Padding="10,4" Margin="0,0,8,8" />
+            </WrapPanel>
+            <TextBlock Text="{Binding ContinuousFeedStatus}" TextWrapping="Wrap" Margin="0,0,0,8" />
+            <DataGrid ItemsSource="{Binding ContinuousFeeds}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MaxHeight="170">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Alias" Binding="{Binding Alias}" Width="120" />
+                    <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80" />
+                    <DataGridTextColumn Header="Account" Binding="{Binding AccountId}" Width="200" />
+                    <DataGridTextColumn Header="Source" Binding="{Binding SourceId}" Width="160" />
+                    <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="65" />
+                    <DataGridCheckBoxColumn Header="Connected" Binding="{Binding Connected}" Width="80" />
+                    <DataGridTextColumn Header="Health" Binding="{Binding Health}" Width="110" />
+                    <DataGridTextColumn Header="Last success" Binding="{Binding LastSuccessAtUtc}" Width="170" />
+                    <DataGridTextColumn Header="Source watermark" Binding="{Binding SourceWatermarkUtc}" Width="170" />
+                    <DataGridTextColumn Header="Failure / gap" Binding="{Binding FailureCode}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <TextBlock Text="Per-category source claims — VerifiedComplete always false; gaps persist until explicit epoch reset."
+                       TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,10,0,4" />
+            <DataGrid ItemsSource="{Binding ContinuousFeedCoverage}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MaxHeight="185">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="200" />
+                    <DataGridTextColumn Header="State" Binding="{Binding State}" Width="100" />
+                    <DataGridCheckBoxColumn Header="Source reports complete" Binding="{Binding SourceReportedComplete}" Width="145" />
+                    <DataGridCheckBoxColumn Header="Verified complete" Binding="{Binding VerifiedComplete}" Width="110" />
+                    <DataGridTextColumn Header="From" Binding="{Binding CoveredFromUtc}" Width="170" />
+                    <DataGridTextColumn Header="Through" Binding="{Binding CoveredThroughUtc}" Width="170" />
+                    <DataGridTextColumn Header="Gap" Binding="{Binding GapCode}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <TextBlock Text="Saved immutable normalized revisions (latest 100; source/provider time and epoch retained)"
+                       FontWeight="SemiBold" Margin="0,10,0,4" TextWrapping="Wrap" />
+            <DataGrid ItemsSource="{Binding ContinuousChanges}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MaxHeight="240">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Source event" Binding="{Binding Change.SourceEventId}" Width="150" />
+                    <DataGridTextColumn Header="Revision" Binding="{Binding Change.RevisionId}" Width="100" />
+                    <DataGridTextColumn Header="Category" Binding="{Binding Change.Category}" Width="150" />
+                    <DataGridTextColumn Header="Operation" Binding="{Binding Change.Operation}" Width="85" />
+                    <DataGridTextColumn Header="Principal" Binding="{Binding Change.PrincipalId}" Width="150" />
+                    <DataGridTextColumn Header="Resource" Binding="{Binding Change.ResourceId}" Width="180" />
+                    <DataGridTextColumn Header="Source time" Binding="{Binding Change.SourceEventAtUtc}" Width="170" />
+                    <DataGridTextColumn Header="Provider time" Binding="{Binding Change.ProviderObservedAtUtc}" Width="170" />
+                    <DataGridTextColumn Header="Received" Binding="{Binding ReceivedAtUtc}" Width="170" />
+                    <DataGridTextColumn Header="Epoch" Binding="{Binding SourceEpoch}" Width="230" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </StackPanel>
+    </Border>
+</UserControl>

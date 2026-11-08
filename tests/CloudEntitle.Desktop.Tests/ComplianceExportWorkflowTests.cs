@@ -67,7 +67,7 @@ public sealed class ComplianceExportWorkflowTests
             using var lineage = JsonDocument.Parse(await ReadEntryAsync(archive, "evidence-lineage.json"));
             using var controlLineage = JsonDocument.Parse(await ReadEntryAsync(archive, "control-lineage.json"));
             Assert.NotEmpty(lineage.RootElement.EnumerateArray());
-            Assert.Equal("1.2", manifest.RootElement.GetProperty("schemaVersion").GetString());
+            Assert.Equal("1.3", manifest.RootElement.GetProperty("schemaVersion").GetString());
             Assert.Equal("EvidenceSnapshot", manifest.RootElement.GetProperty("assessmentType").GetString());
             Assert.False(manifest.RootElement.GetProperty("isCertification").GetBoolean());
             Assert.Equal(ComplianceStandardCatalog.MappingCatalogVersion, manifest.RootElement.GetProperty("mappingCatalogVersion").GetString());

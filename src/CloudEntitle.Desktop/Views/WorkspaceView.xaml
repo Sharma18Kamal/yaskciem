@@ -1,7 +1,8 @@
 <UserControl x:Class="CloudEntitle.Desktop.Views.WorkspaceView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="clr-namespace:CloudEntitle.Desktop.ViewModels">
+             xmlns:vm="clr-namespace:CloudEntitle.Desktop.ViewModels"
+             xmlns:views="clr-namespace:CloudEntitle.Desktop.Views">
     <UserControl.Resources>
         <Style TargetType="{x:Type DataGrid}">
             <Setter Property="ToolTip" Value="Click sortable column headers to reorder rows. Select a row where selection is enabled."/>
@@ -903,6 +904,67 @@
                                         <DataGridTextColumn Header="Compatibility (not historical proof)" Binding="{Binding Status}" Width="*"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                                <TextBlock Text="Multi-cloud JIT - Azure PIM / AWS client-owned broker / GCP PAM" FontWeight="Bold" Margin="0,16,0,6"/>
+                                <TextBlock Text="Connect server-allowlisted targets. AWS requires a client-owned native bounded human-session broker, not direct STS issuance. GCP uses native PAM and a configured requester-to-human mapping; native policies may require additional approvals. Two distinct non-requester approvers; standard at most 60 minutes and shorter emergency at most 15. Native expiration is independent of this app." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <TextBox Text="{Binding JitTarget, UpdateSourceTrigger=PropertyChanged}" Width="150" ToolTip="Client-configured Azure/AWS/GCP target alias, not a URL, role identifier, arbitrary principal or secret."/>
+                                    <TextBox Text="{Binding JitDurationMinutes, UpdateSourceTrigger=PropertyChanged}" Width="60" Margin="8,0,0,0" ToolTip="Requested minutes: standard 1-60, emergency 1-15; the server can enforce a smaller maximum."/>
+                                    <CheckBox Content="Emergency" IsChecked="{Binding JitEmergency}" Margin="8,0,0,0" ToolTip="Short-lived emergency request. Never bypasses dual approvals; all decisions and native outcomes are audited."/>
+                                    <TextBox Text="{Binding JitReason, UpdateSourceTrigger=PropertyChanged}" MinWidth="250" Margin="8,0,0,0" ToolTip="Single-line business justification for the request or decision. Do not enter credentials or personal sensitive data."/>
+                                </WrapPanel>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Content="Request JIT access" Command="{Binding RequestJitCommand}" Style="{StaticResource QuietButton}" ToolTip="Create an approval request for your signed-in identity. This does not immediately grant cloud access."/>
+                                    <Button Content="Refresh JIT requests" Command="{Binding RefreshJitCommand}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Read saved JIT workflow state without contacting a cloud endpoint. Select a refreshed request before deciding."/>
+                                    <Button Content="Approve selected" Command="{Binding ApproveJitCommand}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Record one versioned approval. Requires a configured non-requester manager/security approver with ManageRemediations."/>
+                                    <Button Content="Reject selected" Command="{Binding RejectJitCommand}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Reject an unactivated request as a configured non-requester approver. No native access is changed."/>
+                                    <Button Content="Read JIT audit" Command="{Binding JitAuditCommand}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Read the selected request's append-only audit events. DBAs can alter storage; this is not a WORM archive."/>
+                                </WrapPanel>
+                                <CheckBox Content="I authorize live activation of my selected, dual-approved JIT request" IsChecked="{Binding JitLiveConsent}" Margin="0,8,0,0" ToolTip="One-time explicit consent to the saved provider's bounded human grant. Target and duration are fixed by the approved request; consent resets after use or selection changes."/>
+                                <Button Content="Activate selected JIT request" Command="{Binding ActivateJitCommand}" HorizontalAlignment="Left" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Requester-only activation after two approvals. The server verifies configuration/authorization and uses a fixed UTC expiry; unknown submission outcomes are reconciled, never blindly retried."/>
+                                <CheckBox Content="I authorize ending/cancelling the selected grant now" IsChecked="{Binding JitRevokeConsent}" Margin="0,8,0,0" ToolTip="Requester or one current configured authorized approver may end access with reason and saved version. Queued/unknown is not verified revocation. Consent resets after use/selection changes."/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Content="End / cancel selected JIT access" Command="{Binding RevokeJitCommand}" Style="{StaticResource QuietButton}" ToolTip="Requester or one current configured authorized approver ends this exact grant with reason, current version and explicit consent. Unissued requests cancel without cloud calls; queued or unknown revocation is not verified removal."/>
+                                    <Button Content="Open my AWS broker session" Command="{Binding OpenJitSessionCommand}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Requester authenticates directly at the client-owned broker; no raw cloud credentials are returned or saved by this app."/>
+                                </WrapPanel>
+                                <DataGrid ItemsSource="{Binding JitRequests}" SelectedItem="{Binding SelectedJitRequest}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Request" Binding="{Binding RequestId}" Width="*"/>
+                                        <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="*"/>
+                                        <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80"/>
+                                        <DataGridTextColumn Header="State" Binding="{Binding Status}" Width="120"/>
+                                        <DataGridTextColumn Header="Minutes" Binding="{Binding DurationMinutes}" Width="60"/>
+                                        <DataGridTextColumn Header="Expires UTC" Binding="{Binding ExpiresAtUtc, StringFormat={}{0:u}}" Width="170"/>
+                                        <DataGridTextColumn Header="Verification issue" Binding="{Binding FailureCode}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <DataGrid ItemsSource="{Binding JitAudit}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="140" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="UTC" Binding="{Binding AtUtc, StringFormat={}{0:u}}" Width="170"/>
+                                        <DataGridTextColumn Header="Actor" Binding="{Binding ActorId}" Width="*"/>
+                                        <DataGridTextColumn Header="Action" Binding="{Binding Action}" Width="100"/>
+                                        <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <views:BreakGlassReportsView/>
+                                <views:TrustCredentialMonitoringView/>
+                                <views:ContinuousChangeFeedsView/>
+                                <views:AuthoritativeDecisionsView DataContext="{Binding AuthoritativeDecisions}"/>
+                                <Button Content="Analyze saved behavior and document changes" Command="{Binding AnalyzeSavedSecurityCommand}" HorizontalAlignment="Left" Style="{StaticResource QuietButton}" Margin="0,16,0,0" ToolTip="Analyze the loaded saved activity/documents using server-configured baselines and business hours. Emits deduplicated potential review events to existing notification/ticket rules; no live cloud polling."/>
+                                <TextBlock Text="{Binding PriorityTwoStatus}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0"/>
+                                <DataGrid ItemsSource="{Binding BehaviorAnomalies}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="*"/>
+                                        <DataGridTextColumn Header="Potential behavior signal" Binding="{Binding Kind}" Width="*"/>
+                                        <DataGridTextColumn Header="Evidence / limits" Binding="{Binding Evidence}" Width="2*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <DataGrid ItemsSource="{Binding ObservedDocumentChanges}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="140" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="*"/>
+                                        <DataGridTextColumn Header="Document source" Binding="{Binding SourceId}" Width="*"/>
+                                        <DataGridTextColumn Header="Observed change (not deletion proof)" Binding="{Binding Kind}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
                                 <TextBlock Text="{Binding ActivityAttributionStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                 <DataGrid ItemsSource="{Binding ActivityCorrelations}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
                                     <DataGrid.Columns>
@@ -948,8 +1010,8 @@
                                 </DataGrid>
                                 <StackPanel IsEnabled="{Binding CanManageNotificationRules}">
                                     <WrapPanel Margin="0,8,0,0">
-                                        <ComboBox ItemsSource="{Binding ConnectorKinds}" SelectedItem="{Binding NotificationConnectorKind, Mode=TwoWay}" MinWidth="130" ToolTip="Choose SignedWebhook, Jira, SplunkHec, QRadarTls, or SentinelLogs. The organization server channel kind must match; SIEM exports do not execute response actions."/>
-                                        <CheckBox Content="Policy: auto-create Jira tickets" IsChecked="{Binding AllowAutomaticTickets}" Margin="8,0,0,0" ToolTip="Explicit organization policy opt-in. Jira automatic tickets require a nonempty event type allowlist."/>
+                                        <ComboBox ItemsSource="{Binding ConnectorKinds}" SelectedItem="{Binding NotificationConnectorKind, Mode=TwoWay}" MinWidth="130" ToolTip="Choose SignedWebhook, Jira, ServiceNow, TeamsWorkflow, SplunkHec, QRadarTls, or SentinelLogs. The organization server channel kind must match; notifications do not approve or execute response actions."/>
+                                        <CheckBox Content="Policy: auto-create tickets" IsChecked="{Binding AllowAutomaticTickets}" Margin="8,0,0,0" ToolTip="Explicit organization policy opt-in. Jira and ServiceNow automatic tickets require a nonempty event type allowlist."/>
                                     </WrapPanel>
                                     <TextBlock Text="{Binding NotificationEndpointInstructions}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                     <CheckBox Content="The client-created receiver and this organization server alias are configured; enable delivery" IsChecked="{Binding NotificationEndpointConfirmed}" Margin="0,8,0,0" ToolTip="User confirmation is not a connectivity probe. The server still validates configuration and records delivery errors."/>
@@ -982,8 +1044,8 @@
                                     </DataGrid.Columns>
                                 </DataGrid>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                    <TextBox Text="{Binding TicketChannel, UpdateSourceTrigger=PropertyChanged}" MinWidth="120" ToolTip="Organization-specific Jira channel alias configured on the server; never enter a URL or token."/>
-                                    <Button Content="Request Jira ticket for selected event" Command="{Binding RequestOperationalTicketCommand}" IsEnabled="{Binding CanRequestOperationalTicket}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Explicitly queue a ticket for the selected event. Requires ManageRemediations and inventory/finding read access. Repeated requests are deduplicated; no automatic retry of ambiguous Jira sends."/>
+                                    <TextBox Text="{Binding TicketChannel, UpdateSourceTrigger=PropertyChanged}" MinWidth="120" ToolTip="Organization-specific Jira or ServiceNow channel alias configured on the server; never enter a URL or token."/>
+                                    <Button Content="Request ticket for selected event" Command="{Binding RequestOperationalTicketCommand}" IsEnabled="{Binding CanRequestOperationalTicket}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Explicitly queue a Jira or ServiceNow ticket for the selected event. Requires ManageRemediations and inventory/finding read access. Repeated requests are deduplicated; ambiguous sends require reconciliation."/>
                                 </StackPanel>
                                 <DataGrid ItemsSource="{Binding ConnectorHealth}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
                                     <DataGrid.Columns>

@@ -423,7 +423,11 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         new(ComplianceStandard.CisControlsV8_1, "CIS Controls v8.1"),
         new(ComplianceStandard.Nist80053Rev5, "NIST SP 800-53 Rev. 5"),
         new(ComplianceStandard.Iso27001_2022, "ISO/IEC 27001:2022"),
-        new(ComplianceStandard.Soc2TrustServices, "SOC 2 Trust Services Criteria")
+        new(ComplianceStandard.Soc2TrustServices, "SOC 2 Trust Services Criteria"),
+        new(ComplianceStandard.NistCsf2_0, "NIST CSF 2.0"),
+        new(ComplianceStandard.PciDss4_0_1, "PCI DSS v4.0.1"),
+        new(ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, "CIS Microsoft Azure Foundations Benchmark v2.0.0"),
+        new(ComplianceStandard.CisAwsFoundationsBenchmark3_0_0, "CIS AWS Foundations Benchmark v3.0.0")
     };
     public ObservableCollection<ComplianceException> ComplianceExceptionDrafts { get; } = new();
     public IReadOnlyList<ComplianceStandard> SelectedComplianceStandards => ComplianceStandardOptions.Where(option => option.IsSelected).Select(option => option.Standard).ToArray();

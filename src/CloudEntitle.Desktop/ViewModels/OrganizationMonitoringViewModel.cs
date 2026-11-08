@@ -111,6 +111,12 @@ public sealed partial class OrganizationViewModel
 
     private void ResetMonitoring()
     {
+        ResetPriorityTwo();
+        ResetBreakGlassReports();
+        ResetTrustCredentialMonitoring();
+        ResetContinuousChangeFeeds();
+        ResetAuthoritativeDecisions();
+        SelectedTrustCredentialBinding = null;
         ResetAdministration();
         ResetSecurityAlerts();
         SelectedActivityBinding = null;
@@ -213,7 +219,7 @@ public sealed partial class OrganizationViewModel
             var status = await operations.RequestOperationalTicketAsync(organization.Id, eventId, TicketChannel.Trim());
             if (SelectedOrganization != organization || _identity != identity) return;
             await RefreshMonitoringAsync();
-            MonitoringStatus = $"Jira delivery {status.Delivery.DeliveryId:D}: {status.Delivery.Status}. Repeated requests are deduplicated; dead letters require reconciliation.";
+            MonitoringStatus = $"{status.Delivery.ConnectorKind} delivery {status.Delivery.DeliveryId:D}: {status.Delivery.Status}. Repeated requests are deduplicated; dead letters require reconciliation.";
         }
         catch (Exception exception)
         {

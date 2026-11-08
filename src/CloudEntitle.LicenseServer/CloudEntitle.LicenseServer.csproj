@@ -35,6 +35,11 @@
     <EmbeddedResource Include="..\..\infra\postgres\007-cloud-activity.sql" LogicalName="CloudEntitle.LicenseServer.CloudActivitySchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\008-inbound-security.sql" LogicalName="CloudEntitle.LicenseServer.InboundSecuritySchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\009-entitlement-evidence.sql" LogicalName="CloudEntitle.LicenseServer.EntitlementEvidenceSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\010-priority-two.sql" LogicalName="CloudEntitle.LicenseServer.PriorityTwoSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\011-trust-credential-monitoring.sql" LogicalName="CloudEntitle.LicenseServer.TrustCredentialSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\012-break-glass-reports.sql" LogicalName="CloudEntitle.LicenseServer.BreakGlassSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\013-continuous-change-feeds.sql" LogicalName="CloudEntitle.LicenseServer.ContinuousChangeFeedSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\014-authoritative-decisions.sql" LogicalName="CloudEntitle.LicenseServer.AuthoritativeDecisionSchema.sql" />
   </ItemGroup>
 
   <Target Name="BuildOperationsConsole" BeforeTargets="PrepareForBuild" Condition="'$(BuildWebConsole)' == 'true'">

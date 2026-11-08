@@ -8,7 +8,17 @@ namespace CloudEntitle.Compliance.Models;
 
 public enum ComplianceControlState { Pass, Fail, Partial, NotAssessed }
 public enum ComplianceFramework { CiemBaseline, LeastPrivilege, IdentityGovernance, AccessReview }
-public enum ComplianceStandard { CisControlsV8_1, Nist80053Rev5, Iso27001_2022, Soc2TrustServices }
+public enum ComplianceStandard
+{
+    CisControlsV8_1 = 0,
+    Nist80053Rev5 = 1,
+    Iso27001_2022 = 2,
+    Soc2TrustServices = 3,
+    NistCsf2_0 = 4,
+    PciDss4_0_1 = 5,
+    CisMicrosoftAzureFoundationsBenchmark2_0_0 = 6,
+    CisAwsFoundationsBenchmark3_0_0 = 7
+}
 public enum ComplianceExceptionStatus { NotAssessed, Active, Expired }
 
 public sealed record ComplianceStandardMapping(ComplianceStandard Standard, string Reference, string Rationale)
@@ -17,6 +27,7 @@ public sealed record ComplianceStandardMapping(ComplianceStandard Standard, stri
     public string StandardVersion { get; init; } = string.Empty;
     public string MappingCatalogVersion { get; init; } = string.Empty;
     public string Relationship { get; init; } = "Informative alignment";
+    public string SourceUri { get; init; } = string.Empty;
 }
 
 public sealed record ComplianceControlLineage(
@@ -65,7 +76,7 @@ public sealed record ComplianceAssessmentTrendPoint(
 
 public static class ComplianceStandardCatalogVersion
 {
-    public const string Current = "2026.10.0";
+    public const string Current = "2026.11.2";
     public const string Legacy = "Unversioned (legacy assessment)";
 }
 
