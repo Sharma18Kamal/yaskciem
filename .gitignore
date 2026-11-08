@@ -44,3 +44,11 @@ packages.lock.json
 node_modules/
 src/CloudEntitle.LicenseServer/wwwroot/console/
 .copilot-azure/
+
+# Build/release outputs and key material
+/artifacts/*
+!/artifacts/.gitignore
+*.pfx
+*.wixpdb
+.venv/
+~$*.docx
