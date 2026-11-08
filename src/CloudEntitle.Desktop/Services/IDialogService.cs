@@ -10,4 +10,6 @@ public interface IDialogService
     string? ChooseComplianceBundlePath();
     string? ChooseLocalBackupSavePath();
     string? ChooseLocalBackupOpenPath();
+    string? ChooseAuthorizationBundlePath() => null;
+    string? ChooseWhatIfReportPath() => ChoosePolicyDraftPath();
 }

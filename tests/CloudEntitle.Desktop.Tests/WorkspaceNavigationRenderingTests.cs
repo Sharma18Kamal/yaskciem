@@ -10,6 +10,10 @@ using CloudEntitle.Desktop.Views;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Analytics.Services;
+using CloudEntitle.Domain;
+using CloudEntitle.EffectiveAccess.Models;
+using CloudEntitle.EffectiveAccess.Services;
+using CloudEntitle.OrganizationManagement.Services;
 using System.ComponentModel;
 using Xunit;
 
@@ -71,7 +75,9 @@ public sealed class WorkspaceNavigationRenderingTests
                 var settings = new SettingsViewModel(demo, jiraSettingsStore: new EmptySettings(),
                     ticketingCredentialStore: new EmptyCredentials(), postureWebhookCredentialStore: new EmptyWebhook());
                 var pages = new WorkspaceViewModel[] { dashboard, new CloudAccountsViewModel(demo),
-                    new IdentitiesViewModel(demo), new ResourcesViewModel(demo), new EntitlementsViewModel(demo), settings };
+                    new IdentitiesViewModel(demo), new ResourcesViewModel(demo), new EntitlementsViewModel(demo),
+                    new WhatIfSimulatorViewModel(demo, new EmptyWhatIfData(), new(new EffectiveAccessEngine()),
+                        new DialogService(), new AuthenticatedOrganizationContext(), new OrganizationManagementService()), settings };
                 var cached = new Dictionary<WorkspaceViewModel, object>();
                 WorkspaceView? firstWorkspace = null;
                 window.Show();
@@ -148,6 +154,12 @@ public sealed class WorkspaceNavigationRenderingTests
         public JiraConnectionSettings Load() => new("");
         public void Save(string baseUrl) => throw new NotSupportedException();
         public void Save(JiraConnectionSettings settings) => throw new NotSupportedException();
+    }
+    private sealed class EmptyWhatIfData : IWhatIfSavedData
+    {
+        public Task<IReadOnlyList<CloudAccount>> GetAccountsAsync(CancellationToken token)
+            => Task.FromResult<IReadOnlyList<CloudAccount>>(Array.Empty<CloudAccount>());
+        public Task<WhatIfInput> LoadAsync(Guid accountId, CancellationToken token) => throw new NotSupportedException();
     }
     private sealed class EmptyCredentials : ITicketingCredentialStore
     {

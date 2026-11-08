@@ -4,6 +4,9 @@
              xmlns:vm="clr-namespace:CloudEntitle.Desktop.ViewModels"
              xmlns:views="clr-namespace:CloudEntitle.Desktop.Views">
     <UserControl.Resources>
+        <DataTemplate DataType="{x:Type vm:WhatIfSimulatorViewModel}">
+            <views:WhatIfSimulatorView/>
+        </DataTemplate>
         <Style TargetType="{x:Type DataGrid}">
             <Setter Property="ToolTip" Value="Click sortable column headers to reorder rows. Select a row where selection is enabled."/>
         </Style>

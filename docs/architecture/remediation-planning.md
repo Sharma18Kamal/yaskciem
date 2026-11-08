@@ -23,6 +23,11 @@ Plans contain before/after states, a provider target, rationale, and `Executable
 
 Simulation is structural only. It identifies affected EffectiveAccess records but reports `Unknown` access impact and `RequiresReview` status because provider authorization has not been re-evaluated and no mutation has occurred. Incomplete recommendation evidence remains a review concern rather than a false claim of safety. A dry run is gated on audited approval and does not perform a cloud write.
 
+The separate [What-if Simulator](what-if-simulator.md) re-evaluates saved/offline
+authorization models before and after a selected action removal. Its
+non-executable scenario reports do not replace this approval-bound dry-run,
+prove operational safety or enable recommendation/SOAR execution.
+
 The desktop workflow uses the existing Microsoft Entra interactive sign-in, configured with `YASK_CIEM_ENTRA_CLIENT_ID` and the selected organization's Entra tenant. It binds requester and approver records to Entra user object IDs and requires the `ManageRemediations` organization permission. Organization Admins and Security Analysts receive that permission by default; custom roles can be granted it explicitly. Auditors and Viewers cannot approve. The requester cannot approve or reject their own plan, and final execution approval must come from a different user than the dry-run approver.
 
 Plan snapshots remain local at `%LOCALAPPDATA%\YASK-CIEM\remediation\plans.json`. Remediation audit entries are also inserted once into the existing local SQLite `AuditEvents` table, with actor and organization IDs. Rollback preparation creates a separate non-executable plan that requires its own review and approval; it does not restore cloud state. This is an interim local audit path, not centralized or tamper-proof storage: the organization directory and SQLite database are both locally mutable. Production recommendation/SOAR execution requires server-side authorization and centralized immutable audit storage before its provider writes are enabled.

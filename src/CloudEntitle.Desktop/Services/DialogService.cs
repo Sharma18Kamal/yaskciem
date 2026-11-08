@@ -6,6 +6,28 @@ namespace CloudEntitle.Desktop.Services;
 
 public sealed class DialogService : IDialogService
 {
+    public string? ChooseWhatIfReportPath()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save non-executable what-if simulation report",
+            Filter = "Simulation JSON (*.json)|*.json",
+            DefaultExt = ".json", AddExtension = true, OverwritePrompt = true,
+            FileName = $"yask-ciem-what-if-{DateTime.Now:yyyyMMdd-HHmmss}.json"
+        };
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+    public string? ChooseAuthorizationBundlePath()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import offline authorization bundle (schema 1.0)",
+            Filter = "Authorization JSON (*.json)|*.json",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
     public void ShowInformation(string message, string title = "YASK-CIEM") =>
         MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Information);
 

@@ -53,6 +53,9 @@ public partial class App : System.Windows.Application
 		services.AddDbContextFactory<CloudEntitleDbContext>(options => options.UseSqlite(databaseConfiguration.ConnectionString));
 		services.AddSingleton<IDemoDataService, DemoDataService>();
 		services.AddSingleton<IEffectiveAccessEngine, EffectiveAccessEngine>();
+		services.AddSingleton<CloudEntitle.EffectiveAccess.Services.WhatIfPermissionSimulator>();
+		services.AddSingleton<IWhatIfSavedData, WhatIfSavedData>();
+		services.AddTransient<WhatIfSimulatorViewModel>();
 		services.AddSingleton<IAnalyticsService, AnalyticsService>();
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<IReportService, SqliteReportService>();

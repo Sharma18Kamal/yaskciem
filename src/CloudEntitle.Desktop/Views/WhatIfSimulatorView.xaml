@@ -1,0 +1,81 @@
+<UserControl x:Class="CloudEntitle.Desktop.Views.WhatIfSimulatorView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel>
+        <WrapPanel Margin="0,0,0,12">
+            <Button Content="Refresh saved accounts" Command="{Binding RefreshAccountsCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8"/>
+            <ComboBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}" DisplayMemberPath="Name" MinWidth="180" Margin="0,0,8,8" ToolTip="Local inventory only; no live refresh"/>
+            <Button Content="Load saved inventory" Command="{Binding LoadSavedCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8"/>
+            <Button Content="Import offline JSON" Command="{Binding ImportCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Schema 1.0 authorization bundle; native export projections with explicit resource and identity mapping"/>
+        </WrapPanel>
+        <TextBlock Text="Remove one exact permission from one role or policy" Style="{StaticResource CardLabel}"/>
+        <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding SelectedTarget}" DisplayMemberPath="DisplayName" Margin="0,8,0,8" ToolTip="All modeled assignments of this role/policy are included"/>
+        <TextBox Text="{Binding Action, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" ToolTip="Exact Azure action, AWS action or GCP permission. Wildcard target actions are not accepted."/>
+        <WrapPanel>
+            <Button Content="Simulate removal" Command="{Binding SimulateCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"/>
+            <Button Content="Export simulation report" Command="{Binding ExportCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8"/>
+        </WrapPanel>
+        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,8"/>
+        <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+        <TextBlock Text="{Binding Report.RiskExplanation}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+        <DataGrid ItemsSource="{Binding AccessChanges}" AutoGenerateColumns="False" IsReadOnly="True"
+                  MaxHeight="420" RowDetailsVisibilityMode="VisibleWhenSelected" ToolTip="Select a row for origin and alternative evidence. NotApplicable is no modeled grant, not provider denial.">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Identity" Binding="{Binding Principal}" Width="150"/>
+                <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
+                <DataGridCheckBoxColumn Header="Inherited" Binding="{Binding IsInherited}" Width="80"/>
+                <DataGridTextColumn Header="Before" Binding="{Binding Before}" Width="90"/>
+                <DataGridTextColumn Header="Before status" Binding="{Binding BeforeStatus}" Width="125"/>
+                <DataGridTextColumn Header="After" Binding="{Binding After}" Width="100"/>
+                <DataGridTextColumn Header="After status" Binding="{Binding AfterStatus}" Width="125"/>
+                <DataGridTextColumn Header="Impact" Binding="{Binding Impact}" Width="160"/>
+            </DataGrid.Columns>
+            <DataGrid.RowDetailsTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="12">
+                        <TextBlock Text="Removed contribution: source / scope / evidence digest" FontWeight="Bold"/>
+                        <ItemsControl ItemsSource="{Binding RemovedOrigins}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,4">
+                                        <TextBlock Text="{Binding SourceId}" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding Scope}" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding EvidenceSha256}" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding OriginalStatement}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="Alternative grants of the SAME action (distinct action equivalence is not assumed)" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <ItemsControl ItemsSource="{Binding AlternativeOrigins}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate><StackPanel Margin="0,4"><TextBlock Text="{Binding SourceId}"/><TextBlock Text="{Binding Scope}"/><TextBlock Text="{Binding EvidenceSha256}"/></StackPanel></DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="Before inheritance and authorization paths" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <ItemsControl ItemsSource="{Binding BeforePaths}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,4">
+                                        <TextBlock Text="{Binding SourceId}"/>
+                                        <ItemsControl ItemsSource="{Binding Steps}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate><TextBlock TextWrapping="Wrap"><Run Text="{Binding Type}"/><Run Text=": "/><Run Text="{Binding Name}"/><Run Text=" - "/><Run Text="{Binding Details}"/></TextBlock></DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding Diagnostics}">
+                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Message}" TextWrapping="Wrap"/></DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </DataTemplate>
+            </DataGrid.RowDetailsTemplate>
+        </DataGrid>
+        <ItemsControl ItemsSource="{Binding Report.Limitations}" Margin="0,12,0,0">
+            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/></DataTemplate></ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </StackPanel>
+</UserControl>
