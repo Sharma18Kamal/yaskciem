@@ -116,6 +116,25 @@ public sealed class PermissionUsageAnalyticsTests
             Decision = AccessDecision.Allow
         };
 
+    [Fact]
+    public void Calculate_MissingActionsOrAttributionMustNotClassifyPermissionsUnused()
+    {
+        var now = DateTime.UtcNow;
+        var access = CreateAccess();
+        var permission = new CloudPermission { Id = access.PermissionId, Name = "Read", Action = "" };
+        var coverage = new[] { new ActivityEvidenceCoverage(access.CloudAccountId, access.Provider, now.AddDays(-90), now,
+            ActivityCoverageStatus.Complete, true, true, true, 0) };
+        var service = new PermissionUsageAnalyticsService();
+        var result = service.Calculate(new[] { access }, new[] { permission }, Array.Empty<ActivityRecord>(), coverage, now);
+        Assert.All(Assert.Single(result.Permissions).Windows, item => Assert.Equal(PermissionUsageState.Unknown, item.State));
+        permission.Action = "s3:GetObject";
+        var unattributed = Activity(access, permission.Action, now.AddDays(-1));
+        unattributed.RoleId = null;
+        result = service.Calculate(new[] { access }, new[] { permission }, new[] { unattributed }, coverage, now);
+        Assert.All(Assert.Single(result.Permissions).Windows, item => Assert.Equal(PermissionUsageState.Unknown, item.State));
+        Assert.Throws<ArgumentException>(() => service.Calculate(new[] { access }, Array.Empty<CloudPermission>(), Array.Empty<ActivityRecord>(), coverage, now));
+    }
+
     private static ActivityRecord Activity(DomainEffectiveAccess access, string action, DateTime timestamp)
         => new()
         {

@@ -40,6 +40,8 @@ Migration `004-operational-integrations.sql` extends the existing shared deliver
 
 Apply `006-security-connectors.sql` after `005-operations-scale.sql` before deploying the native SIEM transports. It expands the delivery kind constraint to include SplunkHec, QRadarTls and SentinelLogs without changing existing delivery records or grants. Readiness requires the validated new constraint. QRadar abandoned leases are terminal because TLS syslog cannot confirm receiver ingestion. See the [client connector setup guide](../../docs/deployment/security-connectors.md); inbound alerts and SOAR/cloud response actions are not implemented by these exports.
 
+Apply `007-cloud-activity.sql` after 006 before deploying on-demand audit collection. It creates indexed tenant/organization/account-scoped `SharedCloudActivitySnapshots` and grants runtime SELECT/INSERT only. Readiness requires this table. Snapshots retain authenticated uploader IDs and normalized partial-coverage observations, not raw cloud logs or approval evidence. The application never updates a snapshot; exact replay is idempotent and conflicting snapshot IDs are rejected. Include snapshots in backups; no retention/pruning worker currently removes them.
+
 ## WORM Archive
 
 Provision an independently administered, S3-compatible bucket outside the application runtime with versioning and Object Lock enabled. Set its default retention to COMPLIANCE mode for at least the approved audit retention period. The archive service also applies COMPLIANCE retention to each object, verifies its SHA-256 metadata, version, and retain-until date, then advances the PostgreSQL archive ledger. Segments are capped by `SegmentEventCount` and the remaining tail is sealed each poll cycle.

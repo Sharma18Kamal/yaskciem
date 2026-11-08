@@ -31,6 +31,7 @@ public sealed partial class SharedWorkspaceEndpointTests
         var organization = service.CreateOrganization("Operations", "operations", tenant.ToString(), owner);
         service.AddMember(organization.Id, owner, viewer.Email, OrganizationMemberRole.Viewer);
         service.AcceptInvitation(organization.Id, viewer);
+        service.BindCloudAccount(organization.Id, owner, CloudProvider.Aws, Guid.NewGuid(), "123456789012", "Production");
         var schedule = (await store.CreateScanScheduleAsync(tenant, organization.Id,
             new(CloudProvider.Aws, "123456789012", "Production", 5, 0)))!;
         await store.QueueScanNowAsync(tenant, organization.Id, schedule.ScheduleId);
@@ -79,6 +80,22 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Contains(catalog, item => item.Kind == SecurityConnectorCatalog.QRadar && item.ExportEvents);
         Assert.Contains(catalog, item => item.Kind == SecurityConnectorCatalog.Sentinel && item.ExportEvents);
         Assert.All(catalog, item => Assert.False(item.ExecuteResponseActions));
+        var activityTime = DateTimeOffset.UtcNow;
+        var activity = new CloudActivitySnapshot(Guid.NewGuid(), CloudProvider.Aws, "123456789012",
+            activityTime.AddDays(-90), activityTime, "CloudTrail regional event history", "Partial management only", false,
+            new[] { new CloudActivityEvent("event", "principal", "iam.amazonaws.com/CreateUser", null, null, activityTime.AddDays(-1), true) });
+        using var activityDenied = await Send(HttpMethod.Post, prefix + "/cloud-activity", viewer, activity);
+        Assert.Equal(HttpStatusCode.Forbidden, activityDenied.StatusCode);
+        using var activityUnbound = await Send(HttpMethod.Post, prefix + "/cloud-activity", owner, activity with { AccountId = "999999999999" });
+        Assert.Equal(HttpStatusCode.Forbidden, activityUnbound.StatusCode);
+        using var activitySaved = await Send(HttpMethod.Post, prefix + "/cloud-activity", owner, activity);
+        Assert.Equal(HttpStatusCode.OK, activitySaved.StatusCode);
+        var activityPath = prefix + "/cloud-activity?provider=Aws&accountId=123456789012";
+        using var activityRead = await Send(HttpMethod.Get, activityPath, viewer);
+        Assert.Equal(HttpStatusCode.OK, activityRead.StatusCode);
+        Assert.Equal(activity.SnapshotId, (await activityRead.Content.ReadFromJsonAsync<ApiEnvelope<CloudActivitySnapshot>>())!.Data.SnapshotId);
+        using var activityConflict = await Send(HttpMethod.Post, prefix + "/cloud-activity", owner, activity with { Source = "Changed" });
+        Assert.Equal(HttpStatusCode.Conflict, activityConflict.StatusCode);
         using var eventRead = await Send(HttpMethod.Get, prefix + "/operational-events", viewer);
         Assert.Equal(value.EventId, Assert.Single((await eventRead.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SharedDriftEventDto>>>())!.Data).EventId);
         var ticketPath = prefix + $"/operational-events/{value.EventId:D}/ticket";
@@ -102,7 +119,7 @@ public sealed partial class SharedWorkspaceEndpointTests
         await store.CompleteNotificationDeliveryAsync(lease, new(false, false, 503, "outcome_unknown"));
         using var dead = await Send(HttpMethod.Get, prefix + "/connectors/health", viewer);
         Assert.Equal(1, Assert.Single((await dead.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<ConnectorHealthDto>>>())!.Data).DeadLettered);
-        foreach (var route in new[] { "/connectors/health", "/connectors/catalog", "/operational-events" })
+        foreach (var route in new[] { "/connectors/health", "/connectors/catalog", "/operational-events", "/cloud-activity?provider=Aws&accountId=123456789012" })
         {
             using var crossTenant = await Send(HttpMethod.Get, prefix + route, owner with { TenantId = Guid.NewGuid().ToString() });
             Assert.Equal(HttpStatusCode.NotFound, crossTenant.StatusCode);

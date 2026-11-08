@@ -15,7 +15,7 @@ Defaults are 1,000 queued scans and 3,600 seconds maximum oldest queued age befo
 
 Defaults limit each tenant to 100 schedules and 25 queued/running scan jobs. Override with `Operations__Limits__MaxScanSchedulesPerTenant` and `Operations__Limits__MaxActiveScanJobsPerTenant`. Immediate duplicate requests remain idempotent; new work beyond the tenant limit returns HTTP 429. These limits protect queue capacity and are enforced under a per-tenant PostgreSQL transaction lock.
 
-Apply schema migrations `001` through `006` with the DBA identity, then run:
+Apply schema migrations `001` through `007` with the DBA identity, then run:
 
 ```powershell
 ./scripts/check-postgres-operations.ps1
@@ -30,6 +30,8 @@ Native Splunk, QRadar and Sentinel event exports additionally require client pro
 `Operations__RetentionDays` defaults to 90. A daily worker prunes terminal Succeeded/Partial/Cancelled scan jobs (with their job attempts/checkpoints) and completed attempt rows belonging to old Delivered/Suppressed notifications. It processes at most 500 rows per batch and 20 batches per day by default; configure `Operations__RetentionBatchSize` (1–5,000) and `Operations__RetentionMaxBatchesPerRun` (1–100) to match measured workload. A warning is logged if the run reaches its batch limit.
 
 Delivery records are retained as permanent idempotency/replay tombstones, even after their successful attempt details are pruned. Failed/dead-letter deliveries and their attempt history are retained for investigation. Drift events, notification rules/baselines, scan summaries/records/evidence, review and exception evidence, and central audit data are not removed by this worker. This is not a complete database-size cap: set and review capacity plans for retained evidence and audit data separately. Audit retention and Object Lock archive policy remain governed by the audit data owner.
+
+`SharedCloudActivitySnapshots` is also retained without automatic pruning. Include it in capacity planning and backups. Overlapping collections are independent snapshots; the UI reads the latest and does not sum repeated audit events across snapshots. These are partial client-uploaded observations, not a tamper-evident raw-cloud archive or an approval record.
 
 ## Backup, recovery, and restore drills
 

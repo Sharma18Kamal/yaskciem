@@ -21,7 +21,16 @@ public sealed partial class OrganizationViewModel
     public AsyncRelayCommand RequestOperationalTicketCommand => _requestTicketCommand ??= new(RequestOperationalTicketAsync);
     public IReadOnlyList<string> ConnectorKinds { get; } = SecurityConnectorCatalog.OutboundKinds;
     public IReadOnlyList<ConnectorHealthDto> ConnectorHealth { get => _connectorHealth; private set => SetProperty(ref _connectorHealth, value); }
-    public string NotificationConnectorKind { get => _connectorKind; set => SetProperty(ref _connectorKind, value); }
+    public string NotificationConnectorKind
+    {
+        get => _connectorKind;
+        set
+        {
+            if (!SetProperty(ref _connectorKind, value)) return;
+            NotificationEndpointConfirmed = false;
+            OnPropertyChanged(nameof(NotificationEndpointInstructions));
+        }
+    }
     public string OperationalTypes { get => _operationalTypes; set => SetProperty(ref _operationalTypes, value); }
     public bool AllowAutomaticTickets { get => _automaticTickets; set => SetProperty(ref _automaticTickets, value); }
     public string TicketChannel { get => _ticketChannel; set => SetProperty(ref _ticketChannel, value); }
@@ -49,7 +58,11 @@ public sealed partial class OrganizationViewModel
     public string MonitoringStatus { get => _monitoringStatus; private set => SetProperty(ref _monitoringStatus, value); }
     public IReadOnlyList<SharedAlertSeverity> AlertSeverities { get; } = Enum.GetValues<SharedAlertSeverity>();
     public string NotificationRuleName { get => _notificationRuleName; set => SetProperty(ref _notificationRuleName, value); }
-    public string NotificationChannel { get => _notificationChannel; set => SetProperty(ref _notificationChannel, value); }
+    public string NotificationChannel
+    {
+        get => _notificationChannel;
+        set { if (SetProperty(ref _notificationChannel, value)) NotificationEndpointConfirmed = false; }
+    }
     public SharedAlertSeverity AlertMinimumSeverity { get => _alertMinimumSeverity; set => SetProperty(ref _alertMinimumSeverity, value); }
     public bool NotificationEnabled { get => _notificationEnabled; set => SetProperty(ref _notificationEnabled, value); }
     public bool AlertOnFindings { get => _alertOnFindings; set => SetProperty(ref _alertOnFindings, value); }
@@ -68,6 +81,7 @@ public sealed partial class OrganizationViewModel
         set
         {
             if (!SetProperty(ref _selectedNotificationRule, value) || value is null) return;
+            NotificationEndpointConfirmed = false;
             NotificationRuleName = value.Name;
             NotificationChannel = value.Channel;
             AlertMinimumSeverity = value.MinimumSeverity;
@@ -85,6 +99,7 @@ public sealed partial class OrganizationViewModel
 
     private void ResetNotificationEditor()
     {
+        NotificationEndpointConfirmed = false;
         NotificationRuleName = "Important access and risk changes";
         NotificationChannel = "security";
         NotificationConnectorKind = "SignedWebhook";
@@ -96,6 +111,9 @@ public sealed partial class OrganizationViewModel
 
     private void ResetMonitoring()
     {
+        SelectedActivityBinding = null;
+        ResetCloudActivity();
+        NotificationEndpointConfirmed = false;
         NotificationRules = Array.Empty<SharedNotificationRuleDto>();
         DriftEvents = Array.Empty<SharedDriftEventDto>();
         NotificationDeliveries = Array.Empty<SharedDeliveryDto>();
@@ -146,6 +164,11 @@ public sealed partial class OrganizationViewModel
         if (!CanManageNotificationRules || _sharedMonitoringApi is null || SelectedOrganization is null)
         {
             MonitoringStatus = "ManagePolicies permission is required to save notification rules.";
+            return;
+        }
+        if (NotificationEnabled && !NotificationEndpointConfirmed)
+        {
+            MonitoringStatus = "Please create/configure the live receiver on demand using the setup instructions, then confirm the server alias is ready. No endpoint was contacted.";
             return;
         }
         var organization = SelectedOrganization;

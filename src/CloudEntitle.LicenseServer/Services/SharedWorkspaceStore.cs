@@ -222,6 +222,11 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         using var securityReader = new StreamReader(securitySchema);
         await using var securityCommand = new NpgsqlCommand(await securityReader.ReadToEndAsync(cancellationToken), connection);
         await securityCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var activitySchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.CloudActivitySchema.sql")
+            ?? throw new InvalidOperationException("The cloud activity schema resource is missing.");
+        using var activityReader = new StreamReader(activitySchema);
+        await using var activityCommand = new NpgsqlCommand(await activityReader.ReadToEndAsync(cancellationToken), connection);
+        await activityCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
@@ -265,6 +270,7 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                          AND to_regclass('shareddriftevents') IS NOT NULL
                          AND to_regclass('sharednotificationdeliveries') IS NOT NULL
                          AND to_regclass('sharednotificationattempts') IS NOT NULL
+                         AND to_regclass('sharedcloudactivitysnapshots') IS NOT NULL
                          AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharednotificationdeliveries')
                              AND attname='connectorkind' AND NOT attisdropped)
                          AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharednotificationdeliveries')

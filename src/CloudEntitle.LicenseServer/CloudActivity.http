@@ -1,0 +1,40 @@
+@baseUrl = https://license.example.invalid
+@organizationId = 00000000-0000-0000-0000-000000000000
+@token = replace-with-delegated-api-token
+
+### Load saved evidence only (ViewInventory + ViewFindings; exact bound account required)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/cloud-activity?provider=Aws&accountId=123456789012
+Authorization: Bearer {{token}}
+
+### Idempotent snapshot upload (RunScan + ViewInventory + ViewFindings)
+# Example timestamps only: Desktop generates the current 90-day window after explicit live-read consent.
+# Repeating the same ID and evidence is safe; changing evidence under an existing ID returns 409.
+POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/cloud-activity
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "snapshotId": "11111111-1111-1111-1111-111111111111",
+  "provider": 1,
+  "accountId": "123456789012",
+  "fromUtc": "2026-08-10T12:00:00Z",
+  "throughUtc": "2026-11-08T12:00:00Z",
+  "source": "CloudTrail regional event history",
+  "coverageDetails": "Partial: regional management events only.",
+  "truncated": false,
+  "events": [
+    {
+      "eventId": "source-event-id",
+      "principal": "arn:aws:iam::123456789012:user/example",
+      "action": "iam.amazonaws.com/CreateUser",
+      "permissionAction": null,
+      "resource": null,
+      "timestamp": "2026-11-07T12:00:00Z",
+      "success": true
+    }
+  ]
+}
+
+### No stored snapshot for a bound account returns 404; an unbound account is forbidden
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/cloud-activity?provider=Gcp&accountId=client-project
+Authorization: Bearer {{token}}

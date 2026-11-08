@@ -43,6 +43,17 @@ public sealed class CiemApiClient
         => SendForEnvelopeAsync<IReadOnlyList<SharedNotificationRuleDto>>(HttpMethod.Get,
             $"api/v1/organizations/{organizationId:D}/notification-rules", accessToken, cancellationToken: cancellationToken);
 
+    public Task<ApiEnvelope<CloudActivitySnapshot>?> UploadCloudActivityAsync(Guid organizationId, CloudActivitySnapshot snapshot,
+        string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<CloudActivitySnapshot>(HttpMethod.Post,
+            $"api/v1/organizations/{organizationId:D}/cloud-activity", accessToken, snapshot, cancellationToken);
+
+    public Task<ApiEnvelope<CloudActivitySnapshot>?> GetCloudActivityAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider,
+        string accountId, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<CloudActivitySnapshot>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/cloud-activity?provider={provider}&accountId={Uri.EscapeDataString(accountId)}",
+            accessToken, cancellationToken: cancellationToken);
+
     public Task<ApiEnvelope<IReadOnlyList<SecurityConnectorCapability>>?> GetSecurityConnectorCatalogAsync(
         Guid organizationId, string accessToken, CancellationToken cancellationToken = default)
         => SendForEnvelopeAsync<IReadOnlyList<SecurityConnectorCapability>>(HttpMethod.Get,

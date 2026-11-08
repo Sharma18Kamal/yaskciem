@@ -19,8 +19,8 @@ The shared server worker, not Desktop, sends events. A client administrator prov
 ## 1. Upgrade and provision
 
 1. Back up PostgreSQL, including operational events, notification rules, deliveries and attempts. Pause notification workers during the coordinated upgrade.
-2. Using the DBA identity, apply migrations `001` through `005`, then [006-security-connectors.sql](../../infra/postgres/006-security-connectors.sql). Production startup does not migrate schemas. Migration 006 expands the delivery-kind constraint; readiness requires the validated new constraint. Existing SignedWebhook/Jira deliveries are preserved.
-3. Deploy the updated server and Desktop. The staging bundle includes migration 006. Resume workers after readiness succeeds.
+2. Using the DBA identity, apply migrations `001` through `005`, then [006-security-connectors.sql](../../infra/postgres/006-security-connectors.sql) and [007-cloud-activity.sql](../../infra/postgres/007-cloud-activity.sql). Production startup does not migrate schemas. Migration 006 expands the delivery-kind constraint; 007 adds on-demand activity snapshots. Readiness requires both. Existing SignedWebhook/Jira deliveries are preserved.
+3. Deploy the updated server and Desktop. The staging bundle includes migrations 006 and 007. Resume workers after readiness succeeds.
 4. Provision the chosen receiver below and permit only the necessary network egress. Require valid TLS certificates and approved host trust. Never bypass hostname/chain validation.
 5. Configure each alias at:
 
@@ -115,6 +115,10 @@ Build durable action deduplication separately if the client uses these events to
 ## 5. Enable organization routing
 
 In the Desktop Organizations workspace, select the native connector kind, enter its configured alias, choose the minimum severity and event filters, and save the rule. Creating/editing rules requires `ManagePolicies`; reading monitoring/catalog/health requires organization inventory and findings access.
+
+The app now shows product-specific **please create/configure the receiver** instructions when a connector is selected. Before saving an enabled rule, the user must confirm the client-created receiver and organization server alias are configured. Selecting another kind/channel/rule resets confirmation. Disabling a rule remains available without setup confirmation. This is an on-demand setup guard, not a connectivity test or a replacement for server-side authorization/configuration checks; existing enabled policies continue independently on the server.
+
+The same workspace has an on-demand cloud activity panel. It explains required read/logging permissions for the selected account and requests explicit consent before one read. Regional CloudTrail history and Azure Activity Log require no new log endpoint; fuller data-plane evidence may require the client to provision trails/diagnostic destinations or enable GCP Data Access logging. The app does not create those resources, enable logging, or grant permissions. Saved-evidence loading does not contact live cloud APIs. See [activity collection](../architecture/continuous-monitoring.md#on-demand-cloud-activity-collection) for coverage limits.
 
 The [HTTP examples](../../src/CloudEntitle.LicenseServer/OperationalIntegrations.http) include catalog, health and an opt-in Splunk rule. For QRadar or Sentinel, use a distinct rule ID and replace `connectorKind` and `channel` with `QRadarTls`/`qradar` or `SentinelLogs`/`sentinel`. Keep `allowAutomaticTickets: false` for exports.
 

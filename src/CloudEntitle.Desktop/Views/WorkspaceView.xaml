@@ -818,6 +818,34 @@
                         </Border>
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
+                                <TextBlock Text="ON-DEMAND CLOUD ACTIVITY (30 / 60 / 90 DAYS)" Style="{StaticResource CardLabel}"/>
+                                <ComboBox ItemsSource="{Binding Bindings}" SelectedItem="{Binding SelectedActivityBinding, Mode=TwoWay}" DisplayMemberPath="DisplayName" Margin="0,8,0,0" ToolTip="Select the bound account for explicit read-only audit collection"/>
+                                <TextBlock Text="{Binding ActivitySetupInstructions}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <TextBlock Text="AWS region:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                    <TextBox Text="{Binding ActivityRegion, UpdateSourceTrigger=PropertyChanged}" Width="140" ToolTip="AWS region (required for CloudTrail event history)"/>
+                                    <TextBlock Text="AWS profile:" VerticalAlignment="Center" Margin="8,0,6,0"/>
+                                    <TextBox Text="{Binding ActivityProfile, UpdateSourceTrigger=PropertyChanged}" Width="180" Margin="8,0,0,0" ToolTip="AWS CLI profile; blank uses the default. Never enter secrets."/>
+                                </WrapPanel>
+                                <CheckBox Content="I have prepared logging/read access and authorize one live read for this account" IsChecked="{Binding ActivityReadConsent}" Margin="0,8,0,0"/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Content="Collect and save 90-day activity" Command="{Binding CollectActivityCommand}" Style="{StaticResource QuietButton}"/>
+                                    <Button Content="Load saved (no cloud call)" Command="{Binding LoadActivityCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <Button Content="Cancel read" Command="{Binding CancelActivityCommand}" IsEnabled="{Binding ActivityBusy}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                </WrapPanel>
+                                <TextBlock Text="{Binding ActivityStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <DataGrid ItemsSource="{Binding ActivityActions}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="220" Margin="0,8,0,12">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Principal" Binding="{Binding Principal}" Width="*"/>
+                                        <DataGridTextColumn Header="Observed action" Binding="{Binding Action}" Width="*"/>
+                                        <DataGridTextColumn Header="Permission evidence" Binding="{Binding PermissionAction}" Width="*"/>
+                                        <DataGridTextColumn Header="Last successful (UTC)" Binding="{Binding LastUsedAtUtc, StringFormat=u}" Width="150"/>
+                                        <DataGridTextColumn Header="30d" Binding="{Binding Successful30Days}" Width="50"/>
+                                        <DataGridTextColumn Header="60d" Binding="{Binding Successful60Days}" Width="50"/>
+                                        <DataGridTextColumn Header="90d" Binding="{Binding Successful90Days}" Width="50"/>
+                                        <DataGridTextColumn Header="Failed 90d" Binding="{Binding Failed90Days}" Width="80"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
                                 <TextBlock Text="CENTRAL DRIFT AND ALERT DELIVERY" Style="{StaticResource CardLabel}"/>
                                 <TextBlock Text="Compare complete scans centrally. Channel aliases reference organization-specific secrets configured on the server; never enter webhook URLs here." Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -838,6 +866,8 @@
                                         <ComboBox ItemsSource="{Binding ConnectorKinds}" SelectedItem="{Binding NotificationConnectorKind, Mode=TwoWay}" MinWidth="130" ToolTip="Choose SignedWebhook, Jira, SplunkHec, QRadarTls, or SentinelLogs. The organization server channel kind must match; SIEM exports do not execute response actions."/>
                                         <CheckBox Content="Policy: auto-create Jira tickets" IsChecked="{Binding AllowAutomaticTickets}" Margin="8,0,0,0" ToolTip="Explicit organization policy opt-in. Jira automatic tickets require a nonempty event type allowlist."/>
                                     </WrapPanel>
+                                    <TextBlock Text="{Binding NotificationEndpointInstructions}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                    <CheckBox Content="The client-created receiver and this organization server alias are configured; enable delivery" IsChecked="{Binding NotificationEndpointConfirmed}" Margin="0,8,0,0" ToolTip="User confirmation is not a connectivity probe. The server still validates configuration and records delivery errors."/>
                                     <TextBox Text="{Binding OperationalTypes, UpdateSourceTrigger=PropertyChanged}" Margin="0,8,0,0" ToolTip="Comma-separated event types: finding.created, finding.resolved, finding.updated, access.added, access.removed, access.changed, review.overdue, scan.failed. Nonempty overrides legacy source/change checkboxes; minimum severity still applies. Blank preserves legacy drift filtering."/>
                                     <Grid Margin="0,8,0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

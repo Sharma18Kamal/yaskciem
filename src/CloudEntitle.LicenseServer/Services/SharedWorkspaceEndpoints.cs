@@ -19,6 +19,7 @@ public static partial class SharedWorkspaceEndpoints
     {
     app.MapCentralMonitoringEndpoints(store);
     app.MapOperationalIntegrationEndpoints(store);
+    app.MapCloudActivityEndpoints(store);
     app.MapGovernanceEndpoints(store);
         app.MapGet("/api/v1/organizations", (ClaimsPrincipal principal) => GetOrganizations(principal, store))
             .RequireAuthorization("CiemApiAccess");

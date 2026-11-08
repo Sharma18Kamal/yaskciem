@@ -101,6 +101,10 @@ public sealed class OrganizationViewModelTests
             viewModel.AllowAutomaticTickets = true;
             viewModel.OperationalTypes = "review.overdue, scan.failed";
             await viewModel.SaveNotificationRuleAsync();
+            Assert.Equal(0, monitor.Saves);
+            if (canEdit) Assert.Contains("create/configure", viewModel.MonitoringStatus);
+            viewModel.NotificationEndpointConfirmed = true;
+            await viewModel.SaveNotificationRuleAsync();
             Assert.Equal(canEdit ? 1 : 0, monitor.Saves);
             if (canEdit)
             {
@@ -115,6 +119,8 @@ public sealed class OrganizationViewModelTests
                 viewModel.NotificationConnectorKind = kind;
                 viewModel.NotificationChannel = "client-security";
                 viewModel.AllowAutomaticTickets = false;
+                Assert.Contains("Please create", viewModel.NotificationEndpointInstructions);
+                viewModel.NotificationEndpointConfirmed = true;
                 await viewModel.SaveNotificationRuleAsync();
                 if (canEdit)
                 {
@@ -202,8 +208,75 @@ public sealed class OrganizationViewModelTests
             => Task.FromResult(identity);
     }
 
-    private sealed class TestMonitoringApi : ISharedMonitoringApi, ISharedOperationalApi
+    [Fact]
+    public async Task Activity_IsExplicitlyConsentedSavedAndNeverReadOnSignInOrSavedLoad()
     {
+        var directory = Path.Combine(Path.GetTempPath(), $"yask-activity-ui-{Guid.NewGuid():N}");
+        var tenant = Guid.NewGuid().ToString();
+        var identity = new OrganizationIdentity(Guid.NewGuid(), "owner", tenant, "owner@example.invalid");
+        var service = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        var organization = service.CreateOrganization("Activity", "activity", tenant, identity);
+        service.BindCloudAccount(organization.Id, identity, CloudProvider.Aws, Guid.NewGuid(), "123456789012", "AWS");
+        try
+        {
+            var api = new TestMonitoringApi();
+            var collector = new TestActivityCollector();
+            var viewModel = new OrganizationViewModel(new TestDemoDataService(), service, new TestSsoService(identity),
+                new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(),
+                sharedMonitoringApi: api, activityCollector: collector);
+            await viewModel.SignInAsync();
+            Assert.Equal(0, collector.Reads);
+            viewModel.SelectedActivityBinding = Assert.Single(viewModel.Bindings);
+            viewModel.ActivityRegion = "us-east-1";
+            await viewModel.CollectCloudActivityAsync();
+            Assert.Equal(0, collector.Reads);
+            Assert.Contains("authorize", viewModel.ActivityStatus);
+            viewModel.ActivityReadConsent = true;
+            await viewModel.CollectCloudActivityAsync();
+            Assert.Equal(1, collector.Reads);
+            Assert.Equal(1, api.ActivityUploads);
+            Assert.False(viewModel.ActivityReadConsent);
+            Assert.Equal(1, Assert.Single(viewModel.ActivityActions).Successful30Days);
+            await viewModel.LoadCloudActivityAsync();
+            Assert.Equal(1, collector.Reads);
+            Assert.Contains("No live cloud call", viewModel.ActivityStatus);
+            viewModel.ActivityReadConsent = true;
+            viewModel.ActivityRegion = "us-west-2";
+            Assert.False(viewModel.ActivityReadConsent);
+            await viewModel.SignOutAsync();
+            Assert.Empty(viewModel.ActivityActions);
+            Assert.Null(viewModel.SelectedActivityBinding);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private sealed class TestActivityCollector : ICloudActivityCollector
+    {
+        public int Reads { get; private set; }
+        public Task<CloudActivitySnapshot> CollectAsync(CloudActivityQuery query, CancellationToken cancellationToken = default)
+        {
+            Reads++;
+            return Task.FromResult(new CloudActivitySnapshot(Guid.NewGuid(), query.Provider, query.AccountId,
+                query.ThroughUtc.AddDays(-90), query.ThroughUtc, "CloudTrail regional event history", "Partial management only", false,
+                new[] { new CloudActivityEvent("event", "reader", "GetObject", null, null, query.ThroughUtc.AddDays(-1), true) }));
+        }
+    }
+
+    private sealed class TestMonitoringApi : ISharedMonitoringApi, ISharedOperationalApi, ISharedCloudActivityApi
+    {
+        private CloudActivitySnapshot? _activity;
+        public int ActivityUploads { get; private set; }
+        public Task<CloudActivitySnapshot> UploadCloudActivityAsync(Guid organizationId, CloudActivitySnapshot snapshot, CancellationToken cancellationToken = default)
+        {
+            _activity = snapshot;
+            ActivityUploads++;
+            return Task.FromResult(snapshot);
+        }
+        public Task<CloudActivitySnapshot> GetCloudActivityAsync(Guid organizationId, CloudProvider provider, string accountId, CancellationToken cancellationToken = default)
+            => Task.FromResult(_activity ?? throw new InvalidOperationException("No saved activity."));
         public int TicketRequests { get; private set; }
         public SharedNotificationRuleDto? LastRule { get; private set; }
         public Task<IReadOnlyList<ConnectorHealthDto>> GetConnectorHealthAsync(Guid organizationId, CancellationToken cancellationToken = default)

@@ -61,6 +61,7 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IMonitoringScheduleStore, LocalMonitoringScheduleStore>();
 		services.AddSingleton<ContinuousMonitoringService>();
 		services.AddSingleton<ICloudCommandRunner>(_ => new LoggingCloudCommandRunner(new ProcessCloudCommandRunner()));
+		services.AddSingleton<CloudEntitle.Integration.Contracts.ICloudActivityCollector, CloudEntitle.Integration.Services.CloudActivityCollector>();
 		services.AddSingleton<IPostureWebhookCredentialStore, WindowsPostureWebhookCredentialStore>();
 		services.AddSingleton<IPostureNotificationChannel>(provider => new WebhookPostureNotificationChannel(
 			new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) },

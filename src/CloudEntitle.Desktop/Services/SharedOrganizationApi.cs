@@ -59,8 +59,20 @@ public interface ISharedOperationalApi
     Task<SharedDeliveryStatusDto> RequestOperationalTicketAsync(Guid organizationId, Guid eventId, string channel, CancellationToken cancellationToken = default);
 }
 
-public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi, ISharedGovernanceApi, ISharedOperationalApi
+public interface ISharedCloudActivityApi
 {
+    Task<CloudActivitySnapshot> UploadCloudActivityAsync(Guid organizationId, CloudActivitySnapshot snapshot, CancellationToken cancellationToken = default);
+    Task<CloudActivitySnapshot> GetCloudActivityAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string accountId, CancellationToken cancellationToken = default);
+}
+
+public sealed class SharedOrganizationApi(CiemApiClient client, IApiAccessTokenProvider tokenProvider) : ISharedOrganizationApi, ISharedScanScheduleApi, ISharedMonitoringApi, ISharedGovernanceApi, ISharedOperationalApi, ISharedCloudActivityApi
+{
+    public async Task<CloudActivitySnapshot> UploadCloudActivityAsync(Guid organizationId, CloudActivitySnapshot snapshot, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.UploadCloudActivityAsync(organizationId, snapshot, await TokenAsync(cancellationToken), cancellationToken));
+
+    public async Task<CloudActivitySnapshot> GetCloudActivityAsync(Guid organizationId, CloudEntitle.Domain.CloudProvider provider, string accountId, CancellationToken cancellationToken = default)
+        => await RequireDataAsync(client.GetCloudActivityAsync(organizationId, provider, accountId, await TokenAsync(cancellationToken), cancellationToken));
+
     public async Task<IReadOnlyList<ConnectorHealthDto>> GetConnectorHealthAsync(Guid organizationId, CancellationToken cancellationToken = default)
         => await RequireDataAsync(client.GetConnectorHealthAsync(organizationId, await TokenAsync(cancellationToken), cancellationToken));
 

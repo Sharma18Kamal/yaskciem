@@ -1,0 +1,47 @@
+using CloudEntitle.Domain;
+
+namespace CloudEntitle.Integration.Contracts;
+
+/// <summary>A scoped, normalized audit event without raw request bodies or credentials.</summary>
+public sealed record CloudActivityEvent(string EventId, string Principal, string Action, string? PermissionAction,
+    string? Resource, DateTimeOffset Timestamp, bool Success);
+
+/// <summary>A bounded read-only collection. Coverage remains partial for these audit sources.</summary>
+public sealed record CloudActivitySnapshot(Guid SnapshotId, CloudProvider Provider, string AccountId,
+    DateTimeOffset FromUtc, DateTimeOffset ThroughUtc, string Source, string CoverageDetails,
+    bool Truncated, IReadOnlyList<CloudActivityEvent> Events)
+{
+    public string CoverageStatus => "Partial";
+}
+
+/// <summary>Explicitly selected cloud account and regional CLI context for an on-demand read.</summary>
+public sealed record CloudActivityQuery(CloudProvider Provider, string AccountId, string Region,
+    string Profile, DateTimeOffset ThroughUtc);
+
+/// <summary>Observed action frequency; absence of an action is not evidence of unused permission.</summary>
+public sealed record CloudActivityActionUsage(string Principal, string Action, string? PermissionAction,
+    DateTimeOffset? LastUsedAtUtc, int Successful30Days, int Successful60Days, int Successful90Days, int Failed90Days);
+
+public interface ICloudActivityCollector
+{
+    Task<CloudActivitySnapshot> CollectAsync(CloudActivityQuery query, CancellationToken cancellationToken = default);
+}
+
+public static class CloudActivityAnalysis
+{
+    public static IReadOnlyList<CloudActivityActionUsage> Analyze(CloudActivitySnapshot snapshot)
+        => snapshot.Events.DistinctBy(item => (item.EventId, item.Principal, item.Action, item.PermissionAction))
+            .Where(item => item.Timestamp >= snapshot.ThroughUtc.AddDays(-90) && item.Timestamp <= snapshot.ThroughUtc)
+            .GroupBy(item => (item.Principal, item.Action, item.PermissionAction))
+            .Select(group =>
+            {
+                var successes = group.Where(item => item.Success).ToArray();
+                return new CloudActivityActionUsage(group.Key.Principal, group.Key.Action, group.Key.PermissionAction,
+                    successes.Length == 0 ? null : successes.Max(item => item.Timestamp),
+                    successes.Count(item => item.Timestamp >= snapshot.ThroughUtc.AddDays(-30)),
+                    successes.Count(item => item.Timestamp >= snapshot.ThroughUtc.AddDays(-60)),
+                    successes.Length, group.Count(item => !item.Success));
+            })
+            .OrderByDescending(item => item.Successful90Days).ThenBy(item => item.Principal, StringComparer.Ordinal)
+            .ThenBy(item => item.Action, StringComparer.Ordinal).ToArray();
+}
