@@ -6,7 +6,7 @@ using CloudEntitle.Integration.Contracts;
 
 namespace CloudEntitle.Integration.Services;
 
-public sealed class CloudActivityCollector(ICloudCommandRunner runner) : ICloudActivityCollector
+public sealed partial class CloudActivityCollector(ICloudCommandRunner runner) : ICloudActivityCollector
 {
     private const int MaximumEvents = 5000;
     private const int MaximumResponseCharacters = 16 * 1024 * 1024;
@@ -24,6 +24,8 @@ public sealed class CloudActivityCollector(ICloudCommandRunner runner) : ICloudA
         string details;
         try
         {
+            if (query.SourceKind != CloudActivitySource.Default)
+                return await CollectDataPlaneAsync(query, start, end, timeout.Token);
             switch (query.Provider)
             {
                 case CloudProvider.Aws:
@@ -80,8 +82,10 @@ public sealed class CloudActivityCollector(ICloudCommandRunner runner) : ICloudA
                                 ?? throw new InvalidOperationException("Azure audit event has no operation name.");
                             var principal = NestedText(entry, "claims", "http://schemas.microsoft.com/identity/claims/objectidentifier")
                                 ?? Text(entry, "caller") ?? "Unattributed";
-                            Add(events, Text(entry, "eventDataId"), principal, action, action,
+                            var permission = NestedText(entry, "authorization", "action");
+                            Add(events, Text(entry, "eventDataId"), principal, action, permission,
                                 Text(entry, "resourceId"), RequiredTime(entry, "eventTimestamp"), status == "Succeeded", start, end);
+                            events[^1] = events[^1] with { PermissionEvidenceSource = permission is null ? null : "Azure authorization.action" };
                         }
                         var link = Text(page.RootElement, "nextLink");
                         if (string.IsNullOrEmpty(link)) break;
@@ -126,6 +130,7 @@ public sealed class CloudActivityCollector(ICloudCommandRunner runner) : ICloudA
                                     var granted = permission.TryGetProperty("granted", out var grant) && grant.ValueKind == JsonValueKind.True;
                                     Add(events, id, principal, action, action, Text(permission, "resource") ?? Text(payload, "resourceName"),
                                         time, success && granted, start, end);
+                                    events[^1] = events[^1] with { PermissionEvidenceSource = "GCP authorizationInfo.permission" };
                                 }
                             }
                         }
@@ -150,6 +155,7 @@ public sealed class CloudActivityCollector(ICloudCommandRunner runner) : ICloudA
     public static void Validate(CloudActivityQuery query)
     {
         ArgumentNullException.ThrowIfNull(query);
+        if (!Enum.IsDefined(query.SourceKind)) throw new ArgumentException("Unsupported activity source.");
         if (query.ThroughUtc > DateTimeOffset.UtcNow.AddMinutes(1) || query.ThroughUtc < DateTimeOffset.UtcNow.AddDays(-1))
             throw new ArgumentException("Choose a current UTC collection end time.");
         var valid = query.Provider switch
@@ -162,6 +168,7 @@ public sealed class CloudActivityCollector(ICloudCommandRunner runner) : ICloudA
             _ => false
         };
         if (!valid) throw new ArgumentException("A valid bound account and cloud context are required. AWS also requires an explicit region.");
+        if (query.SourceKind != CloudActivitySource.Default) ValidateDataPlane(query);
     }
 
     private static bool SafeArgument(string? value, int max)
@@ -178,7 +185,7 @@ public sealed class CloudActivityCollector(ICloudCommandRunner runner) : ICloudA
     }
 
     private static IReadOnlyList<string> AwsArguments(CloudActivityQuery query, IReadOnlyList<string> args)
-        => args.Concat(["--region", query.Region]).Concat(string.IsNullOrEmpty(query.Profile) ? [] : new[] { "--profile", query.Profile }).ToArray();
+        => args.Concat(["--region", query.Region, "--no-cli-pager"]).Concat(string.IsNullOrEmpty(query.Profile) ? [] : new[] { "--profile", query.Profile }).ToArray();
     private static string Iso(DateTimeOffset value) => value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
     private static JsonElement RequiredArray(JsonElement element, string name)
         => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array
