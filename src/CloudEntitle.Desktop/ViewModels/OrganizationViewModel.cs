@@ -81,7 +81,9 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
         ISharedScanScheduleApi? sharedScanScheduleApi = null,
         ISharedMonitoringApi? sharedMonitoringApi = null,
         ICloudAuthenticationLauncher? cloudAuthentication = null,
-        ICloudActivityCollector? activityCollector = null) : base(demoData)
+        ICloudActivityCollector? activityCollector = null,
+        ICloudAdministrationService? administration = null,
+        IDialogService? administrationDialogs = null) : base(demoData)
     {
         _organizationsService = organizationsService;
         _ssoService = ssoService;
@@ -94,6 +96,8 @@ public sealed partial class OrganizationViewModel : WorkspaceViewModel
         _sharedScanSummaryPublisher = sharedScanSummaryPublisher;
         _sharedMonitoringApi = sharedMonitoringApi;
         _activityCollector = activityCollector;
+        _administration = administration;
+        _administrationDialogs = administrationDialogs;
         RefreshMonitoringCommand = new AsyncRelayCommand(RefreshMonitoringAsync);
         SaveNotificationRuleCommand = new AsyncRelayCommand(SaveNotificationRuleAsync);
         NewNotificationRuleCommand = new AsyncRelayCommand(() => { SelectedNotificationRule = null; ResetNotificationEditor(); return Task.CompletedTask; });

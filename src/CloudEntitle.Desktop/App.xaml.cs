@@ -81,6 +81,8 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<RemediationWorkflowService>();
 		services.AddSingleton<IOrganizationStore, LocalOrganizationStore>();
 		services.AddSingleton<AuthenticatedOrganizationContext>();
+		services.AddSingleton<ICloudAdministrationJournal, CloudAdministrationJournal>();
+		services.AddSingleton<ICloudAdministrationService, CloudAdministrationService>();
 		services.AddSingleton<OrganizationManagementService>();
 		services.AddSingleton<EntraOrganizationSsoService>();
 		services.AddSingleton<IOrganizationSsoService>(provider => provider.GetRequiredService<EntraOrganizationSsoService>());

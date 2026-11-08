@@ -6,6 +6,7 @@ This repository was initialized from the project brief in `CIEM-COmpact-prompt.d
 
 - Cloud entitlement and privilege visibility for Azure, AWS, and GCP
 - Read-only discovery and analysis in v1
+- Opt-in desktop administrator role/policy writes with explicit approval, verification and guarded rollback
 - WPF desktop client using .NET 10, MVVM, EF Core, SQLite, and Serilog
 - Clean Architecture with provider-specific adapters and a shared normalization/risk model
 - Free standalone desktop edition, without a trial expiry or license-activation requirement
@@ -22,6 +23,7 @@ The desktop client currently supports:
 - SQLite persistence for risk rules, normalized inventory, and findings
 - Provider-filtered findings and identity views
 - Read-only Azure CLI, AWS CLI, and gcloud discovery adapters
+- Separate [native cloud administration](docs/deployment/cloud-administration.md) for Azure role assignments/custom roles, AWS policy attachments/inline Allow/Deny policies, and GCP project IAM/deny policies; scans and recommendation simulations remain read-only
 - Azure Entra users, groups, service principals, and active/eligible PIM schedules through the signed-in Azure CLI's Graph access
 - Graceful reporting when a CLI is missing or unauthenticated
 - JSON report export under `%LocalAppData%\\YASK-CIEM\\reports`
@@ -49,7 +51,7 @@ for build, configuration and the 72-hour freshness policy.
 For installation instructions for released Windows packages, see [Install YASK-CIEM](docs/deployment/installation.md). For development setup, testing, and first-run details, see [Getting Started](docs/development/getting-started.md).
 
 1. Install the .NET 10 SDK selected by `global.json`.
-2. Install and authenticate the required read-only tools: `az`, `aws`, and `gcloud`.
+2. Install and authenticate `az`, `aws`, and `gcloud` with read permissions for discovery. Cloud administration additionally requires explicitly granted native write permissions.
 3. Restore with `dotnet restore CloudEntitle.sln --configfile .nuget/NuGet.Config`.
 4. Build with `dotnet build src/CloudEntitle.Desktop/CloudEntitle.Desktop.csproj`.
 5. Test with `dotnet test CloudEntitle.sln`.

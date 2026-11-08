@@ -827,11 +827,11 @@
                                     <TextBlock Text="AWS profile:" VerticalAlignment="Center" Margin="8,0,6,0"/>
                                     <TextBox Text="{Binding ActivityProfile, UpdateSourceTrigger=PropertyChanged}" Width="180" Margin="8,0,0,0" ToolTip="AWS CLI profile; blank uses the default. Never enter secrets."/>
                                 </WrapPanel>
-                                <CheckBox Content="I have prepared logging/read access and authorize one live read for this account" IsChecked="{Binding ActivityReadConsent}" Margin="0,8,0,0"/>
+                                <CheckBox Content="I have prepared logging/read access and authorize one live read for this account" IsChecked="{Binding ActivityReadConsent}" Margin="0,8,0,0" ToolTip="Authorize one bounded read of client-provisioned cloud audit logs; no permissions are changed"/>
                                 <WrapPanel Margin="0,8,0,0">
-                                    <Button Content="Collect and save 90-day activity" Command="{Binding CollectActivityCommand}" Style="{StaticResource QuietButton}"/>
-                                    <Button Content="Load saved (no cloud call)" Command="{Binding LoadActivityCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
-                                    <Button Content="Cancel read" Command="{Binding CancelActivityCommand}" IsEnabled="{Binding ActivityBusy}" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    <Button Content="Collect and save 90-day activity" Command="{Binding CollectActivityCommand}" Style="{StaticResource QuietButton}" ToolTip="Read audit events with explicit consent and save the partial-coverage snapshot"/>
+                                    <Button Content="Load saved (no cloud call)" Command="{Binding LoadActivityCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="View the saved activity snapshot without contacting cloud APIs"/>
+                                    <Button Content="Cancel read" Command="{Binding CancelActivityCommand}" IsEnabled="{Binding ActivityBusy}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Cancel the in-progress audit collection"/>
                                 </WrapPanel>
                                 <TextBlock Text="{Binding ActivityStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                 <DataGrid ItemsSource="{Binding ActivityActions}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="220" Margin="0,8,0,12">
@@ -939,6 +939,49 @@
                                         <DataGridTextColumn Header="Failure code" Binding="{Binding FailureCode}" Width="*"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="LIVE CLOUD ADMINISTRATION (OPT-IN READ / WRITE)" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="Manual administrator changes are separate from read-only scans and recommendation simulations. No automatic least-privilege removal or SOAR execution is enabled." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <CheckBox Content="Enable administrator read/write mode for this session" IsChecked="{Binding AdministratorWriteMode}" Margin="0,8,0,0" ToolTip="Opt into manual cloud writes; each apply or rollback still requires review and confirmation"/>
+                                <ComboBox ItemsSource="{Binding Bindings}" SelectedItem="{Binding SelectedAdministrationBinding, Mode=TwoWay}" DisplayMemberPath="DisplayName" Margin="0,8,0,0" ToolTip="Select the organization-bound cloud account"/>
+                                <ComboBox ItemsSource="{Binding AdministrationOperations}" SelectedItem="{Binding AdministrationOperation, Mode=TwoWay}" Margin="0,8,0,0" ToolTip="Select the native role or allow/deny policy operation"/>
+                                <TextBlock Text="{Binding AdministrationInstructions}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <TextBlock Text="AWS CLI profile (blank = default)" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdminProfile, UpdateSourceTrigger=PropertyChanged}" ToolTip="AWS CLI profile name; blank uses the default. Do not enter credentials."/>
+                                <TextBlock Text="Azure scope (subscription / resource group / resource)" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdminScope, UpdateSourceTrigger=PropertyChanged}" ToolTip="Exact Azure scope within the selected subscription"/>
+                                <TextBlock Text="Subject: Azure principal object ID / AWS IAM name" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdminSubject, UpdateSourceTrigger=PropertyChanged}" ToolTip="Existing Azure principal GUID or AWS IAM user, role or group name"/>
+                                <TextBlock Text="Target kind/ID: Azure assignment GUID / AWS user, role or group" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdminSubjectKind, UpdateSourceTrigger=PropertyChanged}" ToolTip="Azure role-assignment GUID, or AWS target kind: user, role or group"/>
+                                <TextBlock Text="Role/policy: Azure role GUID / AWS policy ARN or name / GCP deny policy ID" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdminRoleOrPolicy, UpdateSourceTrigger=PropertyChanged}" ToolTip="Provider-specific role GUID, policy ARN or policy ID; review the operation instructions"/>
+                                <TextBlock Text="Policy JSON (native provider schema; used for policy editing only)" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdminPolicyJson, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Height="130" FontFamily="Consolas" ToolTip="Native policy JSON for policy editing. Preserve unrelated permissions and audit logging; never include secrets."/>
+                                <TextBlock Text="Change reason" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdminReason, UpdateSourceTrigger=PropertyChanged}" ToolTip="Required audit rationale for this exact manual change"/>
+                                <Button Content="Prepare live preview (read only)" Command="{Binding AdminPreviewCommand}" IsEnabled="{Binding CanAdministerCloud}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Verify authorization and CLI identity, capture cloud state and prepare before/after snapshots without writing"/>
+                                <DataGrid ItemsSource="{Binding AdministrationPlans}" SelectedItem="{Binding SelectedAdministrationPlan, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="150" Margin="0,8,0,0">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Plan" Binding="{Binding Id}" Width="*"/>
+                                        <DataGridTextColumn Header="Operation" Binding="{Binding Request.Operation}" Width="*"/>
+                                        <DataGridTextColumn Header="State" Binding="{Binding Status}" Width="120"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <TextBlock Text="Before (captured cloud state)" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdministrationBeforeJson, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" Height="120" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" ToolTip="Cloud state captured for the selected plan and guarded rollback"/>
+                                <TextBlock Text="After (proposed exact state)" Margin="0,8,0,0"/>
+                                <TextBox Text="{Binding AdministrationAfterJson, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" Height="120" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" ToolTip="Exact proposed state; review permissions, conditions and unrelated bindings before approval"/>
+                                <CheckBox Content="I approve this exact change and have reviewed workloads, inherited access, logging and break-glass dependencies" IsChecked="{Binding DependenciesReviewed}" Margin="0,8,0,0" ToolTip="Administrator acknowledgment, not an automated guarantee of workload safety"/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Content="Approve and apply LIVE" Command="{Binding AdminApplyCommand}" IsEnabled="{Binding CanAdministerCloud}" Style="{StaticResource QuietButton}" ToolTip="Confirm and perform a real cloud write using the reviewed plan and desktop CLI identity"/>
+                                    <Button Content="Approve rollback LIVE" Command="{Binding AdminRollbackCommand}" IsEnabled="{Binding CanAdministerCloud}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Confirm restoration of captured state only if current cloud state still matches the applied plan"/>
+                                    <Button Content="Reconcile (read only)" Command="{Binding AdminReconcileCommand}" IsEnabled="{Binding CanAdministerCloud}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Resolve an unknown write outcome by reading cloud state; never retries the write"/>
+                                </WrapPanel>
+                                <TextBlock Text="{Binding AdministrationStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource SectionCard}">

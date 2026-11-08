@@ -111,6 +111,7 @@ public sealed partial class OrganizationViewModel
 
     private void ResetMonitoring()
     {
+        ResetAdministration();
         SelectedActivityBinding = null;
         ResetCloudActivity();
         NotificationEndpointConfirmed = false;

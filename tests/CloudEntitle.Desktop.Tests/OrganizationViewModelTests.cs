@@ -265,6 +265,147 @@ public sealed class OrganizationViewModelTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Administration_RequiresOptInExactPreviewReviewAndConfirmationThenResetsOnSignOut(bool confirmation)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"yask-admin-ui-{Guid.NewGuid():N}");
+        var identity = new OrganizationIdentity(Guid.NewGuid(), "owner", Guid.NewGuid().ToString(), "owner@example.invalid");
+        var organizations = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        var organization = organizations.CreateOrganization("Administration", "administration", identity.TenantId, identity);
+        organizations.BindCloudAccount(organization.Id, identity, CloudProvider.Aws, Guid.NewGuid(), "123456789012", "AWS");
+        try
+        {
+            var admin = new TestAdministration(organization.Id, identity.UserId);
+            var dialogs = new AdministrationDialogs(confirmation);
+            var vm = new OrganizationViewModel(new TestDemoDataService(), organizations, new TestSsoService(identity),
+                new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(),
+                administration: admin, administrationDialogs: dialogs);
+            await vm.SignInAsync();
+            vm.SelectedAdministrationBinding = Assert.Single(vm.Bindings);
+            Assert.False(vm.AdministratorWriteMode);
+            await vm.PreviewAdministrationAsync();
+            Assert.Equal(0, admin.Previews);
+            vm.AdministratorWriteMode = true;
+            vm.AdminReason = "Approved maintenance";
+            await vm.PreviewAdministrationAsync();
+            Assert.NotNull(vm.SelectedAdministrationPlan);
+            vm.AdminRoleOrPolicy = "changed-policy";
+            Assert.Null(vm.SelectedAdministrationPlan);
+            await vm.PreviewAdministrationAsync();
+            vm.AdminApplyCommand.Execute(null);
+            Assert.Equal(0, dialogs.Confirmations);
+            Assert.Equal(0, admin.Writes);
+            vm.DependenciesReviewed = true;
+            vm.AdminApplyCommand.Execute(null);
+            Assert.Equal(1, dialogs.Confirmations);
+            Assert.Equal(confirmation ? 1 : 0, admin.Writes);
+            if (confirmation)
+            {
+                Assert.Equal("Applied", vm.SelectedAdministrationPlan!.Status);
+                admin.Fail = true;
+                vm.DependenciesReviewed = true;
+                vm.AdminRollbackCommand.Execute(null);
+                Assert.Equal("RollbackUnknown", vm.SelectedAdministrationPlan!.Status);
+                Assert.Equal("RollbackUnknown", Assert.Single(vm.AdministrationPlans,
+                    item => item.Id == vm.SelectedAdministrationPlan.Id).Status);
+                vm.AdminReconcileCommand.Execute(null);
+                Assert.Equal("Applied", vm.SelectedAdministrationPlan!.Status);
+                Assert.Equal(2, dialogs.Confirmations);
+            }
+            await vm.SignOutAsync();
+            Assert.False(vm.AdministratorWriteMode);
+            Assert.Empty(vm.AdministrationPlans);
+            Assert.Null(vm.SelectedAdministrationPlan);
+            Assert.False(vm.DependenciesReviewed);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Administration_DiscardsPreviewWhenInputsChangeDuringRead()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"yask-admin-preview-ui-{Guid.NewGuid():N}");
+        var identity = new OrganizationIdentity(Guid.NewGuid(), "owner", Guid.NewGuid().ToString(), "owner@example.invalid");
+        var organizations = new OrganizationManagementService(new LocalOrganizationStore(Path.Combine(directory, "organizations.json")));
+        var organization = organizations.CreateOrganization("Administration", "administration", identity.TenantId, identity);
+        organizations.BindCloudAccount(organization.Id, identity, CloudProvider.Aws, Guid.NewGuid(), "123456789012", "AWS");
+        try
+        {
+            var admin = new TestAdministration(organization.Id, identity.UserId);
+            var vm = new OrganizationViewModel(new TestDemoDataService(), organizations, new TestSsoService(identity),
+                new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(),
+                administration: admin);
+            await vm.SignInAsync();
+            vm.SelectedAdministrationBinding = Assert.Single(vm.Bindings);
+            vm.AdministratorWriteMode = true;
+            await vm.PreviewAdministrationAsync();
+            var old = vm.SelectedAdministrationPlan!;
+            admin.PendingPreview = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var reading = vm.PreviewAdministrationAsync();
+            vm.AdminReason = "Different review";
+            admin.PendingPreview.SetResult(old);
+            await reading;
+            Assert.Null(vm.SelectedAdministrationPlan);
+            Assert.False(vm.DependenciesReviewed);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
+    private sealed class TestAdministration(Guid organization, Guid actor) : ICloudAdministrationService
+    {
+        private CloudAdministrationPlan? _plan;
+        public int Previews { get; private set; }
+        public int Writes { get; private set; }
+        public bool Fail { get; set; }
+        public TaskCompletionSource<CloudAdministrationPlan>? PendingPreview { get; set; }
+        public Task<CloudAdministrationPlan> PreviewAsync(CloudAdministrationRequest request, CancellationToken token = default)
+        {
+            Previews++;
+            _plan = new(Guid.NewGuid(), organization, actor, request,
+                new("Aws", request.AccountId, "operator", "", DateTime.UtcNow), "{}", "{\"attached\":true}", DateTimeOffset.UtcNow, "Prepared");
+            return PendingPreview?.Task ?? Task.FromResult(_plan);
+        }
+        public Task<CloudAdministrationPlan> ApplyAsync(Guid planId, bool dependenciesReviewed, CancellationToken token = default)
+        {
+            Assert.True(dependenciesReviewed);
+            Assert.Equal(_plan!.Id, planId);
+            Writes++;
+            return Task.FromResult(_plan = _plan with { Status = "Applied" });
+        }
+        public Task<CloudAdministrationPlan> RollbackAsync(Guid planId, bool dependenciesReviewed, CancellationToken token = default)
+        {
+            Assert.True(dependenciesReviewed);
+            if (Fail)
+            {
+                _plan = _plan! with { Status = "RollbackUnknown" };
+                throw new CloudAdministrationException(_plan, new InvalidOperationException("Provider timeout"));
+            }
+            return Task.FromResult(_plan! with { Status = "RolledBack" });
+        }
+        public Task<CloudAdministrationPlan> ReconcileAsync(Guid planId, CancellationToken token = default)
+            => Task.FromResult(_plan = _plan! with { Status = "Applied" });
+    }
+
+    private sealed class AdministrationDialogs(bool confirmation) : IDialogService
+    {
+        public int Confirmations { get; private set; }
+        public bool Confirm(string message, string title = "YASK-CIEM")
+        {
+            Assert.Contains("REAL cloud write", message);
+            Confirmations++;
+            return confirmation;
+        }
+        public void ShowInformation(string message, string title = "YASK-CIEM") { }
+        public void ShowError(string message, string title = "YASK-CIEM") { }
+        public string? ChooseReportPath() => null;
+        public string? ChoosePolicyDraftPath() => null;
+        public string? ChooseComplianceBundlePath() => null;
+        public string? ChooseLocalBackupSavePath() => null;
+        public string? ChooseLocalBackupOpenPath() => null;
+    }
+
     private sealed class TestMonitoringApi : ISharedMonitoringApi, ISharedOperationalApi, ISharedCloudActivityApi
     {
         private CloudActivitySnapshot? _activity;

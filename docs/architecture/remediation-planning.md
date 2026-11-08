@@ -2,6 +2,8 @@
 
 The remediation layer is a review-only boundary after Recommendations. It consumes recommendation evidence and EffectiveAccess records to create non-executable policy previews, approval records, conservative simulations, and rollback previews.
 
+The desktop also has a **separate opt-in [native cloud administration workflow](../deployment/cloud-administration.md)** for manually specified role/policy changes using the desktop CLI identity. It does not execute recommendation plans, change their separation-of-duties requirements, or enable automatic least-privilege/SOAR removal. A single authorized administrator may explicitly approve a manual change; its dependency review is an acknowledgment, not computed evidence of operational safety.
+
 ```mermaid
 flowchart TD
     R[Recommendation] --> P[Remediation Planner]
@@ -23,11 +25,11 @@ Simulation is structural only. It identifies affected EffectiveAccess records bu
 
 The desktop workflow uses the existing Microsoft Entra interactive sign-in, configured with `YASK_CIEM_ENTRA_CLIENT_ID` and the selected organization's Entra tenant. It binds requester and approver records to Entra user object IDs and requires the `ManageRemediations` organization permission. Organization Admins and Security Analysts receive that permission by default; custom roles can be granted it explicitly. Auditors and Viewers cannot approve. The requester cannot approve or reject their own plan, and final execution approval must come from a different user than the dry-run approver.
 
-Plan snapshots remain local at `%LOCALAPPDATA%\YASK-CIEM\remediation\plans.json`. Remediation audit entries are also inserted once into the existing local SQLite `AuditEvents` table, with actor and organization IDs. Rollback preparation creates a separate non-executable plan that requires its own review and approval; it does not restore cloud state. This is an interim local audit path, not centralized or tamper-proof storage: the organization directory and SQLite database are both locally mutable. Production approval requires server-side authorization and centralized immutable audit storage before any provider write is enabled.
+Plan snapshots remain local at `%LOCALAPPDATA%\YASK-CIEM\remediation\plans.json`. Remediation audit entries are also inserted once into the existing local SQLite `AuditEvents` table, with actor and organization IDs. Rollback preparation creates a separate non-executable plan that requires its own review and approval; it does not restore cloud state. This is an interim local audit path, not centralized or tamper-proof storage: the organization directory and SQLite database are both locally mutable. Production recommendation/SOAR execution requires server-side authorization and centralized immutable audit storage before its provider writes are enabled.
 
 ## Cloud Change Engine Boundary
 
-`RemediationEngine` adds the execution lifecycle boundary without enabling mutation. It validates review plans, completes non-mutating structural dry runs, requires independent approval bound to the unchanged preview for execution attempts, and blocks live mode because provider mutation adapters are non-mutating stubs. Azure, AWS, and GCP adapters expose validation, apply, and verify hooks, but no provider write is enabled in this build.
+`RemediationEngine` adds the execution lifecycle boundary without enabling mutation. It validates review plans, completes non-mutating structural dry runs, requires independent approval bound to the unchanged preview for execution attempts, and blocks live mode because provider mutation adapters are non-mutating stubs. Azure, AWS, and GCP remediation adapters expose validation, apply, and verify hooks, but no recommendation-driven provider write is enabled.
 
 The implemented workflow is:
 
