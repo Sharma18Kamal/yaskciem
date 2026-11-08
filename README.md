@@ -13,8 +13,6 @@ This repository was initialized from the project brief in `CIEM-COmpact-prompt.d
 
 ## Current implementation
 
-- `src/` — application, domain, infrastructure, cloud providers, licensing
-- `tests/` — unit and integration tests
 - `src/` — application, domain, infrastructure, cloud providers, licensing, and WPF desktop client
 - `tests/` — domain, application, infrastructure, Azure provider, and licensing tests
 - `.github/workflows/ci.yml` — Windows restore, desktop build, and test validation

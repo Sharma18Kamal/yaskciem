@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\CloudEntitle.Application\CloudEntitle.Application.csproj" />
     <ProjectReference Include="..\..\src\CloudEntitle.Cloud.Aws\CloudEntitle.Cloud.Aws.csproj" />
     <ProjectReference Include="..\..\src\CloudEntitle.Domain\CloudEntitle.Domain.csproj" />
   </ItemGroup>
