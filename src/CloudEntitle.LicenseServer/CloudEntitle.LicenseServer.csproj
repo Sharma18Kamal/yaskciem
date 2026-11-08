@@ -14,6 +14,7 @@
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
     <PackageReference Include="Npgsql" Version="9.0.4" />
     <PackageReference Include="AWSSDK.S3" Version="3.7.400.0" />
+    <PackageReference Include="Azure.Identity" Version="1.17.2" />
     <ProjectReference Include="..\CloudEntitle.Licensing\CloudEntitle.Licensing.csproj" />
     <ProjectReference Include="..\CloudEntitle.Integration\CloudEntitle.Integration.csproj" />
     <ProjectReference Include="..\CloudEntitle.Security\CloudEntitle.Security.csproj" />
@@ -30,6 +31,7 @@
     <EmbeddedResource Include="..\..\infra\postgres\003-governance-deadlines.sql" LogicalName="CloudEntitle.LicenseServer.GovernanceSchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\004-operational-integrations.sql" LogicalName="CloudEntitle.LicenseServer.OperationsSchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\005-operations-scale.sql" LogicalName="CloudEntitle.LicenseServer.ScaleSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\006-security-connectors.sql" LogicalName="CloudEntitle.LicenseServer.SecurityConnectorSchema.sql" />
   </ItemGroup>
 
   <Target Name="BuildOperationsConsole" BeforeTargets="PrepareForBuild" Condition="'$(BuildWebConsole)' == 'true'">

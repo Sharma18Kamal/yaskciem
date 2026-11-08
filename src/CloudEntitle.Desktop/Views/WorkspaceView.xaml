@@ -835,7 +835,7 @@
                                 </DataGrid>
                                 <StackPanel IsEnabled="{Binding CanManageNotificationRules}">
                                     <WrapPanel Margin="0,8,0,0">
-                                        <ComboBox ItemsSource="{Binding ConnectorKinds}" SelectedItem="{Binding NotificationConnectorKind, Mode=TwoWay}" MinWidth="130" ToolTip="Choose SignedWebhook for monitoring or Jira for ticket creation. The server channel kind must match."/>
+                                        <ComboBox ItemsSource="{Binding ConnectorKinds}" SelectedItem="{Binding NotificationConnectorKind, Mode=TwoWay}" MinWidth="130" ToolTip="Choose SignedWebhook, Jira, SplunkHec, QRadarTls, or SentinelLogs. The organization server channel kind must match; SIEM exports do not execute response actions."/>
                                         <CheckBox Content="Policy: auto-create Jira tickets" IsChecked="{Binding AllowAutomaticTickets}" Margin="8,0,0,0" ToolTip="Explicit organization policy opt-in. Jira automatic tickets require a nonempty event type allowlist."/>
                                     </WrapPanel>
                                     <TextBox Text="{Binding OperationalTypes, UpdateSourceTrigger=PropertyChanged}" Margin="0,8,0,0" ToolTip="Comma-separated event types: finding.created, finding.resolved, finding.updated, access.added, access.removed, access.changed, review.overdue, scan.failed. Nonempty overrides legacy source/change checkboxes; minimum severity still applies. Blank preserves legacy drift filtering."/>

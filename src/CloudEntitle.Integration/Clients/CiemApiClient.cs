@@ -43,6 +43,11 @@ public sealed class CiemApiClient
         => SendForEnvelopeAsync<IReadOnlyList<SharedNotificationRuleDto>>(HttpMethod.Get,
             $"api/v1/organizations/{organizationId:D}/notification-rules", accessToken, cancellationToken: cancellationToken);
 
+    public Task<ApiEnvelope<IReadOnlyList<SecurityConnectorCapability>>?> GetSecurityConnectorCatalogAsync(
+        Guid organizationId, string accessToken, CancellationToken cancellationToken = default)
+        => SendForEnvelopeAsync<IReadOnlyList<SecurityConnectorCapability>>(HttpMethod.Get,
+            $"api/v1/organizations/{organizationId:D}/connectors/catalog", accessToken, cancellationToken: cancellationToken);
+
     public Task<ApiEnvelope<SharedNotificationRuleDto>?> SaveNotificationRuleAsync(Guid organizationId,
         SharedNotificationRuleDto rule, string accessToken, CancellationToken cancellationToken = default)
         => SendForEnvelopeAsync<SharedNotificationRuleDto>(HttpMethod.Put,

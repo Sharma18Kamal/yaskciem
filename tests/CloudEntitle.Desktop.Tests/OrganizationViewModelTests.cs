@@ -109,6 +109,24 @@ public sealed class OrganizationViewModelTests
                 Assert.Equal(new[] { "review.overdue", "scan.failed" }, monitor.LastRule.EventTypes);
             }
 
+            foreach (var kind in new[] { SecurityConnectorCatalog.Splunk, SecurityConnectorCatalog.QRadar, SecurityConnectorCatalog.Sentinel })
+            {
+                Assert.Contains(kind, viewModel.ConnectorKinds);
+                viewModel.NotificationConnectorKind = kind;
+                viewModel.NotificationChannel = "client-security";
+                viewModel.AllowAutomaticTickets = false;
+                await viewModel.SaveNotificationRuleAsync();
+                if (canEdit)
+                {
+                    Assert.Equal(kind, monitor.LastRule!.ConnectorKind);
+                    Assert.Equal("client-security", monitor.LastRule.Channel);
+                    viewModel.SelectedNotificationRule = monitor.LastRule;
+                    Assert.Equal(kind, viewModel.NotificationConnectorKind);
+                }
+            }
+            Assert.Equal(canEdit ? 4 : 0, monitor.Saves);
+            Assert.DoesNotContain("CarbonBlackCloud", viewModel.ConnectorKinds);
+
             monitor.PendingRefresh = new TaskCompletionSource<IReadOnlyList<SharedNotificationRuleDto>>(TaskCreationOptions.RunContinuationsAsynchronously);
             var inFlight = viewModel.RefreshMonitoringAsync();
             await viewModel.SignOutAsync();

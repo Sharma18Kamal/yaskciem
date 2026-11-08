@@ -12,6 +12,31 @@ Authorization: Bearer {{token}}
 GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/connectors/health
 Authorization: Bearer {{token}}
 
+### Supported connector capabilities (exports are not approved response actions)
+GET {{baseUrl}}/api/v1/organizations/{{organizationId}}/connectors/catalog
+Authorization: Bearer {{token}}
+
+### Route future high-severity events to a client-provisioned Splunk HEC alias (ManagePolicies)
+PUT {{baseUrl}}/api/v1/organizations/{{organizationId}}/notification-rules/{{ruleId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "ruleId": "{{ruleId}}",
+  "name": "Client security event export",
+  "enabled": true,
+  "minimumSeverity": 3,
+  "findings": false,
+  "effectiveAccess": false,
+  "added": false,
+  "removed": false,
+  "changed": false,
+  "channel": "splunk",
+  "connectorKind": "SplunkHec",
+  "allowAutomaticTickets": false,
+  "eventTypes": ["finding.created", "finding.resolved", "finding.updated", "access.added", "access.removed", "access.changed", "review.overdue", "scan.failed"]
+}
+
 ### Explicit ticket creation (202 + Location); repeated event/channel requests are deduplicated
 POST {{baseUrl}}/api/v1/organizations/{{organizationId}}/operational-events/{{eventId}}/ticket
 Authorization: Bearer {{token}}

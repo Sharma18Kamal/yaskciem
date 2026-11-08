@@ -54,7 +54,7 @@ $config = Join-Path $bundle 'config'
 New-Item -ItemType Directory -Path $schema, $scripts, $config -Force | Out-Null
 foreach ($name in @(
     '001-schema.sql', '002-central-monitoring.sql', '003-governance-deadlines.sql',
-    '004-operational-integrations.sql', '005-operations-scale.sql', 'backup-roles.sql'
+    '004-operational-integrations.sql', '005-operations-scale.sql', '006-security-connectors.sql', 'backup-roles.sql'
 )) {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "infra\postgres\$name") -Destination $schema
 }

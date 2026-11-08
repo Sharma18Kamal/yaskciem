@@ -15,13 +15,15 @@ Defaults are 1,000 queued scans and 3,600 seconds maximum oldest queued age befo
 
 Defaults limit each tenant to 100 schedules and 25 queued/running scan jobs. Override with `Operations__Limits__MaxScanSchedulesPerTenant` and `Operations__Limits__MaxActiveScanJobsPerTenant`. Immediate duplicate requests remain idempotent; new work beyond the tenant limit returns HTTP 429. These limits protect queue capacity and are enforced under a per-tenant PostgreSQL transaction lock.
 
-Apply schema migrations `001` through `005` with the DBA identity, then run:
+Apply schema migrations `001` through `006` with the DBA identity, then run:
 
 ```powershell
 ./scripts/check-postgres-operations.ps1
 ```
 
 The check reports required index validity, bounded queue query plans, and table vacuum/analyze statistics. Review slow plans and stale statistics before adding indexes; coordinate any index changes with DBA migration procedures.
+
+Native Splunk, QRadar and Sentinel event exports additionally require client provisioning and organization-scoped server channels. See the [connector setup guide](security-connectors.md) for TLS/authentication, acknowledgement limits, deduplication and dead-letter reconciliation. Connector health is passive; export acceptance is not approval to execute SOAR/cloud changes.
 
 ## Retention policy
 

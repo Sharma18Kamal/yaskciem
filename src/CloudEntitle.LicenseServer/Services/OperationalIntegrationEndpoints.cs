@@ -9,6 +9,12 @@ public static partial class SharedWorkspaceEndpoints
     private static void MapOperationalIntegrationEndpoints(this WebApplication app, SharedWorkspaceStore store)
     {
         const string prefix = "/api/v1/organizations/{organizationId:guid}";
+        app.MapGet(prefix + "/connectors/catalog", (ClaimsPrincipal principal, Guid organizationId) =>
+            WithMonitoringAccess(principal, organizationId, store, false, _ =>
+                Task.FromResult<IResult>(Results.Ok(Envelope(SecurityConnectorCatalog.Capabilities)))))
+            .RequireAuthorization("CiemApiAccess").WithName("GetSecurityConnectorCatalog")
+            .WithSummary("List supported SIEM transports and their implemented capabilities; no credentials or live probes.")
+            .Produces<ApiEnvelope<IReadOnlyList<SecurityConnectorCapability>>>().Produces(403);
         app.MapGet(prefix + "/connectors/health", (ClaimsPrincipal principal, Guid organizationId,
             IConfiguration configuration, CancellationToken token) =>
             WithMonitoringAccess(principal, organizationId, store, false, async tenant =>

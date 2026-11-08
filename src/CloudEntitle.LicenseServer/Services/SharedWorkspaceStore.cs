@@ -217,6 +217,11 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         using var scaleReader = new StreamReader(scaleSchema);
         await using var scaleCommand = new NpgsqlCommand(await scaleReader.ReadToEndAsync(cancellationToken), connection);
         await scaleCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var securitySchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.SecurityConnectorSchema.sql")
+            ?? throw new InvalidOperationException("The security connector schema resource is missing.");
+        using var securityReader = new StreamReader(securitySchema);
+        await using var securityCommand = new NpgsqlCommand(await securityReader.ReadToEndAsync(cancellationToken), connection);
+        await securityCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
@@ -264,6 +269,8 @@ public sealed partial class SharedWorkspaceStore : IDisposable
                              AND attname='connectorkind' AND NOT attisdropped)
                          AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('sharednotificationdeliveries')
                              AND attname='requestedby' AND NOT attisdropped)
+                         AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('sharednotificationdeliveries')
+                             AND conname='ck_sharednotificationdeliveries_connectorkind_v2' AND convalidated)
                          AND to_regclass('ix_sharedscanjobs_retention') IS NOT NULL
                          AND to_regclass('ix_sharednotificationattempts_retention') IS NOT NULL
                          AND to_regclass('ix_sharednotificationattempts_failuretime') IS NOT NULL

@@ -19,7 +19,7 @@ public sealed partial class OrganizationViewModel
     private bool _automaticTickets;
     private AsyncRelayCommand? _requestTicketCommand;
     public AsyncRelayCommand RequestOperationalTicketCommand => _requestTicketCommand ??= new(RequestOperationalTicketAsync);
-    public IReadOnlyList<string> ConnectorKinds { get; } = new[] { "SignedWebhook", "Jira" };
+    public IReadOnlyList<string> ConnectorKinds { get; } = SecurityConnectorCatalog.OutboundKinds;
     public IReadOnlyList<ConnectorHealthDto> ConnectorHealth { get => _connectorHealth; private set => SetProperty(ref _connectorHealth, value); }
     public string NotificationConnectorKind { get => _connectorKind; set => SetProperty(ref _connectorKind, value); }
     public string OperationalTypes { get => _operationalTypes; set => SetProperty(ref _operationalTypes, value); }

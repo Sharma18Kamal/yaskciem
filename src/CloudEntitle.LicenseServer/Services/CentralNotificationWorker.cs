@@ -19,7 +19,7 @@ public interface ICentralNotificationTransport
     Task<NotificationSendResult> SendAsync(NotificationDeliveryLease lease, CancellationToken cancellationToken);
 }
 
-public sealed class CentralWebhookTransport : ICentralNotificationTransport, IDisposable
+public sealed partial class CentralWebhookTransport : ICentralNotificationTransport, IDisposable
 {
     private readonly IConfiguration _configuration;
     private readonly HttpClient _client;
@@ -27,10 +27,13 @@ public sealed class CentralWebhookTransport : ICentralNotificationTransport, IDi
     public CentralWebhookTransport(IConfiguration configuration)
         : this(configuration, new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, Credentials = null }) { }
 
-    public CentralWebhookTransport(IConfiguration configuration, HttpMessageHandler handler)
+    public CentralWebhookTransport(IConfiguration configuration, HttpMessageHandler handler,
+        Azure.Core.TokenCredential? sentinelCredential = null, IQradarSyslogSender? syslogSender = null)
     {
         _configuration = configuration;
         _client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+        _sentinelCredential = sentinelCredential;
+        _syslogSender = syslogSender ?? new QradarSyslogSender();
     }
 
     public async Task<NotificationSendResult> SendAsync(NotificationDeliveryLease lease, CancellationToken cancellationToken)
@@ -40,6 +43,12 @@ public sealed class CentralWebhookTransport : ICentralNotificationTransport, IDi
             return new(false, false, null, "channel_invalid");
         if (lease.Delivery.ConnectorKind == "Jira")
             return await SendJiraAsync(lease, section, cancellationToken);
+        if (lease.Delivery.ConnectorKind is SecurityConnectorCatalog.Splunk or SecurityConnectorCatalog.Sentinel)
+            return await SendSecurityEventAsync(lease, section, cancellationToken);
+        if (lease.Delivery.ConnectorKind == SecurityConnectorCatalog.QRadar)
+            return ConnectorConfiguration.Status(section, SecurityConnectorCatalog.QRadar) == "Configured"
+                ? await _syslogSender.SendAsync(section, QradarEventFormatter.Format(lease, section["LogSourceIdentifier"]!), cancellationToken)
+                : new(false, false, null, "channel_invalid");
         var endpoint = section["Url"];
         var key = section["SigningKey"];
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(key))
@@ -129,6 +138,8 @@ public static class ConnectorConfiguration
 
     public static string Status(IConfiguration section, string kind)
     {
+        if (kind is SecurityConnectorCatalog.Splunk or SecurityConnectorCatalog.QRadar or SecurityConnectorCatalog.Sentinel)
+            return SecurityConnectorConfiguration.Status(section, kind);
         if (section["Url"] is null) return "Unconfigured";
         if (Kind(section) != kind || kind is not ("SignedWebhook" or "Jira")
             || !Uri.TryCreate(section["Url"], UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps

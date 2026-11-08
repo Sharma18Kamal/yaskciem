@@ -127,7 +127,7 @@ public sealed partial class SharedWorkspaceStore
         if (rule is null || rule.RuleId == Guid.Empty || string.IsNullOrWhiteSpace(rule.Name) || rule.Name.Length > 128
             || !Enum.IsDefined(rule.MinimumSeverity) || rule.EventTypes is null || rule.EventTypes.Count > OperationalEventTypes.All.Count
             || rule.EventTypes.Any(type => !OperationalEventTypes.All.Contains(type, StringComparer.Ordinal))
-            || rule.ConnectorKind is not ("SignedWebhook" or "Jira")
+            || !SecurityConnectorCatalog.OutboundKinds.Contains(rule.ConnectorKind, StringComparer.Ordinal)
             || rule.EventTypes.Count == 0 && (!(rule.Findings || rule.EffectiveAccess) || !(rule.Added || rule.Removed || rule.Changed))
             || rule.ConnectorKind == "Jira" && rule.AllowAutomaticTickets && rule.EventTypes.Count == 0
             || string.IsNullOrEmpty(rule.Channel) || rule.Channel.Length > 64

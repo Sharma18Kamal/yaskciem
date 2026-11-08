@@ -72,6 +72,13 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Equal("Configured", health.ConfigurationStatus);
         Assert.Equal("Unknown", health.Health);
         Assert.DoesNotContain("test-server-only-secret", await healthRead.Content.ReadAsStringAsync());
+        using var catalogRead = await Send(HttpMethod.Get, prefix + "/connectors/catalog", viewer);
+        Assert.Equal(HttpStatusCode.OK, catalogRead.StatusCode);
+        var catalog = (await catalogRead.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SecurityConnectorCapability>>>())!.Data;
+        Assert.Contains(catalog, item => item.Kind == SecurityConnectorCatalog.Splunk && item.ExportEvents);
+        Assert.Contains(catalog, item => item.Kind == SecurityConnectorCatalog.QRadar && item.ExportEvents);
+        Assert.Contains(catalog, item => item.Kind == SecurityConnectorCatalog.Sentinel && item.ExportEvents);
+        Assert.All(catalog, item => Assert.False(item.ExecuteResponseActions));
         using var eventRead = await Send(HttpMethod.Get, prefix + "/operational-events", viewer);
         Assert.Equal(value.EventId, Assert.Single((await eventRead.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<SharedDriftEventDto>>>())!.Data).EventId);
         var ticketPath = prefix + $"/operational-events/{value.EventId:D}/ticket";
@@ -95,7 +102,7 @@ public sealed partial class SharedWorkspaceEndpointTests
         await store.CompleteNotificationDeliveryAsync(lease, new(false, false, 503, "outcome_unknown"));
         using var dead = await Send(HttpMethod.Get, prefix + "/connectors/health", viewer);
         Assert.Equal(1, Assert.Single((await dead.Content.ReadFromJsonAsync<ApiEnvelope<IReadOnlyList<ConnectorHealthDto>>>())!.Data).DeadLettered);
-        foreach (var route in new[] { "/connectors/health", "/operational-events" })
+        foreach (var route in new[] { "/connectors/health", "/connectors/catalog", "/operational-events" })
         {
             using var crossTenant = await Send(HttpMethod.Get, prefix + route, owner with { TenantId = Guid.NewGuid().ToString() });
             Assert.Equal(HttpStatusCode.NotFound, crossTenant.StatusCode);
