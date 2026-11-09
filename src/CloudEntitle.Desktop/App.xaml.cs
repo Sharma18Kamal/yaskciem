@@ -75,8 +75,6 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IReportService, SqliteReportService>();
 		services.AddSingleton<ILiveScanHistoryStore, LocalLiveScanHistoryStore>();
 		services.AddSingleton<ILocalDataBackupService, LocalDataBackupService>();
-		services.AddSingleton<IMonitoringScheduleStore, LocalMonitoringScheduleStore>();
-		services.AddSingleton<ContinuousMonitoringService>();
 		services.AddSingleton<ICloudCommandRunner>(_ => new LoggingCloudCommandRunner(new ProcessCloudCommandRunner()));
 		services.AddSingleton<CloudEntitle.Integration.Contracts.ICloudActivityCollector, CloudEntitle.Integration.Services.CloudActivityCollector>();
 		services.AddSingleton<CloudEntitle.Integration.Contracts.IEntitlementEvidenceCollector, CloudEntitle.Integration.Services.EntitlementEvidenceCollector>();
@@ -164,7 +162,6 @@ public partial class App : System.Windows.Application
 		services.AddTransient<SettingsViewModel>();
 		services.AddSingleton<MainWindow>();
 		_services = services.BuildServiceProvider();
-		await _services.GetRequiredService<ContinuousMonitoringService>().InitializeAsync();
 		var mainViewModel = _services.GetRequiredService<MainWindowViewModel>();
 		_services.GetRequiredService<MainWindow>().Show();
 		if (linkedRecommendationId is { } id)

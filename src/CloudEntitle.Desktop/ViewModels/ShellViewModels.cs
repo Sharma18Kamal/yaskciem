@@ -2511,7 +2511,6 @@ internal static class WorkspaceDataFormatting
 public sealed class SettingsViewModel : WorkspaceViewModel
 {
     private readonly IDemoDataService _demoData;
-    private readonly ContinuousMonitoringService? _monitoringService;
     private readonly IJiraConnectionSettingsStore _jiraSettingsStore;
     private readonly ITicketingCredentialStore _ticketingCredentialStore;
     private readonly IPostureWebhookCredentialStore _postureWebhookCredentialStore;
@@ -2530,12 +2529,9 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     private string _localDataBackupStatus = string.Empty;
     private string _ticketingCredentialStatus = "Credentials are not configured.";
     private TicketingProvider _selectedTicketingProvider = TicketingProvider.Jira;
-    private bool _scheduledScansEnabled;
-    private int _selectedScanIntervalMinutes = 1440;
-    public SettingsViewModel(IDemoDataService demoData, ContinuousMonitoringService? monitoringService = null, IJiraConnectionSettingsStore? jiraSettingsStore = null, ITicketingCredentialStore? ticketingCredentialStore = null, IPostureWebhookCredentialStore? postureWebhookCredentialStore = null, ILocalDataBackupService? localDataBackupService = null, IDialogService? dialogService = null)
+    public SettingsViewModel(IDemoDataService demoData, IJiraConnectionSettingsStore? jiraSettingsStore = null, ITicketingCredentialStore? ticketingCredentialStore = null, IPostureWebhookCredentialStore? postureWebhookCredentialStore = null, ILocalDataBackupService? localDataBackupService = null, IDialogService? dialogService = null)
     {
         _demoData = demoData;
-        _monitoringService = monitoringService;
         _jiraSettingsStore = jiraSettingsStore ?? new LocalJiraConnectionSettingsStore();
         _ticketingCredentialStore = ticketingCredentialStore ?? new WindowsTicketingCredentialStore();
         _postureWebhookCredentialStore = postureWebhookCredentialStore ?? new WindowsPostureWebhookCredentialStore();
@@ -2553,8 +2549,6 @@ public sealed class SettingsViewModel : WorkspaceViewModel
         {
             _postureWebhookStatus = "Posture alert endpoint status is unavailable.";
         }
-        _scheduledScansEnabled = monitoringService?.Schedule.Enabled ?? false;
-        _selectedScanIntervalMinutes = monitoringService?.Schedule.IntervalMinutes ?? 1440;
         try
         {
             var ticketingSettings = _jiraSettingsStore.Load();
@@ -2577,7 +2571,6 @@ public sealed class SettingsViewModel : WorkspaceViewModel
         }
         LoadDemoDataCommand = new AsyncRelayCommand(LoadDemoDataAsync);
         ResetDemoDataCommand = new AsyncRelayCommand(ResetDemoDataAsync);
-        SaveMonitoringScheduleCommand = new AsyncRelayCommand(SaveMonitoringScheduleAsync);
         SaveTicketingConnectionCommand = new AsyncRelayCommand(SaveTicketingConnectionAsync);
         OpenTicketingRequestCommand = new AsyncRelayCommand(OpenTicketingRequestAsync);
         RemovePostureWebhookCredentialCommand = new RelayCommand(RemovePostureWebhookCredential);
@@ -2658,24 +2651,8 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     public bool CanOpenTicketingRequest => TryGetTicketingUri(SelectedTicketingProvider, TicketingSiteUrl, out _);
     public bool CanConnectToJira => SelectedTicketingProvider == TicketingProvider.Jira && TryGetTicketingUri(TicketingProvider.Jira, JiraBaseUrl, out _);
     public string JiraConnectionStatus => TicketingConnectionStatus;
-    public bool ScheduledScansEnabled { get => _scheduledScansEnabled; set => SetProperty(ref _scheduledScansEnabled, value); }
-    public int SelectedScanIntervalMinutes { get => _selectedScanIntervalMinutes; set => SetProperty(ref _selectedScanIntervalMinutes, value); }
-    public IReadOnlyList<MonitoringIntervalOption> ScanIntervals { get; } = new[]
-    {
-        new MonitoringIntervalOption(5, "5 minutes"),
-        new MonitoringIntervalOption(15, "15 minutes"),
-        new MonitoringIntervalOption(30, "30 minutes"),
-        new MonitoringIntervalOption(60, "1 hour"),
-        new MonitoringIntervalOption(180, "3 hours"),
-        new MonitoringIntervalOption(360, "6 hours"),
-        new MonitoringIntervalOption(720, "12 hours"),
-        new MonitoringIntervalOption(1440, "24 hours"),
-        new MonitoringIntervalOption(10080, "7 days")
-    };
-    public ContinuousMonitoringService? MonitoringService => _monitoringService;
     public AsyncRelayCommand LoadDemoDataCommand { get; }
     public AsyncRelayCommand ResetDemoDataCommand { get; }
-    public AsyncRelayCommand SaveMonitoringScheduleCommand { get; }
     public AsyncRelayCommand SaveTicketingConnectionCommand { get; }
     public AsyncRelayCommand OpenTicketingRequestCommand { get; }
     public RelayCommand RemovePostureWebhookCredentialCommand { get; }
@@ -2683,24 +2660,6 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     public AsyncRelayCommand RestoreLocalBackupCommand { get; }
     public AsyncRelayCommand SaveJiraConnectionCommand => SaveTicketingConnectionCommand;
     public AsyncRelayCommand OpenJiraCommand => OpenTicketingRequestCommand;
-    private async Task SaveMonitoringScheduleAsync()
-    {
-        if (_monitoringService is null)
-        {
-            ErrorMessage = "Scheduled monitoring is unavailable.";
-            return;
-        }
-
-        try
-        {
-            await _monitoringService.SetScheduleAsync(new MonitoringSchedule(ScheduledScansEnabled, SelectedScanIntervalMinutes));
-            ErrorMessage = null;
-        }
-        catch (Exception exception)
-        {
-            ErrorMessage = $"Unable to save monitoring schedule: {exception.Message}";
-        }
-    }
     public Task SaveJiraConnectionAsync() => SaveTicketingConnectionAsync();
 
     public Task SaveTicketingConnectionAsync()
@@ -2923,5 +2882,3 @@ public sealed class SettingsViewModel : WorkspaceViewModel
     private async Task LoadDemoDataAsync() { IsLoading = true; ErrorMessage = null; try { await _demoData.LoadAsync(); DemoModeState = "DEMO MODE active: synthetic data only"; } catch { ErrorMessage = "Unable to load Demo Mode data."; } finally { IsLoading = false; } }
     private async Task ResetDemoDataAsync() { IsLoading = true; ErrorMessage = null; try { await _demoData.ResetAsync(); DemoModeState = "Demo Mode is off"; } catch { ErrorMessage = "Unable to reset Demo Mode data."; } finally { IsLoading = false; } }
 }
-
-public sealed record MonitoringIntervalOption(int Minutes, string Label);

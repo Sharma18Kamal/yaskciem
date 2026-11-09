@@ -565,11 +565,7 @@
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="CONTINUOUS MONITORING" Style="{StaticResource CardLabel}"/>
-                        <CheckBox Content="Enable scheduled scans" IsChecked="{Binding ScheduledScansEnabled, Mode=TwoWay}" Margin="0,12,0,8" ToolTip="Run serialized read-only scans at the selected interval while YASK-CIEM remains open."/>
-                        <TextBlock Text="Scan interval" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,4"/>
-                        <ComboBox ItemsSource="{Binding ScanIntervals}" DisplayMemberPath="Label" SelectedValuePath="Minutes" SelectedValue="{Binding SelectedScanIntervalMinutes, Mode=TwoWay}" ToolTip="Choose how often scans run, from 5 minutes to 7 days."/>
-                        <Button Content="Save schedule" Command="{Binding SaveMonitoringScheduleCommand}" Style="{StaticResource PrimaryButton}" Margin="0,10,0,0" ToolTip="Save the scan schedule on this device. Scheduled scans run only while the app is open."/>
-                        <TextBlock Text="{Binding MonitoringService.Status}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="Cloud scans and monitoring run in the managed License Server background workers, independently of this desktop app. Configure per-account scan schedules in Organization &gt; Scan Operations. Scheduled JIT revocation is processed by the server worker; the desktop is not required to remain open." Foreground="{StaticResource MutedBrush}" Margin="0,12,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
                 <Border Style="{StaticResource SectionCard}">
