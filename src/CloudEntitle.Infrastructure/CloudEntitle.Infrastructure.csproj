@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CloudEntitle.Application\CloudEntitle.Application.csproj" />
     <ProjectReference Include="..\CloudEntitle.Domain\CloudEntitle.Domain.csproj" />
+    <ProjectReference Include="..\CloudEntitle.Reporting\CloudEntitle.Reporting.csproj" />
   </ItemGroup>
 
   <ItemGroup>

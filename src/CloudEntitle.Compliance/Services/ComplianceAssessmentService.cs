@@ -15,6 +15,8 @@ public sealed class ComplianceAssessmentService
     {
         ArgumentNullException.ThrowIfNull(context);
         var assessedAtUtc = (assessedAt ?? DateTime.UtcNow).ToUniversalTime();
+        if (context.ManualEvidence.Select(item => item.Id).Distinct().Count() != context.ManualEvidence.Count)
+            throw new ArgumentException("Manual evidence IDs must be unique within an assessment.", nameof(context));
         var standards = (selectedStandards ?? ComplianceStandardCatalog.Standards).Distinct().ToArray();
         var controls = framework switch
         {
@@ -24,6 +26,16 @@ public sealed class ComplianceAssessmentService
             _ => CiemBaseline(context)
         };
         var controlIds = controls.Select(control => control.ControlId).ToHashSet(StringComparer.Ordinal);
+        foreach (var evidence in context.ManualEvidence)
+        {
+            if (evidence.Id == Guid.Empty || !controlIds.Contains(evidence.ControlId)
+                || string.IsNullOrWhiteSpace(evidence.Summary) || evidence.Summary.Length > 2000
+                || evidence.Summary.Any(char.IsControl) || string.IsNullOrWhiteSpace(evidence.Reference)
+                || evidence.Reference.Length > 512 || evidence.Reference.Any(char.IsControl)
+                || string.IsNullOrWhiteSpace(evidence.RecordedBy) || evidence.RecordedBy.Length > 200
+                || evidence.RecordedBy.Any(char.IsControl) || evidence.RecordedAtUtc.Kind != DateTimeKind.Utc)
+                throw new ArgumentException("Manual evidence requires a valid control, summary, reference, recorded-by identity, UTC timestamp, and unique ID.", nameof(context));
+        }
         var exceptions = context.Exceptions.Select(exception =>
         {
             if (exception.Id == Guid.Empty || string.IsNullOrWhiteSpace(exception.ControlId)
@@ -40,6 +52,29 @@ public sealed class ComplianceAssessmentService
         {
             Mappings = ComplianceStandardCatalog.GetMappings(control.ControlId, standards),
             Exceptions = exceptions.Where(exception => exception.ControlId == control.ControlId).ToArray()
+        }).ToArray();
+        controls = controls.Select(control =>
+        {
+            var manualEvidence = context.ManualEvidence.Where(item => item.ControlId == control.ControlId).ToArray();
+            if (manualEvidence.Length == 0) return control;
+            var manualReferences = manualEvidence.Select(item => new ComplianceEvidenceReference(
+                $"ManualEvidence:{item.Id:D}", "ManualEvidence", item.Reference, null, item.RecordedAtUtc,
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{item.Summary}\n{item.Reference}"))).ToLowerInvariant())
+            {
+                SourceKind = ComplianceEvidenceSourceKind.Manual
+            }).ToArray();
+            var incompleteReview = control.State == ComplianceControlState.NotAssessed;
+            return control with
+            {
+                State = incompleteReview ? ComplianceControlState.Partial : control.State,
+                EvidenceCount = control.EvidenceCount + manualEvidence.Length,
+                Evidence = control.Evidence.Concat(manualEvidence.Select(item =>
+                    $"Manual evidence by {item.RecordedBy}: {item.Summary} (reference: {item.Reference})")).ToArray(),
+                EvidenceLineage = control.EvidenceLineage.Concat(manualReferences).ToArray(),
+                Gaps = incompleteReview
+                    ? control.Gaps.Append("Manual evidence was supplied but has not been independently assessed.").ToArray()
+                    : control.Gaps
+            };
         }).ToArray();
         return new ComplianceAssessment(Guid.NewGuid(), framework, assessedAtUtc, controls, controls.Count(item => item.State == ComplianceControlState.Pass), controls.Count(item => item.State == ComplianceControlState.Fail), controls.Count(item => item.State == ComplianceControlState.Partial), controls.Count(item => item.State == ComplianceControlState.NotAssessed))
         {

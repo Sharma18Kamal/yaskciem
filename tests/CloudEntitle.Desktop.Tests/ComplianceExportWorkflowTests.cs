@@ -57,22 +57,28 @@ public sealed class ComplianceExportWorkflowTests
             Assert.True(workflow.CanExport);
             var exception = new ComplianceException(Guid.NewGuid(), "CIEM-BASE-001", "CHG-2042", "Temporary discovery exception",
                 "security@example.invalid", DateTime.UtcNow, DateTime.UtcNow.AddDays(30), "approval:CHG-2042");
+            var manualEvidence = new ComplianceEvidenceRecord(Guid.NewGuid(), "CIEM-BASE-001", "Approved access review",
+                "review:REV-100", "security@example.invalid", DateTime.UtcNow);
             var bytes = await workflow.CreateBundleAsync(ComplianceFramework.CiemBaseline,
-                new[] { ComplianceStandard.CisControlsV8_1, ComplianceStandard.Nist80053Rev5 }, exceptions: new[] { exception });
+                new[] { ComplianceStandard.CisControlsV8_1, ComplianceStandard.Nist80053Rev5 }, exceptions: new[] { exception },
+                manualEvidence: new[] { manualEvidence });
             using var archive = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
             using var assessment = JsonDocument.Parse(await ReadEntryAsync(archive, "assessment.json"));
             using var manifest = JsonDocument.Parse(await ReadEntryAsync(archive, "manifest.json"));
             using var exceptions = JsonDocument.Parse(await ReadEntryAsync(archive, "exceptions.json"));
+            using var manualEvidenceFile = JsonDocument.Parse(await ReadEntryAsync(archive, "manual-evidence.json"));
             Assert.Contains(archive.Entries, entry => entry.FullName == "signature.json");
             using var lineage = JsonDocument.Parse(await ReadEntryAsync(archive, "evidence-lineage.json"));
             using var controlLineage = JsonDocument.Parse(await ReadEntryAsync(archive, "control-lineage.json"));
             Assert.NotEmpty(lineage.RootElement.EnumerateArray());
-            Assert.Equal("1.3", manifest.RootElement.GetProperty("schemaVersion").GetString());
+            Assert.Equal("1.4", manifest.RootElement.GetProperty("schemaVersion").GetString());
             Assert.Equal("EvidenceSnapshot", manifest.RootElement.GetProperty("assessmentType").GetString());
             Assert.False(manifest.RootElement.GetProperty("isCertification").GetBoolean());
             Assert.Equal(ComplianceStandardCatalog.MappingCatalogVersion, manifest.RootElement.GetProperty("mappingCatalogVersion").GetString());
             Assert.Equal("CIS Controls v8.1", controlLineage.RootElement[0].GetProperty("mappings")[0].GetProperty("standardVersion").GetString());
             Assert.Equal("CHG-2042", exceptions.RootElement[0].GetProperty("reference").GetString());
+            Assert.Equal((int)ComplianceEvidenceSourceKind.Manual, manualEvidenceFile.RootElement[0].GetProperty("sourceKind").GetInt32());
+            Assert.Equal("review:REV-100", manualEvidenceFile.RootElement[0].GetProperty("sourceId").GetString());
             Assert.False(assessment.RootElement.GetProperty("isCertification").GetBoolean());
             var accountEvidence = assessment.RootElement.GetProperty("controls").EnumerateArray()
                 .Single(control => control.GetProperty("controlId").GetString() == "CIEM-BASE-001")

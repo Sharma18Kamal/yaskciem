@@ -19,7 +19,7 @@ Readiness checks JIT tables, the valid status/time index and enabled audit guard
 | Behavior | First-observed configured privileged actions, source-enriched unusual countries, configured permission-change bursts and privileged calls outside business hours |
 | Decision transitions | Native GCP v3beta Preview capture for project setIamPolicy only; exact-context NOT_GRANTED-to-GRANTED IAM decision confirmation when complete provider evidence passes the gate; AWS/Azure remain Unsupported |
 | SIEM/tickets | Existing Sentinel/Splunk/QRadar/Jira plus central ServiceNow incidents and Teams Workflows notifications |
-| Compliance | Informative frameworks plus source-verified Azure Foundations v2.0.0 (1.5, 1.23, 5.1.2) and AWS Foundations v3.0.0 (1.12, 1.15) crosswalks; catalog 2026.11.2, bundle schema 1.3 |
+| Compliance | Informative frameworks plus source-verified Azure Foundations v2.0.0 (1.5, 1.23, 5.1.2) and AWS Foundations v3.0.0 (1.12, 1.15) crosswalks; GDPR access-evidence crosswalk; catalog 2026.11.3, bundle schema 1.4; manual evidence remains unverified |
 
 Offline credential issuance, continuous all-source trust/credential collection,
 complete activity/geographic coverage and fully confirmed effective privilege

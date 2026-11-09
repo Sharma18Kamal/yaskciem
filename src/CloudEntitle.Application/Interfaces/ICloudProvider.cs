@@ -166,6 +166,9 @@ public interface IReportService
     Task<string> GenerateReportAsync(string reportType, CancellationToken cancellationToken = default);
     Task<string> GenerateReportAsync(string reportType, string outputPath, CancellationToken cancellationToken = default);
     Task<string> GenerateReportAsync(string reportType, string outputPath, IReadOnlyList<RiskFinding>? currentScanFindings, CancellationToken cancellationToken = default);
+    Task<string> GenerateEnterpriseReportAsync(string reportCategory, string outputPath,
+        IReadOnlyList<RiskFinding>? currentScanFindings = null, CancellationToken cancellationToken = default)
+        => GenerateReportAsync(Path.GetExtension(outputPath).TrimStart('.'), outputPath, currentScanFindings, cancellationToken);
 }
 
 public interface IScanResultStore

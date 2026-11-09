@@ -128,9 +128,18 @@ public class DatabaseContextTests
             var service = new SqliteReportService(options, reportDirectory);
             var jsonPath = await service.GenerateReportAsync("json");
             var csvPath = await service.GenerateReportAsync("csv");
+            var pdfPath = Path.Combine(reportDirectory, "executive.pdf");
+            var excelPath = Path.Combine(reportDirectory, "usage.xlsx");
+            await service.GenerateEnterpriseReportAsync("Executive", pdfPath);
+            await service.GenerateEnterpriseReportAsync("PermissionUsage", excelPath);
 
             Assert.Contains("Owner access", await File.ReadAllTextAsync(jsonPath));
             Assert.Contains("Owner access", await File.ReadAllTextAsync(csvPath));
+            Assert.StartsWith("%PDF-1.4", System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(pdfPath)));
+            using var workbook = new System.IO.Compression.ZipArchive(File.OpenRead(excelPath), System.IO.Compression.ZipArchiveMode.Read);
+            Assert.Contains(workbook.Entries, entry => entry.FullName == "xl/worksheets/sheet1.xml");
+            await using var historyContext = new CloudEntitleDbContext(options);
+            Assert.Equal(4, await historyContext.ReportExecutionHistory.CountAsync());
         }
         finally
         {

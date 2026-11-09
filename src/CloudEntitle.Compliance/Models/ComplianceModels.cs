@@ -17,9 +17,11 @@ public enum ComplianceStandard
     NistCsf2_0 = 4,
     PciDss4_0_1 = 5,
     CisMicrosoftAzureFoundationsBenchmark2_0_0 = 6,
-    CisAwsFoundationsBenchmark3_0_0 = 7
+    CisAwsFoundationsBenchmark3_0_0 = 7,
+    GdprAccessEvidence = 8
 }
 public enum ComplianceExceptionStatus { NotAssessed, Active, Expired }
+public enum ComplianceEvidenceSourceKind { Automated, Manual }
 
 public sealed record ComplianceStandardMapping(ComplianceStandard Standard, string Reference, string Rationale)
 {
@@ -59,7 +61,18 @@ public sealed record ComplianceEvidenceReference(
     string SourceId,
     Guid? CloudAccountId,
     DateTime? CollectedAtUtc,
-    string Sha256);
+    string Sha256)
+{
+    public ComplianceEvidenceSourceKind SourceKind { get; init; } = ComplianceEvidenceSourceKind.Automated;
+}
+
+public sealed record ComplianceEvidenceRecord(
+    Guid Id,
+    string ControlId,
+    string Summary,
+    string Reference,
+    string RecordedBy,
+    DateTime RecordedAtUtc);
 
 public sealed record ComplianceAssessmentTrendPoint(
     Guid AssessmentId,
@@ -76,7 +89,7 @@ public sealed record ComplianceAssessmentTrendPoint(
 
 public static class ComplianceStandardCatalogVersion
 {
-    public const string Current = "2026.11.2";
+    public const string Current = "2026.11.3";
     public const string Legacy = "Unversioned (legacy assessment)";
 }
 
@@ -93,6 +106,8 @@ public sealed record ComplianceControl(
     public IReadOnlyList<ComplianceStandardMapping> Mappings { get; init; } = Array.Empty<ComplianceStandardMapping>();
     public IReadOnlyList<ComplianceEvidenceReference> EvidenceLineage { get; init; } = Array.Empty<ComplianceEvidenceReference>();
     public IReadOnlyList<ComplianceException> Exceptions { get; init; } = Array.Empty<ComplianceException>();
+    public int AutomatedEvidenceCount => EvidenceLineage.Count(item => item.SourceKind == ComplianceEvidenceSourceKind.Automated);
+    public int ManualEvidenceCount => EvidenceLineage.Count(item => item.SourceKind == ComplianceEvidenceSourceKind.Manual);
 }
 
 public sealed record ComplianceAssessment(
@@ -110,6 +125,9 @@ public sealed record ComplianceAssessment(
     public bool IsCertification => false;
     public string EvidenceCaveat => "Evidence snapshot only; not a certification, legal opinion, or auditor attestation.";
     public IReadOnlyList<ComplianceException> Exceptions { get; init; } = Array.Empty<ComplianceException>();
+    public double? TechnicalEvidenceScore => Passed + Failed + Partial == 0
+        ? null : Math.Round(Passed * 100d / (Passed + Failed + Partial), 1);
+    public string ScoreCaveat => "Technical evidence score only; excludes unassessed controls and does not establish legal, contractual, or certification compliance.";
 }
 
 public sealed record ComplianceContext(
@@ -123,4 +141,5 @@ public sealed record ComplianceContext(
 {
     public IReadOnlyList<Scan> Scans { get; init; } = Array.Empty<Scan>();
     public IReadOnlyList<ComplianceException> Exceptions { get; init; } = Array.Empty<ComplianceException>();
+    public IReadOnlyList<ComplianceEvidenceRecord> ManualEvidence { get; init; } = Array.Empty<ComplianceEvidenceRecord>();
 }

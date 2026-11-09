@@ -2498,6 +2498,44 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.ToTable("RemediationRollbacks");
                 });
 
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.ReportExecutionHistoryRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("GeneratedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OutputFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GeneratedAtUtc");
+
+                    b.HasIndex("Category", "GeneratedAtUtc");
+
+                    b.ToTable("ReportExecutionHistory");
+                });
+
             modelBuilder.Entity("CloudEntitle.Domain.Entities.AccessPathEdge", b =>
                 {
                     b.HasOne("CloudEntitle.Domain.Entities.AccessPath", null)

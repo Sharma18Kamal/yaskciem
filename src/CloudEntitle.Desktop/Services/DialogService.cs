@@ -43,9 +43,9 @@ public sealed class DialogService : IDialogService
         var dialog = new SaveFileDialog
         {
             Title = "Save YASK-CIEM report",
-            Filter = "JSON report (*.json)|*.json|CSV report (*.csv)|*.csv",
+            Filter = "PDF report (*.pdf)|*.pdf|Excel workbook (*.xlsx)|*.xlsx|CSV report (*.csv)|*.csv|JSON report (*.json)|*.json|HTML report (*.html)|*.html",
             FilterIndex = 1,
-            DefaultExt = ".json",
+            DefaultExt = ".pdf",
             AddExtension = true,
             OverwritePrompt = true,
             InitialDirectory = Directory.Exists(reportDirectory) ? reportDirectory : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -57,7 +57,14 @@ public sealed class DialogService : IDialogService
             return null;
         }
 
-        var extension = dialog.FilterIndex == 2 ? ".csv" : ".json";
+        var extension = dialog.FilterIndex switch
+        {
+            1 => ".pdf",
+            2 => ".xlsx",
+            3 => ".csv",
+            4 => ".json",
+            _ => ".html"
+        };
         return string.Equals(Path.GetExtension(dialog.FileName), extension, StringComparison.OrdinalIgnoreCase)
             ? dialog.FileName
             : Path.ChangeExtension(dialog.FileName, extension);

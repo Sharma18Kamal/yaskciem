@@ -17,6 +17,7 @@ public static class ComplianceStandardCatalog
         ComplianceStandard.PciDss4_0_1 => "PCI DSS v4.0.1 (June 2024)",
         ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0 => "CIS Microsoft Azure Foundations Benchmark v2.0.0",
         ComplianceStandard.CisAwsFoundationsBenchmark3_0_0 => "CIS AWS Foundations Benchmark v3.0.0",
+        ComplianceStandard.GdprAccessEvidence => "GDPR access-security evidence crosswalk (informative; legal review required)",
         _ => throw new ArgumentOutOfRangeException(nameof(standard), standard, "Unsupported compliance standard.")
     };
 
@@ -50,7 +51,10 @@ public static class ComplianceStandardCatalog
                 Map(ComplianceStandard.Iso27001_2022, "5.18", "Supports reviewable access-right evidence."),
                 Map(ComplianceStandard.Soc2TrustServices, "CC6.2", "Supports authorization evidence for access provisioning."),
                 Map(ComplianceStandard.NistCsf2_0, "PR.AA-05", "Provides evidence for reviewing access permissions and entitlements; evidence presence alone does not establish that the outcome is met."),
-                Map(ComplianceStandard.PciDss4_0_1, "7.2.1", "Provides access-evidence context for an access-control model; this mapping does not establish PCI DSS compliance.")
+                Map(ComplianceStandard.PciDss4_0_1, "7.2.1", "Provides access-evidence context for an access-control model; this mapping does not establish PCI DSS compliance."),
+                Map(ComplianceStandard.GdprAccessEvidence, "Articles 5(1)(f), 25, 32",
+                    "Access evidence can support review of confidentiality safeguards and data protection by design; it does not establish GDPR compliance.",
+                    "https://eur-lex.europa.eu/eli/reg/2016/679/oj")
             ],
             ["CIEM-BASE-003"] =
             [
@@ -66,7 +70,10 @@ public static class ComplianceStandardCatalog
                 Map(ComplianceStandard.Iso27001_2022, "5.15", "Supports access-control decisions grounded in evaluated permissions."),
                 Map(ComplianceStandard.Soc2TrustServices, "CC6.1", "Supports least-privilege logical access controls."),
                 Map(ComplianceStandard.NistCsf2_0, "PR.AA-05", "Aligns with explicit classification of access decisions for least-privilege review."),
-                Map(ComplianceStandard.PciDss4_0_1, "7.2.2", "Supports evaluation of whether assigned access is limited to role-related need; it is not a PCI DSS assessment.")
+                Map(ComplianceStandard.PciDss4_0_1, "7.2.2", "Supports evaluation of whether assigned access is limited to role-related need; it is not a PCI DSS assessment."),
+                Map(ComplianceStandard.GdprAccessEvidence, "Articles 25, 32",
+                    "Evaluated access evidence can inform a review of appropriate technical and organizational security measures; it does not establish GDPR compliance.",
+                    "https://eur-lex.europa.eu/eli/reg/2016/679/oj")
             ],
             ["LP-002"] =
             [
@@ -76,6 +83,9 @@ public static class ComplianceStandardCatalog
                 Map(ComplianceStandard.Soc2TrustServices, "CC6.3", "Supports access changes and authorization traceability."),
                 Map(ComplianceStandard.NistCsf2_0, "PR.AA-05", "Makes privileged authorization paths available for review; a path is not proof of approval or policy enforcement."),
                 Map(ComplianceStandard.PciDss4_0_1, "7.2.2", "Provides context for examining privileged permissions against role-related need; it does not demonstrate requirement fulfillment."),
+                Map(ComplianceStandard.GdprAccessEvidence, "Articles 25, 32",
+                    "Privileged-access evidence can inform review of data-protection-by-design and security measures; it does not establish GDPR compliance.",
+                    "https://eur-lex.europa.eu/eli/reg/2016/679/oj"),
                 Map(ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, "1.23",
                     "Azure-specific privileged authorization paths can support investigation of custom subscription administrator roles; an explainable path does not establish that no such roles exist.",
                     "https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0"),
@@ -92,7 +102,10 @@ public static class ComplianceStandardCatalog
                 Map(ComplianceStandard.NistCsf2_0, "PR.AA-01", "Makes known or unavailable identity-activity evidence explicit; it does not establish that identity credentials are fully managed."),
                 Map(ComplianceStandard.CisAwsFoundationsBenchmark3_0_0, "1.12",
                     "AWS-specific identity activity and disclosed unknown states can support unused-credential investigation; this control does not prove complete credential-level usage coverage or enforce the benchmark's 45-day removal threshold.",
-                    "https://docs.aws.amazon.com/securityhub/latest/userguide/iam-controls.html#iam-22")
+                    "https://docs.aws.amazon.com/securityhub/latest/userguide/iam-controls.html#iam-22"),
+                Map(ComplianceStandard.GdprAccessEvidence, "Articles 5(1)(f), 32",
+                    "Identity lifecycle evidence can inform security reviews; missing activity telemetry is not proof of inactivity or a GDPR violation.",
+                    "https://eur-lex.europa.eu/eli/reg/2016/679/oj")
             ],
             ["IG-002"] =
             [
@@ -113,6 +126,9 @@ public static class ComplianceStandardCatalog
                 Map(ComplianceStandard.Soc2TrustServices, "CC6.2", "Supports evidence for authorized user access."),
                 Map(ComplianceStandard.NistCsf2_0, "PR.AA-05", "Supplies privileged-access evidence that may support review; this control does not record reviewer decisions."),
                 Map(ComplianceStandard.PciDss4_0_1, "7.2.4", "Supplies privileged-access evidence that may be used in an access review; this control does not perform or attest to the PCI DSS review."),
+                Map(ComplianceStandard.GdprAccessEvidence, "Articles 5(1)(f), 25, 32",
+                    "Access-review evidence can inform organizational security review; it does not establish that a GDPR-required measure is effective or sufficient.",
+                    "https://eur-lex.europa.eu/eli/reg/2016/679/oj"),
                 Map(ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, "1.23",
                     "Azure-specific privileged-access evidence can support a custom subscription administrator role review; this control does not establish absence of custom roles or record approval.",
                     "https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0"),
@@ -128,7 +144,10 @@ public static class ComplianceStandardCatalog
                 Map(ComplianceStandard.Soc2TrustServices, "CC7.2", "Supports monitoring and investigation using audit records."),
                 Map(ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, "5.1.2",
                     "Audit records can support an Azure diagnostic-category coverage review; application audit presence does not establish that Azure diagnostic settings capture the required cloud categories or that activity-log alerts exist.",
-                    "https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0")
+                    "https://learn.microsoft.com/en-us/azure/governance/policy/samples/cis-azure-2-0-0"),
+                Map(ComplianceStandard.GdprAccessEvidence, "Articles 5(2), 30, 32",
+                    "Audit evidence can support accountability and security review; CIEM audit events are not a complete GDPR processing record or breach report.",
+                    "https://eur-lex.europa.eu/eli/reg/2016/679/oj")
             ]
         };
 

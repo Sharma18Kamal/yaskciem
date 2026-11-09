@@ -374,6 +374,11 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     private string _exceptionEvidenceReference = string.Empty;
     private DateTime? _exceptionExpiresAt = DateTime.Today.AddDays(30);
     private ComplianceException? _selectedComplianceException;
+    private string _manualEvidenceControlId = string.Empty;
+    private string _manualEvidenceSummary = string.Empty;
+    private string _manualEvidenceReference = string.Empty;
+    private string _manualEvidenceRecordedBy = Environment.UserName;
+    private ComplianceEvidenceRecord? _selectedManualEvidence;
 
     public DashboardViewModel(IDemoDataService demoData, IAnalyticsService analytics, ILiveCloudScanService? liveCloudScanService = null, IReportService? reportService = null, IDialogService? dialogService = null, IComplianceExportWorkflow? complianceExportWorkflow = null, AuthenticatedOrganizationContext? authenticatedOrganizationContext = null)
     {
@@ -401,6 +406,8 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         LoadComplianceHistoryCommand = new AsyncRelayCommand(LoadComplianceHistoryAsync);
         AddComplianceExceptionCommand = new AsyncRelayCommand(AddComplianceExceptionAsync);
         RemoveComplianceExceptionCommand = new AsyncRelayCommand(RemoveSelectedComplianceExceptionAsync);
+        AddManualComplianceEvidenceCommand = new AsyncRelayCommand(AddManualComplianceEvidenceAsync);
+        RemoveManualComplianceEvidenceCommand = new AsyncRelayCommand(RemoveSelectedManualComplianceEvidenceAsync);
         if (_authenticatedOrganizationContext is not null)
             _authenticatedOrganizationContext.Changed += (_, _) => OnPropertyChanged(nameof(CanExportComplianceBundle));
         _demoData.DataChanged += async (_, _) => await RefreshAsync();
@@ -419,8 +426,16 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     public AsyncRelayCommand LoadComplianceHistoryCommand { get; }
     public AsyncRelayCommand AddComplianceExceptionCommand { get; }
     public AsyncRelayCommand RemoveComplianceExceptionCommand { get; }
+    public AsyncRelayCommand AddManualComplianceEvidenceCommand { get; }
+    public AsyncRelayCommand RemoveManualComplianceEvidenceCommand { get; }
     public IReadOnlyList<ComplianceFramework> ComplianceFrameworks { get; } = Enum.GetValues<ComplianceFramework>();
     public ComplianceFramework SelectedComplianceFramework { get; set; } = ComplianceFramework.CiemBaseline;
+    public IReadOnlyList<string> ReportCategories { get; } = new[]
+    {
+        "Executive", "IdentityRisk", "PermissionUsage", "ToxicCombination", "AttackPath",
+        "Remediation", "ComplianceAssessment", "AuditHistory", "Technical", "Identity", "Entitlement", "Risk", "Recommendation"
+    };
+    public string SelectedReportCategory { get; set; } = "Executive";
     public ObservableCollection<ComplianceStandardSelection> ComplianceStandardOptions { get; } = new()
     {
         new(ComplianceStandard.CisControlsV8_1, "CIS Controls v8.1"),
@@ -429,10 +444,12 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         new(ComplianceStandard.Soc2TrustServices, "SOC 2 Trust Services Criteria"),
         new(ComplianceStandard.NistCsf2_0, "NIST CSF 2.0"),
         new(ComplianceStandard.PciDss4_0_1, "PCI DSS v4.0.1"),
+        new(ComplianceStandard.GdprAccessEvidence, "GDPR access-evidence crosswalk"),
         new(ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0, "CIS Microsoft Azure Foundations Benchmark v2.0.0"),
         new(ComplianceStandard.CisAwsFoundationsBenchmark3_0_0, "CIS AWS Foundations Benchmark v3.0.0")
     };
     public ObservableCollection<ComplianceException> ComplianceExceptionDrafts { get; } = new();
+    public ObservableCollection<ComplianceEvidenceRecord> ManualComplianceEvidenceDrafts { get; } = new();
     public IReadOnlyList<ComplianceStandard> SelectedComplianceStandards => ComplianceStandardOptions.Where(option => option.IsSelected).Select(option => option.Standard).ToArray();
     public bool CanExportComplianceBundle => _complianceExportWorkflow?.CanExport == true;
     public bool CanAddComplianceException => !string.IsNullOrWhiteSpace(ExceptionControlId)
@@ -441,6 +458,26 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         && !string.IsNullOrWhiteSpace(ExceptionRecordedBy)
         && ExceptionExpiresAt?.Date > DateTime.Today;
     public bool CanRemoveComplianceException => SelectedComplianceException is not null;
+    public bool CanAddManualComplianceEvidence => !string.IsNullOrWhiteSpace(ManualEvidenceControlId)
+        && !string.IsNullOrWhiteSpace(ManualEvidenceSummary) && ManualEvidenceSummary.Length <= 2000
+        && !ManualEvidenceSummary.Any(char.IsControl) && !string.IsNullOrWhiteSpace(ManualEvidenceReference)
+        && ManualEvidenceReference.Length <= 512 && !ManualEvidenceReference.Any(char.IsControl)
+        && !string.IsNullOrWhiteSpace(ManualEvidenceRecordedBy) && ManualEvidenceRecordedBy.Length <= 200
+        && !ManualEvidenceRecordedBy.Any(char.IsControl);
+    public bool CanRemoveManualComplianceEvidence => SelectedManualEvidence is not null;
+    public string ManualEvidenceControlId { get => _manualEvidenceControlId; set { if (SetProperty(ref _manualEvidenceControlId, value)) OnPropertyChanged(nameof(CanAddManualComplianceEvidence)); } }
+    public string ManualEvidenceSummary { get => _manualEvidenceSummary; set { if (SetProperty(ref _manualEvidenceSummary, value)) OnPropertyChanged(nameof(CanAddManualComplianceEvidence)); } }
+    public string ManualEvidenceReference { get => _manualEvidenceReference; set { if (SetProperty(ref _manualEvidenceReference, value)) OnPropertyChanged(nameof(CanAddManualComplianceEvidence)); } }
+    public string ManualEvidenceRecordedBy { get => _manualEvidenceRecordedBy; set { if (SetProperty(ref _manualEvidenceRecordedBy, value)) OnPropertyChanged(nameof(CanAddManualComplianceEvidence)); } }
+    public ComplianceEvidenceRecord? SelectedManualEvidence
+    {
+        get => _selectedManualEvidence;
+        set
+        {
+            if (!SetProperty(ref _selectedManualEvidence, value)) return;
+            OnPropertyChanged(nameof(CanRemoveManualComplianceEvidence));
+        }
+    }
     public string ExceptionControlId { get => _exceptionControlId; set { if (SetProperty(ref _exceptionControlId, value)) OnPropertyChanged(nameof(CanAddComplianceException)); } }
     public string ExceptionReference { get => _exceptionReference; set { if (SetProperty(ref _exceptionReference, value)) OnPropertyChanged(nameof(CanAddComplianceException)); } }
     public string ExceptionRationale { get => _exceptionRationale; set { if (SetProperty(ref _exceptionRationale, value)) OnPropertyChanged(nameof(CanAddComplianceException)); } }
@@ -639,10 +676,10 @@ public sealed class DashboardViewModel : WorkspaceViewModel
             return;
         }
 
-        var reportType = Path.GetExtension(outputPath).TrimStart('.').ToLowerInvariant();
-        if (reportType is not ("json" or "csv"))
+        var extension = Path.GetExtension(outputPath).TrimStart('.').ToLowerInvariant();
+        if (extension is not ("json" or "csv" or "html" or "pdf" or "xlsx"))
         {
-            ErrorMessage = "Choose a JSON or CSV report file.";
+            ErrorMessage = "Choose a JSON, CSV, HTML, PDF, or Excel report file.";
             return;
         }
 
@@ -650,7 +687,8 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         ErrorMessage = null;
         try
         {
-            var generatedPath = await _reportService.GenerateReportAsync(reportType, outputPath, _liveCloudScanService?.CurrentResult?.Findings);
+            var generatedPath = await _reportService.GenerateEnterpriseReportAsync(SelectedReportCategory, outputPath,
+                _liveCloudScanService?.CurrentResult?.Findings);
             _dialogService.ShowInformation($"Report saved to:\n{generatedPath}");
         }
         catch (Exception exception)
@@ -679,7 +717,7 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         try
         {
             var bundle = await _complianceExportWorkflow.CreateBundleAsync(SelectedComplianceFramework, SelectedComplianceStandards,
-                exceptions: ComplianceExceptionDrafts.ToArray());
+                exceptions: ComplianceExceptionDrafts.ToArray(), manualEvidence: ManualComplianceEvidenceDrafts.ToArray());
             await File.WriteAllBytesAsync(outputPath, bundle);
             ComplianceExportStatus = $"Compliance evidence bundle saved to: {outputPath}";
             OnPropertyChanged(nameof(ComplianceExportStatus));
@@ -713,6 +751,24 @@ public sealed class DashboardViewModel : WorkspaceViewModel
     {
         if (SelectedComplianceException is { } exception) ComplianceExceptionDrafts.Remove(exception);
         SelectedComplianceException = null;
+        return Task.CompletedTask;
+    }
+
+    private Task AddManualComplianceEvidenceAsync()
+    {
+        if (!CanAddManualComplianceEvidence) return Task.CompletedTask;
+        ManualComplianceEvidenceDrafts.Add(new ComplianceEvidenceRecord(Guid.NewGuid(), ManualEvidenceControlId.Trim(),
+            ManualEvidenceSummary.Trim(), ManualEvidenceReference.Trim(), ManualEvidenceRecordedBy.Trim(), DateTime.UtcNow));
+        ManualEvidenceControlId = string.Empty;
+        ManualEvidenceSummary = string.Empty;
+        ManualEvidenceReference = string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private Task RemoveSelectedManualComplianceEvidenceAsync()
+    {
+        if (SelectedManualEvidence is { } evidence) ManualComplianceEvidenceDrafts.Remove(evidence);
+        SelectedManualEvidence = null;
         return Task.CompletedTask;
     }
 

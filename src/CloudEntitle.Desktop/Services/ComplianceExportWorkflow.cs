@@ -16,7 +16,8 @@ public interface IComplianceExportWorkflow
 {
     bool CanExport { get; }
     Task<byte[]> CreateBundleAsync(ComplianceFramework framework, IReadOnlyCollection<ComplianceStandard>? selectedStandards = null,
-        CancellationToken cancellationToken = default, IReadOnlyCollection<ComplianceException>? exceptions = null);
+        CancellationToken cancellationToken = default, IReadOnlyCollection<ComplianceException>? exceptions = null,
+        IReadOnlyCollection<ComplianceEvidenceRecord>? manualEvidence = null);
     Task<IReadOnlyList<ComplianceAssessmentTrendPoint>> GetHistoryAsync(ComplianceFramework framework, CancellationToken cancellationToken = default);
 }
 
@@ -35,7 +36,8 @@ public sealed class ComplianceExportWorkflow(
     public bool CanExport => TryGetAuthorizedOrganization(out _, out _);
 
     public async Task<byte[]> CreateBundleAsync(ComplianceFramework framework, IReadOnlyCollection<ComplianceStandard>? selectedStandards = null,
-        CancellationToken cancellationToken = default, IReadOnlyCollection<ComplianceException>? exceptions = null)
+        CancellationToken cancellationToken = default, IReadOnlyCollection<ComplianceException>? exceptions = null,
+        IReadOnlyCollection<ComplianceEvidenceRecord>? manualEvidence = null)
     {
         if (!TryGetAuthorizedOrganization(out var identity, out var organization))
             throw new UnauthorizedAccessException("Sign in as an organization member with report-export permission before exporting compliance evidence.");
@@ -61,7 +63,8 @@ public sealed class ComplianceExportWorkflow(
         var complianceContext = new ComplianceContext(boundAccounts, principals, effectiveAccess, accessPaths, findings, governance, auditEvents)
         {
             Scans = scans,
-            Exceptions = exceptions?.ToArray() ?? Array.Empty<ComplianceException>()
+            Exceptions = exceptions?.ToArray() ?? Array.Empty<ComplianceException>(),
+            ManualEvidence = manualEvidence?.ToArray() ?? Array.Empty<ComplianceEvidenceRecord>()
         };
         var assessment = assessmentService.Assess(complianceContext, framework, selectedStandards: selectedStandards);
         await _historyStore.SaveAsync(organization.Id, assessment, cancellationToken);

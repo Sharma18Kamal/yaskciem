@@ -39,9 +39,12 @@ public sealed class ComplianceExportService
             Exceptions = control.Exceptions
         }), JsonOptions);
         var exceptionsBytes = JsonSerializer.SerializeToUtf8Bytes(assessment.Exceptions, JsonOptions);
+        var manualEvidence = assessment.Controls.SelectMany(control => control.EvidenceLineage)
+            .Where(evidence => evidence.SourceKind == ComplianceEvidenceSourceKind.Manual).ToArray();
+        var manualEvidenceBytes = JsonSerializer.SerializeToUtf8Bytes(manualEvidence, JsonOptions);
         var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            schemaVersion = "1.3",
+            schemaVersion = "1.4",
             product = "YASK-CIEM",
             assessmentType = "EvidenceSnapshot",
             isCertification = false,
@@ -67,6 +70,8 @@ public sealed class ComplianceExportService
                 assessment.Failed,
                 assessment.Partial,
                 assessment.NotAssessed,
+                technicalEvidenceScore = assessment.TechnicalEvidenceScore,
+                scoreCaveat = assessment.ScoreCaveat,
                 total = assessment.Controls.Count,
                 exceptions = assessment.Exceptions.Count,
                 activeExceptions = assessment.Exceptions.Count(exception => exception.Status == ComplianceExceptionStatus.Active),
@@ -79,7 +84,8 @@ public sealed class ComplianceExportService
                 ["control-mappings.csv"] = Sha256(mappingsBytes),
                 ["evidence-lineage.json"] = Sha256(lineageBytes),
                 ["control-lineage.json"] = Sha256(controlLineageBytes),
-                ["exceptions.json"] = Sha256(exceptionsBytes)
+                ["exceptions.json"] = Sha256(exceptionsBytes),
+                ["manual-evidence.json"] = Sha256(manualEvidenceBytes)
             }
         }, JsonOptions);
         var signature = signer.Sign(manifestBytes);
@@ -94,6 +100,7 @@ public sealed class ComplianceExportService
             AddBytes(archive, "evidence-lineage.json", lineageBytes);
             AddBytes(archive, "control-lineage.json", controlLineageBytes);
             AddBytes(archive, "exceptions.json", exceptionsBytes);
+            AddBytes(archive, "manual-evidence.json", manualEvidenceBytes);
             AddJson(archive, "signature.json", signature);
         }
 

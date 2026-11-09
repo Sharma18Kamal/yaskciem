@@ -57,6 +57,7 @@ public class CloudEntitleDbContext : DbContext
     public DbSet<RemediationExecutionRecord> RemediationExecutions => Set<RemediationExecutionRecord>();
     public DbSet<RemediationRollbackRecord> RemediationRollbacks => Set<RemediationRollbackRecord>();
     public DbSet<RemediationAuditRecord> RemediationAuditRecords => Set<RemediationAuditRecord>();
+    public DbSet<ReportExecutionHistoryRecord> ReportExecutionHistory => Set<ReportExecutionHistoryRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -95,6 +96,16 @@ public class CloudEntitleDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.PlanId, x.Timestamp });
             entity.HasOne<RemediationPlanRecord>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ReportExecutionHistoryRecord>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Category).IsRequired().HasMaxLength(80);
+            entity.Property(x => x.Format).IsRequired().HasMaxLength(20);
+            entity.Property(x => x.OutputFileName).IsRequired().HasMaxLength(260);
+            entity.Property(x => x.Status).IsRequired().HasMaxLength(20);
+            entity.HasIndex(x => x.GeneratedAtUtc);
+            entity.HasIndex(x => new { x.Category, x.GeneratedAtUtc });
         });
 
         modelBuilder.Entity<CloudAccount>(entity =>

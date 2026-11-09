@@ -86,6 +86,46 @@ public sealed class ComplianceTests
     }
 
     [Fact]
+    public void ManualEvidence_ShouldBeClassifiedAndMustNotMakeUnassessedControlPass()
+    {
+        var context = new ComplianceContext(Array.Empty<CloudAccount>(), Array.Empty<CloudPrincipal>(),
+            Array.Empty<DomainEffectiveAccess>(), Array.Empty<DomainAccessPath>(), Array.Empty<RiskFindingModel>(),
+            Array.Empty<IdentityGovernanceRecord>(), Array.Empty<AuditEvent>())
+        {
+            ManualEvidence = new[]
+            {
+                new ComplianceEvidenceRecord(Guid.NewGuid(), "CIEM-BASE-001", "Access review record supplied by administrator",
+                    "ticket:REV-100", "security@example.invalid", DateTime.UtcNow)
+            }
+        };
+
+        var assessment = new ComplianceAssessmentService().Assess(context, ComplianceFramework.CiemBaseline);
+        var control = Assert.Single(assessment.Controls, item => item.ControlId == "CIEM-BASE-001");
+        var evidence = Assert.Single(control.EvidenceLineage);
+
+        Assert.Equal(ComplianceControlState.Partial, control.State);
+        Assert.Equal(1, control.ManualEvidenceCount);
+        Assert.Equal(0, control.AutomatedEvidenceCount);
+        Assert.Equal(ComplianceEvidenceSourceKind.Manual, evidence.SourceKind);
+        Assert.Equal(64, evidence.Sha256.Length);
+        Assert.Contains(control.Gaps, gap => gap.Contains("not been independently assessed", StringComparison.Ordinal));
+        Assert.False(assessment.IsCertification);
+    }
+
+    [Fact]
+    public void GdprCrosswalk_ShouldBeInformativeAndExplicitlyDisclaimCompliance()
+    {
+        var mappings = ComplianceStandardCatalog.GetMappings("CIEM-BASE-002",
+            new[] { ComplianceStandard.GdprAccessEvidence });
+        var mapping = Assert.Single(mappings);
+
+        Assert.Equal("Articles 5(1)(f), 25, 32", mapping.Reference);
+        Assert.Equal("Informative alignment", mapping.Relationship);
+        Assert.Contains("does not establish GDPR compliance", mapping.Rationale);
+        Assert.StartsWith("https://eur-lex.europa.eu/", mapping.SourceUri);
+    }
+
+    [Fact]
     public void ComplianceStandardEnum_ShouldPreservePersistedValuesAndAppendNewStandards()
     {
         Assert.Equal(0, (int)ComplianceStandard.CisControlsV8_1);
@@ -96,6 +136,7 @@ public sealed class ComplianceTests
         Assert.Equal(5, (int)ComplianceStandard.PciDss4_0_1);
         Assert.Equal(6, (int)ComplianceStandard.CisMicrosoftAzureFoundationsBenchmark2_0_0);
         Assert.Equal(7, (int)ComplianceStandard.CisAwsFoundationsBenchmark3_0_0);
+        Assert.Equal(8, (int)ComplianceStandard.GdprAccessEvidence);
         Assert.Equal(ComplianceStandard.CisControlsV8_1, JsonSerializer.Deserialize<ComplianceStandard>("0"));
         Assert.Equal(ComplianceStandard.Soc2TrustServices, JsonSerializer.Deserialize<ComplianceStandard>("3"));
         Assert.Equal(ComplianceStandard.NistCsf2_0, JsonSerializer.Deserialize<ComplianceStandard>("4"));
@@ -125,7 +166,7 @@ public sealed class ComplianceTests
         Assert.Equal(sourceUri, mapping.SourceUri);
         Assert.Equal(controlId, mapping.SourceControlId);
         Assert.Equal(ComplianceStandardCatalog.GetStandardVersion(standard), mapping.StandardVersion);
-        Assert.Equal("2026.11.2", mapping.MappingCatalogVersion);
+        Assert.Equal("2026.11.3", mapping.MappingCatalogVersion);
         Assert.Equal("Informative alignment", mapping.Relationship);
         Assert.Contains("does not", mapping.Rationale, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(ComplianceStandardCatalog.GetMappings("CIEM-BASE-001", new[] { standard }));
@@ -312,7 +353,7 @@ public sealed class ComplianceTests
 
         using var manifestJson = JsonDocument.Parse(manifest);
         using var assessmentJson = JsonDocument.Parse(exportedAssessment);
-        Assert.Equal("1.3", manifestJson.RootElement.GetProperty("schemaVersion").GetString());
+        Assert.Equal("1.4", manifestJson.RootElement.GetProperty("schemaVersion").GetString());
         Assert.Equal("EvidenceSnapshot", manifestJson.RootElement.GetProperty("assessmentType").GetString());
         Assert.False(manifestJson.RootElement.GetProperty("isCertification").GetBoolean());
         Assert.Equal(ComplianceStandardCatalog.MappingCatalogVersion, manifestJson.RootElement.GetProperty("mappingCatalogVersion").GetString());

@@ -21,7 +21,8 @@
             <WrapPanel Margin="0,0,0,16">
                 <Button Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" ToolTip="Scan all connected providers and selected accounts or Kubernetes contexts using read-only access."/>
                 <Button Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" MinWidth="100" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
-                <Button Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Choose a folder and save findings as JSON or CSV"/>
+                <ComboBox ItemsSource="{Binding ReportCategories}" SelectedItem="{Binding SelectedReportCategory, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="150" Margin="0,0,8,8" ToolTip="Choose an enterprise report category"/>
+                <Button Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Generate an evidence-based report as JSON, CSV, HTML, PDF, or Excel"/>
                 <Button Content="Discover accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Refresh connected-provider accounts and local Kubernetes contexts for scan selection."/>
                 <TextBlock Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,12,8" TextWrapping="Wrap" MaxWidth="180" ToolTip="Cloud CLI connection status"/>
                 <ComboBox ItemsSource="{Binding ComplianceFrameworks}" SelectedItem="{Binding SelectedComplianceFramework, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="145" Margin="0,0,8,8" ToolTip="Compliance framework for the exported evidence bundle"/>
@@ -39,6 +40,27 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <TextBlock Text="MANUALLY SUPPLIED EVIDENCE" Style="{StaticResource CardLabel}" Margin="0,14,0,4"/>
+                    <TextBlock Text="Manual evidence is retained with source classification and hash lineage. It is not independently verified and cannot by itself turn an unassessed control into a pass." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <Grid Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="0.8*"/><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="1*"/><ColumnDefinition Width="0.9*"/></Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" Text="{Binding ManualEvidenceControlId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Internal CIEM control ID" Margin="0,0,5,0"/>
+                        <TextBox Grid.Column="1" Text="{Binding ManualEvidenceSummary, UpdateSourceTrigger=PropertyChanged}" ToolTip="Evidence summary" Margin="5,0"/>
+                        <TextBox Grid.Column="2" Text="{Binding ManualEvidenceReference, UpdateSourceTrigger=PropertyChanged}" ToolTip="Document, ticket, or evidence reference" Margin="5,0"/>
+                        <TextBox Grid.Column="3" Text="{Binding ManualEvidenceRecordedBy, UpdateSourceTrigger=PropertyChanged}" ToolTip="Evidence recorded by" Margin="5,0,0,0"/>
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Add manual evidence" Command="{Binding AddManualComplianceEvidenceCommand}" IsEnabled="{Binding CanAddManualComplianceEvidence}" Style="{StaticResource QuietButton}" ToolTip="Add evidence to this local assessment draft. The evidence is not treated as automatically verified."/>
+                        <Button Content="Remove selected" Command="{Binding RemoveManualComplianceEvidenceCommand}" IsEnabled="{Binding CanRemoveManualComplianceEvidence}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Remove selected manual evidence from the local draft."/>
+                    </StackPanel>
+                    <DataGrid ItemsSource="{Binding ManualComplianceEvidenceDrafts}" SelectedItem="{Binding SelectedManualEvidence, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="130" Margin="0,6,0,0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Control" Binding="{Binding ControlId}" Width="110"/>
+                            <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="*"/>
+                            <DataGridTextColumn Header="Reference" Binding="{Binding Reference}" Width="170"/>
+                            <DataGridTextColumn Header="Recorded by" Binding="{Binding RecordedBy}" Width="140"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
                     <TextBlock Text="CONTROL EXCEPTIONS" Style="{StaticResource CardLabel}" Margin="0,14,0,4"/>
                     <Grid Margin="0,6,0,0">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
