@@ -65,6 +65,29 @@ public sealed partial class OrganizationViewModelTests
         Assert.False(vm.ContinuousFeedConsent);
     }
 
+    [Fact]
+    public async Task ContinuousFeeds_RescanUsesMatchingExistingScheduleAndRequiresRunScan()
+    {
+        using var fixture = new ContinuousFixture();
+        var vm = fixture.ViewModel;
+        await vm.SignInAsync();
+        await vm.RefreshContinuousFeedsAsync();
+        vm.SelectedContinuousFeed = Assert.Single(vm.ContinuousFeeds);
+        Assert.True(vm.CanRescanContinuousFeed);
+
+        await vm.RescanContinuousFeedAsync();
+        Assert.Equal(0, fixture.Api.QueueCalls);
+        Assert.Contains("No server scan schedule", vm.ContinuousFeedStatus);
+
+        var scheduleId = Guid.NewGuid();
+        fixture.Api.Schedules.Add(new(scheduleId, Guid.NewGuid(), vm.SelectedOrganization!.Id, CloudProvider.Aws,
+            "123456789012", "AWS", 60, 2, true, DateTime.UtcNow.AddHours(1), DateTime.UtcNow, DateTime.UtcNow, null));
+        await vm.RescanContinuousFeedAsync();
+        Assert.Equal(1, fixture.Api.QueueCalls);
+        Assert.Equal(scheduleId, fixture.Api.LastQueuedSchedule);
+        Assert.Contains("inventory/effective-access snapshot", vm.ContinuousFeedStatus);
+    }
+
     private sealed class ContinuousFixture : IDisposable
     {
         private readonly string _directory = Path.Combine(Environment.CurrentDirectory, ".test-continuous-" + Guid.NewGuid().ToString("N"));
@@ -78,14 +101,14 @@ public sealed partial class OrganizationViewModelTests
             Api = new(service, identity);
             ViewModel = new(new TestDemoDataService(), service, new TestSsoService(identity),
                 new TestLiveCloudScanService(CreateResult(Guid.NewGuid(), Guid.NewGuid())), new AuthenticatedOrganizationContext(),
-                sharedOrganizationApi: Api, sharedMonitoringApi: new TestMonitoringApi());
+                sharedOrganizationApi: Api, sharedMonitoringApi: new TestMonitoringApi(), sharedScanScheduleApi: Api);
             ViewModel.SignInTenantId = identity.TenantId;
         }
         public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
     }
 
     private sealed class ContinuousWorkspaceApi(OrganizationManagementService service, OrganizationIdentity identity)
-        : ISharedOrganizationApi, ISharedContinuousChangeFeedApi
+        : ISharedOrganizationApi, ISharedContinuousChangeFeedApi, ISharedScanScheduleApi
     {
         public ContinuousChangeFeedStatus State { get; private set; } = new("iam", CloudProvider.Aws, "123456789012", "client-bridge",
             Guid.NewGuid(), false, false, null, "Paused", 0, null, null, null, ContinuousChangeFeedValidation.UnknownCoverage());
@@ -93,6 +116,9 @@ public sealed partial class OrganizationViewModelTests
         public int Connects { get; private set; }
         public int Pauses { get; private set; }
         public int ChangeReads { get; private set; }
+        public int QueueCalls { get; private set; }
+        public Guid? LastQueuedSchedule { get; private set; }
+        public List<ScanScheduleDto> Schedules { get; } = [];
         public bool FailConnect { get; set; }
         public TaskCompletionSource<IReadOnlyList<ContinuousChangeFeedStatus>>? PendingStatus { get; set; }
         public Task<IReadOnlyList<ContinuousChangeFeedStatus>> GetContinuousChangeFeedsAsync(Guid organizationId, CancellationToken token = default)
@@ -109,6 +135,25 @@ public sealed partial class OrganizationViewModelTests
         { Pauses++; State = State with { Enabled = false, Connected = false, Health = "Paused" }; return Task.CompletedTask; }
         public Task<IReadOnlyList<StoredContinuousChange>> GetContinuousCloudChangesAsync(Guid organizationId, string alias, CancellationToken token = default)
         { ChangeReads++; return Task.FromResult<IReadOnlyList<StoredContinuousChange>>([]); }
+        public Task<IReadOnlyList<ScanScheduleDto>> GetScanSchedulesAsync(Guid organizationId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ScanScheduleDto>>(Schedules);
+        public Task<ScanScheduleDto> CreateScanScheduleAsync(Guid organizationId, CreateScanScheduleRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+        public Task<ScanScheduleDto> UpdateScanScheduleAsync(Guid organizationId, Guid scheduleId, UpdateScanScheduleRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+        public Task<ScanJobDto> QueueScanNowAsync(Guid organizationId, Guid scheduleId, CancellationToken cancellationToken = default)
+        {
+            QueueCalls++;
+            LastQueuedSchedule = scheduleId;
+            return Task.FromResult(new ScanJobDto(Guid.NewGuid(), scheduleId, Guid.NewGuid(), organizationId, CloudProvider.Aws,
+                "123456789012", "AWS", "Queued", 0, 2, DateTime.UtcNow, null, null, null, null, null, false, null));
+        }
+        public Task<IReadOnlyList<ScanJobDto>> GetScanJobsAsync(Guid organizationId, int limit = 50, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ScanJobDto>>([]);
+        public Task<ScanJobStatusDto> GetScanJobStatusAsync(Guid organizationId, Guid jobId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+        public Task CancelScanJobAsync(Guid organizationId, Guid jobId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
         public Task<IReadOnlyList<OrganizationProfile>> GetOrganizationsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(service.GetOrganizations());
         public Task<OrganizationWorkspaceDto> GetWorkspaceAsync(Guid id, CancellationToken cancellationToken = default)

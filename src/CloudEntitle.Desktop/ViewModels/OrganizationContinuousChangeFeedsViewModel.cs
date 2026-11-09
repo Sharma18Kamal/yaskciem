@@ -20,11 +20,14 @@ public sealed partial class OrganizationViewModel
     private AsyncRelayCommand? _connectContinuousFeed;
     private AsyncRelayCommand? _pauseContinuousFeed;
     private AsyncRelayCommand? _loadContinuousChanges;
+    private AsyncRelayCommand? _rescanContinuousFeed;
 
     private bool ContinuousContextMatches => _continuousOrganization == SelectedOrganization?.Id && _continuousIdentity == _identity;
     public bool CanReadContinuousFeeds => CanReadMonitoring && _sharedOrganizationApi is ISharedContinuousChangeFeedApi;
     public bool CanManageContinuousFeeds => CanReadContinuousFeeds && IsAllowed(OrganizationAction.ManageConnections)
         && IsAllowed(OrganizationAction.ManagePolicies);
+    public bool CanRescanContinuousFeed => CanReadContinuousFeeds && _sharedScanScheduleApi is not null
+        && SelectedContinuousFeed is not null && IsAllowed(OrganizationAction.RunScan);
     public IReadOnlyList<ContinuousChangeFeedStatus> ContinuousFeeds => ContinuousContextMatches ? _continuousFeeds : [];
     public IReadOnlyList<StoredContinuousChange> ContinuousChanges => ContinuousContextMatches ? _continuousChanges : [];
     public ContinuousChangeFeedStatus? SelectedContinuousFeed
@@ -42,6 +45,7 @@ public sealed partial class OrganizationViewModel
             ContinuousFeedResetSource = false;
             OnPropertyChanged(nameof(ContinuousChanges));
             OnPropertyChanged(nameof(ContinuousFeedCoverage));
+            OnPropertyChanged(nameof(CanRescanContinuousFeed));
         }
     }
     public IReadOnlyList<ChangeFeedCategoryCoverage> ContinuousFeedCoverage => SelectedContinuousFeed?.Coverage ?? [];
@@ -69,6 +73,7 @@ public sealed partial class OrganizationViewModel
     public AsyncRelayCommand ConnectContinuousFeedCommand => _connectContinuousFeed ??= new(ConnectContinuousFeedAsync);
     public AsyncRelayCommand PauseContinuousFeedCommand => _pauseContinuousFeed ??= new(PauseContinuousFeedAsync);
     public AsyncRelayCommand LoadContinuousChangesCommand => _loadContinuousChanges ??= new(LoadContinuousChangesAsync);
+    public AsyncRelayCommand RescanContinuousFeedCommand => _rescanContinuousFeed ??= new(RescanContinuousFeedAsync);
 
     public void ResetContinuousChangeFeeds()
     {
@@ -82,7 +87,8 @@ public sealed partial class OrganizationViewModel
         _continuousReset = false;
         foreach (var property in new[] { nameof(ContinuousFeeds), nameof(ContinuousChanges), nameof(SelectedContinuousFeed),
             nameof(ContinuousFeedCoverage), nameof(ContinuousFeedConsent), nameof(ContinuousFeedResetSource),
-            nameof(ContinuousFeedStatus), nameof(CanReadContinuousFeeds), nameof(CanManageContinuousFeeds) })
+            nameof(ContinuousFeedStatus), nameof(CanReadContinuousFeeds), nameof(CanManageContinuousFeeds),
+            nameof(CanRescanContinuousFeed) })
             OnPropertyChanged(property);
     }
 
@@ -144,13 +150,33 @@ public sealed partial class OrganizationViewModel
         return () => { _continuousChanges = changes; _continuousStatus = $"Loaded {changes.Count} saved normalized revisions; no live poll."; NotifyContinuousFeedState(); };
     });
 
-    private async Task RunContinuousOperationAsync(bool write,
-        Func<ISharedContinuousChangeFeedApi, Guid, string?, CancellationToken, Task<Action>> operation)
+    public Task RescanContinuousFeedAsync() => RunContinuousOperationAsync(false, async (_, organization, _, token) =>
     {
-        if ((write ? !CanManageContinuousFeeds : !CanReadContinuousFeeds) || SelectedOrganization is null
+        if (_sharedScanScheduleApi is null || SelectedContinuousFeed is not { } feed)
+            throw new InvalidOperationException("Select a feed with an available scan schedule.");
+        var schedules = await _sharedScanScheduleApi.GetScanSchedulesAsync(organization, token);
+        var matches = schedules.Where(item => item.Provider == feed.Provider
+            && item.ExternalAccountId.Equals(feed.AccountId, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (matches.Length == 0)
+            return () => SetContinuousStatus("No server scan schedule exists for this provider/account. Create one in Scheduled Scans before rescanning.");
+        if (matches.Length > 1)
+            return () => SetContinuousStatus("Multiple server scan schedules match this provider/account. Resolve the duplicate schedules before rescanning.");
+
+        var job = await _sharedScanScheduleApi.QueueScanNowAsync(organization, matches[0].ScheduleId, token);
+        return () => SetContinuousStatus($"Rescan job {job.JobId:D} queued. The server scan refreshes the existing inventory/effective-access snapshot and drift baseline.");
+    }, requiresScanPermission: true);
+
+    private async Task RunContinuousOperationAsync(bool write,
+        Func<ISharedContinuousChangeFeedApi, Guid, string?, CancellationToken, Task<Action>> operation,
+        bool requiresScanPermission = false)
+    {
+        if ((write ? !CanManageContinuousFeeds : requiresScanPermission ? !CanRescanContinuousFeed : !CanReadContinuousFeeds)
+            || SelectedOrganization is null
             || _sharedOrganizationApi is not ISharedContinuousChangeFeedApi api)
         {
-            SetContinuousStatus("Shared active organization and inventory/findings access are required; changes also require ManageConnections and ManagePolicies.");
+            SetContinuousStatus(requiresScanPermission
+                ? "Shared organization access and RunScan permission are required to rescan this account."
+                : "Shared active organization and inventory/findings access are required; changes also require ManageConnections and ManagePolicies.");
             return;
         }
         if (ContinuousFeedBusy) return;
@@ -197,7 +223,8 @@ public sealed partial class OrganizationViewModel
     private void NotifyContinuousFeedState()
     {
         foreach (var property in new[] { nameof(ContinuousFeeds), nameof(SelectedContinuousFeed), nameof(ContinuousFeedCoverage),
-            nameof(ContinuousChanges), nameof(ContinuousFeedStatus), nameof(ContinuousFeedConsent), nameof(ContinuousFeedResetSource) })
+            nameof(ContinuousChanges), nameof(ContinuousFeedStatus), nameof(ContinuousFeedConsent), nameof(ContinuousFeedResetSource),
+            nameof(CanRescanContinuousFeed) })
             OnPropertyChanged(property);
     }
 }

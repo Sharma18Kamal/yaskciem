@@ -44,6 +44,16 @@ cloud resources or connects a feed. Coverage remains source-reported and
 unverified, so a working bridge does not prove comprehensive all-cloud coverage
 or effective privilege escalation. Saved feed reads do not contact that bridge.
 
+The feed workspace's **Rescan this account** action queues an existing server
+scan schedule for the selected provider/account and requires `RunScan`. A
+completed scan can refresh its existing normalized inventory/effective-access
+baseline and produce drift events. Feed revisions contain identifiers and
+before/after hashes, not policy documents; they are not enough by themselves to
+recompute effective access, toxic combinations, or attack paths. The scheduled
+server executor currently does not evaluate toxic-combination or attack-path
+findings, so those results must not be inferred from a feed event or from a
+successful scheduled scan.
+
 The [Priority Two extension](../deployment/priority-two.md) compares selected saved
 permission documents and analyzes behavior using explicitly configured action,
 baseline and business-hours policy. Deduplicated potential review events reuse

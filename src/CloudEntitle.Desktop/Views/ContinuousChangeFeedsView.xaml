@@ -16,6 +16,9 @@
                 <Button Content="Pause" Command="{Binding PauseContinuousFeedCommand}"
                         IsEnabled="{Binding CanManageContinuousFeeds}" Padding="10,4" Margin="0,0,8,8" />
                 <Button Content="Load saved changes" Command="{Binding LoadContinuousChangesCommand}" Padding="10,4" Margin="0,0,8,8" />
+                <Button Content="Rescan this account" Command="{Binding RescanContinuousFeedCommand}"
+                        IsEnabled="{Binding CanRescanContinuousFeed}" Padding="10,4" Margin="0,0,8,8"
+                        ToolTip="Queue the existing server-side provider scan for this feed's account." />
             </WrapPanel>
             <TextBlock Text="{Binding ContinuousFeedStatus}" TextWrapping="Wrap" Margin="0,0,0,8" />
             <DataGrid ItemsSource="{Binding ContinuousFeeds}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MaxHeight="170">
