@@ -7,65 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'The License Server credential wizard requires Windows Credential Manager.' }
 
-$credentialWriterSource = @'
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-using System.Security;
-
-public static class YaskCredentialWriter
-{
-    private const uint GenericCredential = 1;
-    private const uint LocalMachinePersistence = 2;
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct NativeCredential
-    {
-        public uint Flags;
-        public uint Type;
-        [MarshalAs(UnmanagedType.LPWStr)] public string TargetName;
-        [MarshalAs(UnmanagedType.LPWStr)] public string Comment;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
-        public uint CredentialBlobSize;
-        public IntPtr CredentialBlob;
-        public uint Persist;
-        public uint AttributeCount;
-        public IntPtr Attributes;
-        [MarshalAs(UnmanagedType.LPWStr)] public string TargetAlias;
-        [MarshalAs(UnmanagedType.LPWStr)] public string UserName;
-    }
-
-    [DllImport("Advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CredWrite(ref NativeCredential credential, uint flags);
-
-    public static void Write(string targetName, string userName, SecureString secret)
-    {
-        IntPtr secretBuffer = IntPtr.Zero;
-        try
-        {
-            secretBuffer = Marshal.SecureStringToGlobalAllocUnicode(secret);
-            var credential = new NativeCredential
-            {
-                Type = GenericCredential,
-                TargetName = targetName,
-                Comment = "Configured by YASK-CIEM License Server setup",
-                CredentialBlobSize = checked((uint)(secret.Length * sizeof(char))),
-                CredentialBlob = secretBuffer,
-                Persist = LocalMachinePersistence,
-                UserName = userName
-            };
-            if (!CredWrite(ref credential, 0))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not write a secret to Windows Credential Manager.");
-        }
-        finally
-        {
-            if (secretBuffer != IntPtr.Zero) Marshal.ZeroFreeGlobalAllocUnicode(secretBuffer);
-        }
-    }
-}
-'@
-Add-Type -TypeDefinition $credentialWriterSource
+. (Join-Path $PSScriptRoot 'credential-writer.ps1')
 
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 Write-Host "This wizard writes secrets to Windows Credential Manager for '$currentIdentity'."

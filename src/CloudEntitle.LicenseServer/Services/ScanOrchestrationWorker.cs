@@ -7,7 +7,8 @@ public sealed class ScanOrchestrationWorker(
     IScanJobExecutor executor,
     ILogger<ScanOrchestrationWorker> logger,
     WorkerHealthRegistry workers,
-    OperationsMetrics metrics) : BackgroundService
+    OperationsMetrics metrics,
+    ISubscriptionService? subscriptions = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -41,6 +42,13 @@ public sealed class ScanOrchestrationWorker(
 
     private async Task ExecuteLeaseAsync(ScanJobLease lease, CancellationToken stoppingToken)
     {
+        if (subscriptions is not null
+            && !(await subscriptions.GetAsync(lease.Job.TenantId, false, stoppingToken)).CanUseLicensedFeatures)
+        {
+            await store.CompleteScanJobAttemptAsync(lease, "Failed", "Active trial or license required.", null, stoppingToken);
+            logger.LogWarning("Scheduled scan {JobId} blocked by expired or unregistered subscription.", lease.Job.JobId);
+            return;
+        }
         using var jobCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var execution = executor.ExecuteAsync(lease, jobCancellation.Token);
         ScanJobExecutionResult? result = null;

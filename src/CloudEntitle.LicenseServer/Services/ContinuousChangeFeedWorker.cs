@@ -3,7 +3,8 @@ using System.Text.Json;
 namespace CloudEntitle.LicenseServer.Services;
 
 public sealed class ContinuousChangeFeedWorker(SharedWorkspaceStore store, IConfiguration configuration,
-    IContinuousChangeBridge bridge, ILogger<ContinuousChangeFeedWorker> logger, WorkerHealthRegistry workers) : BackgroundService
+    IContinuousChangeBridge bridge, ILogger<ContinuousChangeFeedWorker> logger, WorkerHealthRegistry workers,
+    ISubscriptionService? subscriptions = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -11,7 +12,7 @@ public sealed class ContinuousChangeFeedWorker(SharedWorkspaceStore store, IConf
         {
             try
             {
-                var lease = await store.ClaimContinuousFeedAsync(stoppingToken);
+                    var lease = await store.ClaimContinuousFeedAsync(stoppingToken);
                 if (lease is null)
                 {
                     workers.Heartbeat("continuous-change-feeds", success: true);
@@ -36,6 +37,9 @@ public sealed class ContinuousChangeFeedWorker(SharedWorkspaceStore store, IConf
     {
         try
         {
+            if (subscriptions is not null
+                && !(await subscriptions.GetAsync(lease.TenantId, false, token)).CanUseLicensedFeatures)
+                throw new ChangeBridgeException("subscription_inactive");
             var source = ContinuousChangeSourceConfiguration.Resolve(configuration, lease.TenantId, lease.OrganizationId, lease.State.Alias);
             if (source is null) throw new ChangeBridgeException("server_source_disabled");
             if (source.ConfigurationSha256 != lease.ConfigurationSha256) throw new ChangeBridgeException("source_reset_required");

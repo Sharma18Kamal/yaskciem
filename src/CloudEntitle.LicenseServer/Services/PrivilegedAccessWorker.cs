@@ -5,7 +5,7 @@ using CloudEntitle.OrganizationManagement.Services;
 namespace CloudEntitle.LicenseServer.Services;
 
 public sealed class PrivilegedAccessWorker(SharedWorkspaceStore store, IConfiguration configuration, IAzurePimTransport transport,
-    ILogger<PrivilegedAccessWorker> logger, WorkerHealthRegistry? workers = null) : BackgroundService
+    ILogger<PrivilegedAccessWorker> logger, WorkerHealthRegistry? workers = null, ISubscriptionService? subscriptions = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -31,6 +31,12 @@ public sealed class PrivilegedAccessWorker(SharedWorkspaceStore store, IConfigur
                 if (saved is null || saved.Version != current.Version) continue;
                 if (current.Status == "Queued")
                 {
+                    if (subscriptions is not null
+                        && !(await subscriptions.GetAsync(work.TenantId, false, token)).CanUseLicensedFeatures)
+                    {
+                        logger.LogWarning("New JIT grant {RequestId} blocked by subscription; existing grants remain subject to revocation.", current.RequestId);
+                        continue;
+                    }
                     SharedWorkspaceEndpoints.ValidateJitTarget(configuration, work.TenantId, work.OrganizationId, current);
                     var service = new OrganizationManagementService(store.CreateOrganizationStore(work.TenantId));
                     var requester = new OrganizationIdentity(current.RequestedBy, current.RequestedBy.ToString("D"), work.TenantId.ToString("D"), "jit-requester");

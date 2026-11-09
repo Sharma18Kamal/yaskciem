@@ -8,14 +8,15 @@ namespace CloudEntitle.Desktop.Tests;
 public sealed class WorkspaceViewBindingTests
 {
     [Fact]
-    public void FreeEdition_ShouldNotGateWorkspaceOrCloudControlsOnLegacyTrialState()
+    public void ServerTrial_ShouldPreserveWorkspaceNavigationAndExposeRegistration()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         var document = XDocument.Load(Path.Combine(root, "src", "CloudEntitle.Desktop", "MainWindow.xaml"));
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
         Assert.Contains(document.Descendants(presentation + "TextBlock"),
             element => (string?)element.Attribute("Text") == "{Binding EditionDisplayName}");
-        Assert.DoesNotContain(document.Descendants().Attributes(), attribute => attribute.Value.Contains("Trial", StringComparison.Ordinal));
+        Assert.Contains(document.Descendants(presentation + "Button"),
+            element => (string?)element.Attribute("Command") == "{Binding StartTrialCommand}");
         foreach (var label in new[] { "Connect Cloud", "Settings" })
         {
             var button = Assert.Single(document.Descendants(presentation + "Button"),
@@ -27,6 +28,7 @@ public sealed class WorkspaceViewBindingTests
         var startup = File.ReadAllText(Path.Combine(root, "src", "CloudEntitle.Desktop", "App.xaml.cs"));
         Assert.DoesNotContain("TrialService", startup);
         Assert.DoesNotContain("InitializeTrial", startup);
+        Assert.Contains("LicensedCloudCommandRunner", startup);
         var window = File.ReadAllText(Path.Combine(root, "src", "CloudEntitle.Desktop", "MainWindow.xaml.cs"));
         Assert.DoesNotContain("TrialStatus", window);
     }
@@ -137,7 +139,7 @@ public sealed class WorkspaceViewBindingTests
             (string?)textBlock.Attribute("Text") == "{Binding ApplicationVersion, StringFormat=Version {0}}");
         var header = credit.Ancestors(presentation + "Border").First();
         Assert.Equal("0", (string?)header.Attribute("Grid.Row"));
-        Assert.Contains(header.Descendants(presentation + "StackPanel"), panel => (string?)panel.Attribute("Grid.Row") == "1");
+        Assert.Contains(header.Descendants(presentation + "WrapPanel"), panel => (string?)panel.Attribute("Grid.Row") == "1");
     }
 
     [Fact]

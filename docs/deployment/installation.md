@@ -1,19 +1,22 @@
 # Install YASK-CIEM on Windows
 
-## Current free standalone candidate: 1.0.0.64
+## Current server-managed trial candidate: 1.0.0.65
 
-The free standalone edition has no fourteen-day trial lock and does not require
-Azure backend provisioning or license activation. Legacy trial files are ignored
-and left untouched. Cloud and organization permissions are unchanged.
+Version 1.0.0.65 replaces the unlimited free edition with a server-managed 30-day
+trial. Configure the License Server HTTPS URL and Entra registrations using the
+[server setup guide](license-server-hosting.md), sign in under Organizations, then
+select **Start 30-day trial**. No live server is included or automatically deployed.
+Legacy trial files remain ignored; cloud and organization permissions are unchanged.
+After expiry or failed online validation, existing data remains readable/exportable,
+but new scans and privileged operations are blocked.
 
-- [Native MSI test candidate](../../artifacts/native-installers-1.0.0.64/YASK-CIEM-1.0.0.64.msi)
-- [Interactive Setup EXE test candidate](../../artifacts/native-installers-1.0.0.64/YASK-CIEM-Setup-1.0.0.64.exe)
-- [MSIX test candidate](../../artifacts/msix-1.0.0.64/YASK-CIEM-1.0.0.64.msix)
+- [Native MSI test candidate](../../artifacts/native-installers-1.0.0.65/YASK-CIEM-1.0.0.65.msi)
+- [Interactive Setup EXE test candidate](../../artifacts/native-installers-1.0.0.65/YASK-CIEM-Setup-1.0.0.65.exe)
 
 Close the app before installing. For an existing MSI installation, use the new
 MSI or native Setup EXE, not MSIX; switching package technologies is not an
-in-place MSI upgrade. Do not remove application data. Version 1.0.0.64 has
-persistent right-side scan progress and revised navigation/rendering behavior.
+in-place MSI upgrade. Do not remove application data. The 1.0.0.65 build retains
+the prior scan-progress, navigation, and milestone changes.
 
 These self-contained x64 packages include .NET 10 runtimes; no separate runtime
 installation is required. Native installation is per-machine and requires

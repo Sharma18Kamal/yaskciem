@@ -112,11 +112,12 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
     private readonly LiveResourceRiskGraphEvaluator _resourceRiskGraphEvaluator;
     private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly ICloudAuthenticationLauncher? _authenticationLauncher;
+    private readonly SubscriptionAccessService? _subscription;
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
     public event EventHandler? ScanCompleted;
 
-    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null, IPostureNotificationChannel? postureNotificationChannel = null, ICloudAuthenticationLauncher? authenticationLauncher = null, IToxicCombinationWorkspaceService? toxicCombinationWorkspace = null)
+    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null, IPostureNotificationChannel? postureNotificationChannel = null, ICloudAuthenticationLauncher? authenticationLauncher = null, IToxicCombinationWorkspaceService? toxicCombinationWorkspace = null, SubscriptionAccessService? subscription = null)
     {
         _providers = providers.ToArray();
         _resourceRiskGraphEvaluator = new LiveResourceRiskGraphEvaluator(toxicCombinationWorkspace);
@@ -125,6 +126,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
         _cloudConnectionState = cloudConnectionState;
         _postureNotificationChannel = postureNotificationChannel ?? new DisabledPostureNotificationChannel();
         _authenticationLauncher = authenticationLauncher;
+        _subscription = subscription;
     }
 
     public async Task<IReadOnlyList<LiveScanAccountRecord>> DiscoverAccountsAsync(CancellationToken cancellationToken = default)
@@ -178,6 +180,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
 
     public async Task<LiveCloudScanResult> ScanAsync(IReadOnlySet<string>? selectedAccountKeys, IProgress<LiveScanProgress>? progress, CancellationToken cancellationToken = default)
     {
+        if (_subscription is not null) await _subscription.RequireAsync(cancellationToken);
         await _scanGate.WaitAsync(cancellationToken);
         try
         {
@@ -191,6 +194,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
 
     public async Task<LiveCloudScanResult> ScanVerifiedAccountAsync(LiveScanAccountRecord account, CloudAccountVerification verification, CancellationToken cancellationToken = default)
     {
+        if (_subscription is not null) await _subscription.RequireAsync(cancellationToken);
         if (_authenticationLauncher is null)
             throw new InvalidOperationException("Verified-account scanning requires cloud identity verification.");
         if (!string.Equals(account.Provider, verification.Provider, StringComparison.OrdinalIgnoreCase)

@@ -81,7 +81,7 @@ public sealed class NavigationTests
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Access Reviews");
         Assert.Equal("YASK-CIEM", viewModel.ApplicationName);
         Assert.Equal("Cloud Accounts", viewModel.CloudAccountsNavigationItem.Title);
-        Assert.Equal("1.0.0.64", viewModel.ApplicationVersion);
+        Assert.Equal("1.0.0.65", viewModel.ApplicationVersion);
     }
 
     [Fact]
@@ -104,11 +104,11 @@ public sealed class NavigationTests
     }
 
     [Fact]
-    public void MainWindowViewModel_ShouldOfferFreeEditionWithoutTrialOrDeviceIdentityService()
+    public void MainWindowViewModel_ShouldRequireServerTrialWithoutLocalDeviceTracking()
     {
         var viewModel = new MainWindowViewModel(new TestNavigationService(new CloudAccountsViewModel(new NoopDemoDataService())));
 
-        Assert.Equal("Free standalone edition", viewModel.EditionDisplayName);
+        Assert.Equal("30-day trial: License Server required", viewModel.EditionDisplayName);
         Assert.Equal("Ready", viewModel.StatusMessage);
         Assert.DoesNotContain(typeof(MainWindowViewModel).GetConstructors().SelectMany(constructor => constructor.GetParameters()),
             parameter => parameter.ParameterType == typeof(ITrialService) || parameter.Name == "getDeviceIdentifier");

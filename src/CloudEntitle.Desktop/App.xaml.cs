@@ -75,7 +75,16 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IReportService, SqliteReportService>();
 		services.AddSingleton<ILiveScanHistoryStore, LocalLiveScanHistoryStore>();
 		services.AddSingleton<ILocalDataBackupService, LocalDataBackupService>();
-		services.AddSingleton<ICloudCommandRunner>(_ => new LoggingCloudCommandRunner(new ProcessCloudCommandRunner()));
+		services.AddSingleton<SubscriptionAccessService>(provider =>
+		{
+			var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(15) };
+			var endpoint = Environment.GetEnvironmentVariable("YASK_CIEM_API_BASE_URL");
+			if (Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+				client.BaseAddress = new Uri(uri.AbsoluteUri.TrimEnd('/') + "/");
+			return new SubscriptionAccessService(client, provider.GetRequiredService<IApiAccessTokenProvider>());
+		});
+		services.AddSingleton<ICloudCommandRunner>(provider => new LicensedCloudCommandRunner(
+			new LoggingCloudCommandRunner(new ProcessCloudCommandRunner()), provider.GetRequiredService<SubscriptionAccessService>()));
 		services.AddSingleton<CloudEntitle.Integration.Contracts.ICloudActivityCollector, CloudEntitle.Integration.Services.CloudActivityCollector>();
 		services.AddSingleton<CloudEntitle.Integration.Contracts.IEntitlementEvidenceCollector, CloudEntitle.Integration.Services.EntitlementEvidenceCollector>();
 		services.AddSingleton<CloudEntitle.Integration.Contracts.ITrustCredentialEvidenceCollector, CloudEntitle.Integration.Services.MultiCloudTrustCredentialEvidenceCollector>();

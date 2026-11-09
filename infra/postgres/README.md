@@ -19,6 +19,14 @@ Do not put a password in a checked-in SQL file. Supply credentials using the dep
 
 ## License Server Configuration
 
+Version 1.0.0.65 also requires `017-subscriptions.sql` after all earlier numbered
+migrations. It preserves one 30-day trial per Entra tenant using database time.
+Back up this table; never delete trial history to work around expiry. Runtime
+credentials may register a trial and read status but may not update dates, grant
+paid entitlements, delete or truncate subscriptions. Only the authorized licensing
+DBA may set an approved `LicensedUntilUtc`. Subscription storage is included in
+server readiness checks.
+
 Configure:
 
 - `ConnectionStrings__Postgres` with a PostgreSQL connection string using TLS validation, for example `Host=db.example.internal;Database=yask_ciem;Username=yask_ciem_service;Password=<secret>;SSL Mode=VerifyFull;Root Certificate=<trusted-ca-file>`.

@@ -97,16 +97,22 @@ public sealed class MainWindowViewModel : ObservableObject
     private object _currentViewModel;
     private NavigationItem _currentNavigationItem;
     private string _statusMessage = "Ready";
+    private readonly SubscriptionAccessService? _subscription;
 
     public MainWindowViewModel(
         INavigationService navigation,
         CloudConnectionState? cloudConnectionState = null,
-        ICloudAuthenticationLauncher? authenticationLauncher = null)
+        ICloudAuthenticationLauncher? authenticationLauncher = null,
+        SubscriptionAccessService? subscription = null)
     {
         _navigation = navigation;
         ScanProgress = navigation.CurrentViewModel as DashboardViewModel;
         _cloudConnectionState = cloudConnectionState ?? new CloudConnectionState();
         _authenticationLauncher = authenticationLauncher;
+        _subscription = subscription;
+        if (subscription is not null) subscription.Changed += (_, _) => OnPropertyChanged(nameof(EditionDisplayName));
+        StartTrialCommand = new AsyncRelayCommand(() => UpdateSubscriptionAsync(true));
+        RefreshLicenseCommand = new AsyncRelayCommand(() => UpdateSubscriptionAsync(false));
         _cloudConnectionState.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(CloudConnectionState.Status)) OnPropertyChanged(nameof(CloudConnectionStatus));
@@ -159,7 +165,22 @@ public sealed class MainWindowViewModel : ObservableObject
     public DashboardViewModel? ScanProgress { get; }
     public string ApplicationVersion => typeof(MainWindowViewModel).Assembly.GetName().Version?.ToString(4) ?? "0.0.0.0";
     public string DatabaseStatus => "Connected";
-    public string EditionDisplayName => "Free standalone edition";
+    public string EditionDisplayName => _subscription?.Status ?? "30-day trial: License Server required";
+    public AsyncRelayCommand StartTrialCommand { get; }
+    public AsyncRelayCommand RefreshLicenseCommand { get; }
+    private async Task UpdateSubscriptionAsync(bool register)
+    {
+        try
+        {
+            if (_subscription is null) throw new InvalidOperationException("License Server is not configured.");
+            await _subscription.RefreshAsync(register);
+            StatusMessage = EditionDisplayName;
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = $"License validation failed: {exception.Message}";
+        }
+    }
     public string CloudConnectionStatus => _cloudConnectionState.Status;
     public bool CanDisconnectCloud => _cloudConnectionState.HasConnections;
     public string DisconnectCloudButtonLabel => _cloudConnectionState.PendingProvider.HasValue ? "Cancel Sign-in" : "Disconnect Cloud";

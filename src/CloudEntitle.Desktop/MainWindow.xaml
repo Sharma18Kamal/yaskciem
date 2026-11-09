@@ -47,15 +47,17 @@
                         <TextBlock Text="Connect multiple cloud providers. Scans are read-only and do not modify cloud resources." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Border>
-                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,10,0,0">
-                    <Border Style="{StaticResource StatusPill}" ToolTip="Free standalone desktop edition. No trial expiry or license activation is required."><TextBlock Text="{Binding EditionDisplayName}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
+                <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,10,0,0">
+                    <Border Style="{StaticResource StatusPill}" MaxWidth="260" ToolTip="{Binding EditionDisplayName}"><TextBlock Text="{Binding EditionDisplayName}" TextWrapping="Wrap" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
+                    <Button Content="Start 30-day trial" Command="{Binding StartTrialCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Sign in under Organizations first. Starts the tenant's single server-managed trial; repeated requests do not reset it."/>
+                    <Button Content="Refresh license" Command="{Binding RefreshLicenseCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Read the current trial or license from the License Server without starting a new trial."/>
                     <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
                     <Button Content="{Binding DisconnectCloudButtonLabel}" Command="{Binding OpenCloudDisconnectCommand}" IsEnabled="{Binding CanDisconnectCloud}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Disconnect the active CLI or cancel a pending sign-in"/>
                     <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNavigationItem}" Style="{StaticResource QuietButton}" Margin="12,0,0,0" ToolTip="Open application settings"/>
                     <Button Content="−" Style="{StaticResource WindowChromeButton}" Margin="16,0,0,0" Click="MinimizeButton_Click" ToolTip="Minimize window" AutomationProperties.Name="Minimize window"/>
                     <Button Content="□" Style="{StaticResource WindowChromeButton}" Click="MaximizeButton_Click" ToolTip="Maximize or restore window" AutomationProperties.Name="Maximize or restore window"/>
                     <Button Content="×" Style="{StaticResource WindowChromeButton}" Click="CloseButton_Click" ToolTip="Close YASK-CIEM" AutomationProperties.Name="Close YASK-CIEM"/>
-                </StackPanel>
+                </WrapPanel>
             </Grid>
         </Border>
         <Grid Grid.Row="1">

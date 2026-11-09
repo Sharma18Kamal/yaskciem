@@ -237,6 +237,14 @@ public sealed class ContinuousChangeFeedTests
             scope.Tenant, scope.Organization, source with { AccountId = "999999999999" }, new(true, true)));
         var state = await store.ConfigureContinuousFeedAsync(scope.Tenant, scope.Organization, source, new(true, true));
         var lease = (await store.ClaimContinuousFeedAsync())!;
+        var subscription = new TestSubscription { Active = false };
+        var unlicensedBridge = new CountingBridge();
+        await new ContinuousChangeFeedWorker(store, config, unlicensedBridge,
+            NullLogger<ContinuousChangeFeedWorker>.Instance, new WorkerHealthRegistry(), subscription).PollLeaseAsync(lease, default);
+        Assert.Equal(0, unlicensedBridge.Calls);
+        Assert.Equal("subscription_inactive", (await store.GetContinuousFeedStatesAsync(scope.Tenant, scope.Organization)).Single().State.FailureCode);
+        await Due(database.ConnectionString);
+        lease = (await store.ClaimContinuousFeedAsync())!;
         config[$"{Root(scope.Tenant, scope.Organization)}:Connected"] = "false";
         var bridge = new CountingBridge();
         var worker = new ContinuousChangeFeedWorker(store, config, bridge, NullLogger<ContinuousChangeFeedWorker>.Instance, new WorkerHealthRegistry());

@@ -1,0 +1,13 @@
+@baseUrl = https://localhost:5081
+@accessToken = replace-with-authorized-Entra-access-token
+
+### Read status without registering a trial
+GET {{baseUrl}}/api/v1/subscription
+Authorization: Bearer {{accessToken}}
+
+### Explicitly start the tenant's single 30-day trial (idempotent)
+POST {{baseUrl}}/api/v1/subscription/trial
+Authorization: Bearer {{accessToken}}
+
+### Anonymous requests must return 401
+GET {{baseUrl}}/api/v1/subscription

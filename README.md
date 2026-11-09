@@ -9,7 +9,7 @@ This repository was initialized from the project brief in `CIEM-COmpact-prompt.d
 - Opt-in desktop administrator role/policy writes with explicit approval, verification and guarded rollback
 - WPF desktop client using .NET 10, MVVM, EF Core, SQLite, and Serilog
 - Clean Architecture with provider-specific adapters and a shared normalization/risk model
-- Free standalone desktop edition, without a trial expiry or license-activation requirement
+- Server-managed 30-day trial; existing data remains readable/exportable after expiry
 - JSON and CSV report export from the persisted findings database
 
 ## Current implementation
@@ -66,4 +66,4 @@ For installation instructions for released Windows packages, see [Install YASK-C
 4. Build with `dotnet build src/CloudEntitle.Desktop/CloudEntitle.Desktop.csproj`.
 5. Test with `dotnet test CloudEntitle.sln`.
 
-The desktop starts as **Free standalone edition**. It does not create or read local trial state, collect a device identifier for licensing, or lock workspace/cloud controls after fourteen days. Legacy trial files from older versions are left untouched and ignored. Existing scan data, settings and cloud permissions are preserved. Central organization features still require their separately configured services; free desktop access does not grant cloud or organization permissions. Public release still requires the installed-package and real-cloud acceptance in the [release checklist](docs/deployment/release.md). No cloud write operations are performed by the current discovery adapters.
+Version **1.0.0.65** replaces the unlimited free edition with a **server-managed 30-day trial**, registered once per authenticated Entra tenant. Configure the HTTPS License Server and Entra public-client/API registrations, sign in under Organizations, then select **Start 30-day trial**. The server persists the original registration and evaluates expiry using its database clock; reinstalling or changing the desktop clock does not reset it. New scans, provider collection, and privileged actions require online validation. Existing local data, reports, Demo Mode, and server reads remain available after expiry; server-side revocation/reconciliation continues. Legacy local trial files are ignored. Trial expiry does not remove cloud permissions or replace organization authorization. See [server setup](docs/deployment/license-server-hosting.md). Public release still requires the installed-package and real-cloud acceptance in the [release checklist](docs/deployment/release.md).

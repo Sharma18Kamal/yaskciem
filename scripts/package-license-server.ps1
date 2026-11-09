@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$PackageVersion = '1.0.0.48',
+    [string]$PackageVersion = '1.0.0.65',
     [string]$OutputPath,
     [string]$Runtime = 'win-x64'
 )
@@ -43,16 +43,20 @@ try {
         --configfile $nugetConfig --output $publishDirectory
     if ($LASTEXITCODE -ne 0) { throw "License Server publish failed with exit code $LASTEXITCODE." }
 
-    Copy-Item -LiteralPath $schemaPath -Destination $schemaDirectory
+    Get-ChildItem -LiteralPath (Split-Path -Parent $schemaPath) -Filter '*.sql' |
+        Where-Object Name -Match '^\d{3}-' |
+        Copy-Item -Destination $schemaDirectory
     Copy-Item -LiteralPath $settingsTemplate -Destination (Join-Path $configDirectory 'license-server.settings.example.json')
     Copy-Item -LiteralPath $archiveWizard -Destination $scriptsDirectory
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'credential-writer.ps1') -Destination $scriptsDirectory
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'configure-license-server.ps1') -Destination $scriptsDirectory
     Copy-Item -LiteralPath $deploymentGuide -Destination (Join-Path $bundleRoot 'README.md')
 
     $manifest = [pscustomobject]@{
         Product = 'YASK-CIEM Self-Hosted License Server'
         Version = $PackageVersion
         Runtime = $Runtime
-        Includes = @('Self-contained License Server publish output', 'PostgreSQL schema', 'Non-secret configuration template', 'Archive Credential Manager setup wizard', 'Deployment guide')
+        Includes = @('Self-contained License Server publish output', 'All numbered PostgreSQL migrations', 'Non-secret configuration template', 'Server and archive Credential Manager setup wizards', 'Deployment guide')
         ExternalPrerequisites = @('PostgreSQL 15+', 'S3-compatible Object Lock COMPLIANCE archive', 'Microsoft Entra API app registration')
         ContainsSecrets = $false
     } | ConvertTo-Json -Depth 4
@@ -70,4 +74,3 @@ catch {
     if (Test-Path $outputDirectory) { Remove-Item -LiteralPath $outputDirectory -Recurse -Force }
     throw
 }
-*** End Patch

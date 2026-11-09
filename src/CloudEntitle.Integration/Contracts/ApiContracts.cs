@@ -17,6 +17,7 @@ public sealed record ApiReadinessResponse(string Status, bool DatabaseReady, boo
     public bool WorkersReady { get; init; }
     public bool AuditStorageReady { get; init; }
     public bool ProductionReady { get; init; }
+    public bool SubscriptionStorageReady { get; init; }
     public string AuditStorageDetails { get; init; } = string.Empty;
     public bool AuditArchiveReady { get; init; }
     public string AuditArchiveDetails { get; init; } = string.Empty;

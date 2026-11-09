@@ -149,14 +149,14 @@ which remains on hold. Passing tests does not certify the installed package.
 - Install from the `.appinstaller` feed, publish a higher package version at the same package URL, and verify on-launch/background update behavior and user-data preservation.
 - Confirm `az`, `aws`, and `gcloud` missing, unauthenticated, and authenticated states are handled without crashing; verify discovery remains read-only.
 - Confirm findings, inventory and settings persist at their documented locations and JSON/CSV report export works.
-- Confirm the free edition stays usable after fourteen days and ignores missing, expired and damaged legacy trial files without changing or deleting them.
+- Confirm tenant trial registration is idempotent and expires exactly 30 days after its original server timestamp; reinstall and desktop clock changes must not restart it. After expiry or server failure, confirm new scans/grants are blocked, data viewing/export remains available, and server revocation continues.
 - Verify the installed build’s logs contain no credential values and that configured API security headers are present.
 
 ## Release blockers
 
 - Direct distribution requires trusted production signing; Store-distributed MSIX is signed by Microsoft on submission and must match the reserved Store identity. CI intentionally produces unsigned QA artifacts only.
 - Direct MSIX automatic updates require stable HTTPS hosting for the signed MSIX and `.appinstaller` feed; Store-managed MSIX uses the Store update channel instead. The per-user ZIP installer has no automatic update mechanism.
-- Free standalone behavior is implemented; installed upgrade acceptance must verify legacy trial state cannot lock the app. Do not advertise paid entitlements or hosted services as included.
+- Version 1.0.0.65 uses a server-managed trial, not unlimited free access. Deployment acceptance must verify the configured HTTPS server, Entra sign-in, trial expiry and authorized paid-entitlement provisioning. Hosted services are not bundled with the desktop.
 - Complete the privacy policy's publisher/contact/address placeholders and publish the reviewed policy and support details for the Store listing.
 - Real cloud acceptance testing requires isolated Azure, AWS, and GCP test accounts with least-privilege read-only identities and authenticated CLI sessions.
 - The current source and native candidate target .NET 10 LTS. Installed-package acceptance on the supported Windows matrix remains required; passing build/unit tests alone does not validate deployment.

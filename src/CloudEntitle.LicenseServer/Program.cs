@@ -12,7 +12,10 @@ using System.Security.Claims;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHealthChecks()
-	.AddCheck<OperationsReadinessHealthCheck>("operations-ready", tags: ["ready"]);
+	.AddCheck<OperationsReadinessHealthCheck>("operations-ready", tags: ["ready"])
+	.AddCheck<SubscriptionReadinessHealthCheck>("subscriptions-ready", tags: ["ready"]);
+builder.Services.AddSingleton<SubscriptionReadinessHealthCheck>();
+builder.Services.AddProblemDetails();
 var operationsMetrics = new OperationsMetrics();
 builder.Services.AddSingleton(operationsMetrics);
 var workerHealth = new WorkerHealthRegistry();
@@ -21,8 +24,12 @@ var auditArchiveStatus = new AuditArchiveStatus();
 builder.Services.AddSingleton(auditArchiveStatus);
 var postgresConnectionString = builder.Configuration.GetConnectionString("Postgres");
 if (string.IsNullOrWhiteSpace(postgresConnectionString))
+	postgresConnectionString = WindowsGenericCredentialStore.Read(
+		builder.Configuration["DatabaseCredentialTarget"] ?? "YASK-CIEM/LicenseServer/Runtime/Postgres")?.Secret;
+if (string.IsNullOrWhiteSpace(postgresConnectionString))
 	throw new InvalidOperationException("Configure ConnectionStrings:Postgres before starting the License Server.");
 using var postgresDataSource = new NpgsqlDataSourceBuilder(postgresConnectionString).Build();
+builder.Services.AddSingleton<ISubscriptionService>(new SubscriptionService(postgresDataSource));
 
 var entraConfiguration = builder.Configuration.GetSection("AzureAd");
 var apiClientId = entraConfiguration["ClientId"];
@@ -59,6 +66,15 @@ builder.Services.AddAuthorization(options =>
 var auditRetentionDays = builder.Configuration.GetValue("AuditRetention:MinimumRetentionDays", 2555);
 IAuditRetentionStore auditStore;
 var auditProvider = builder.Configuration["AuditRetention:Provider"];
+var integrityCredentialTarget = builder.Configuration["AuditRetention:IntegrityCredentialTarget"];
+if (!string.IsNullOrWhiteSpace(integrityCredentialTarget))
+{
+	var keyId = builder.Configuration["AuditRetention:IntegrityKeyId"]
+		?? throw new InvalidOperationException("Configure the audit integrity key ID.");
+	var secret = WindowsGenericCredentialStore.Read(integrityCredentialTarget)?.Secret
+		?? throw new InvalidOperationException("The configured audit integrity credential is unavailable.");
+	builder.Configuration[$"AuditRetention:IntegrityKeys:{keyId}"] = secret;
+}
 var integrityKeys = AuditIntegrityKeyRing.FromConfiguration(builder.Configuration);
 var integrityKeyBytes = integrityKeys?.CopyCurrentKey();
 if (integrityKeys is not null) builder.Services.AddSingleton(integrityKeys);
@@ -95,7 +111,8 @@ builder.Services.AddHostedService(serviceProvider => new ScanOrchestrationWorker
 	sharedWorkspaceStore, serviceProvider.GetRequiredService<IScanJobExecutor>(),
 	serviceProvider.GetRequiredService<ILogger<ScanOrchestrationWorker>>(),
 	serviceProvider.GetRequiredService<WorkerHealthRegistry>(),
-	serviceProvider.GetRequiredService<OperationsMetrics>()));
+	serviceProvider.GetRequiredService<OperationsMetrics>(),
+	serviceProvider.GetRequiredService<ISubscriptionService>()));
 builder.Services.AddSingleton<ICentralNotificationTransport, CentralWebhookTransport>();
 builder.Services.AddSingleton<AzurePimTransport>();
 builder.Services.AddSingleton<IAzurePimTransport>(serviceProvider => new MultiCloudJitTransport(
@@ -202,8 +219,11 @@ app.Use(async (context, next) =>
 });
 app.UseMiddleware<ApiRequestMetricsMiddleware>();
 app.UseOperationsConsole();
+app.UseExceptionHandler();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<SubscriptionMiddleware>();
+app.MapSubscriptionEndpoints();
 
 app.MapHealthChecks("/health");
 app.MapGet("/health/live", () => Results.Ok(new { status = "Healthy" })).AllowAnonymous();
@@ -217,7 +237,7 @@ app.MapGet("/metrics", (OperationsMetrics metrics) =>
 
 app.MapGet("/api/v1/health", () => Results.Ok(new ApiHealthResponse("Healthy", ApiContractVersion.Current, DateTime.UtcNow))).AllowAnonymous();
 app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, SharedWorkspaceStore workspaceStore,
-	AuditArchiveStatus archiveStatus, CancellationToken cancellationToken) =>
+	AuditArchiveStatus archiveStatus, SubscriptionReadinessHealthCheck subscriptionHealth, CancellationToken cancellationToken) =>
 {
 	var audit = await retentionStore.CheckReadinessAsync(cancellationToken);
 	var workspaceReady = await workspaceStore.IsReadyAsync(cancellationToken);
@@ -233,7 +253,9 @@ app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, Shar
 	var queueReady = snapshot is not null
 		&& snapshot.OldestQueuedScanSeconds <= builder.Configuration.GetValue("Operations:Readiness:MaxQueueAgeSeconds", 3600)
 		&& snapshot.QueuedScanJobs <= builder.Configuration.GetValue("Operations:Readiness:MaxQueueDepth", 1000);
-	var productionReady = audit.Ready && audit.ProductionReady && workspaceReady && operationsReady && workersReady && queueReady && archive.Ready;
+	var subscriptionReady = (await subscriptionHealth.CheckHealthAsync(new(), cancellationToken)).Status
+		== Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy;
+	var productionReady = audit.Ready && audit.ProductionReady && workspaceReady && operationsReady && workersReady && queueReady && archive.Ready && subscriptionReady;
 	var response = new ApiReadinessResponse(productionReady ? "Ready" : "NotReady",
 		audit.Ready && workspaceReady && operationsReady, productionReady, ApiContractVersion.Current)
 	{
@@ -242,6 +264,7 @@ app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, Shar
 		QueueReady = queueReady,
 		WorkersReady = workersReady,
 		ProductionReady = productionReady,
+		SubscriptionStorageReady = subscriptionReady,
 		AuditStorageDetails = workspaceReady ? audit.Details : $"{audit.Details} PostgreSQL shared-workspace schema is unavailable.",
 		AuditArchiveReady = archive.Ready,
 		AuditArchiveDetails = archive.Details,
