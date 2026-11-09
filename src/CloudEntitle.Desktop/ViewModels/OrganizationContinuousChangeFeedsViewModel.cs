@@ -68,6 +68,7 @@ public sealed partial class OrganizationViewModel
         + "Client administrator must provision and authorize these resources, configure exact IAM/trust/key categories, backfill and gaps, "
         + "then ask the server operator to configure an HTTPS allowlisted alias and server-only secret. "
         + "Refresh status, select alias, explicitly consent and enable/connect. Pause stops future polls. "
+        + "Azure administrator setup and safe smoke-test steps are documented in docs/continuous-change-feeds.md. "
         + "This application creates no provider resources and does not claim native polling or full coverage.";
     public AsyncRelayCommand RefreshContinuousFeedsCommand => _refreshContinuousFeeds ??= new(RefreshContinuousFeedsAsync);
     public AsyncRelayCommand ConnectContinuousFeedCommand => _connectContinuousFeed ??= new(ConnectContinuousFeedAsync);
