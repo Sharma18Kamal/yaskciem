@@ -983,7 +983,7 @@
                                     </DataGrid.Columns>
                                 </DataGrid>
                                 <TextBlock Text="Multi-cloud JIT - Azure PIM / AWS client-owned broker / GCP PAM" FontWeight="Bold" Margin="0,16,0,6"/>
-                                <TextBlock Text="Connect server-allowlisted targets. AWS requires a client-owned native bounded human-session broker, not direct STS issuance. GCP uses native PAM and a configured requester-to-human mapping; native policies may require additional approvals. Two distinct non-requester approvers; standard at most 60 minutes and shorter emergency at most 15. Native expiration is independent of this app." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
+                                <TextBlock Text="Connect server-allowlisted targets. AWS requires a client-owned native bounded human-session broker, not direct STS issuance. GCP uses native PAM and a configured requester-to-human mapping; native policies may require additional approvals. One or two distinct non-requester approvals are configurable (default: two). Each request shows a low-confidence screening score, not a full provider permission-risk evaluation. Standard at most 60 minutes and shorter emergency at most 15. Native expiration is independent of this app." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
                                 <WrapPanel Margin="0,8,0,0">
                                     <TextBox Text="{Binding JitTarget, UpdateSourceTrigger=PropertyChanged}" Width="150" ToolTip="Client-configured Azure/AWS/GCP target alias, not a URL, role identifier, arbitrary principal or secret."/>
                                     <TextBox Text="{Binding JitDurationMinutes, UpdateSourceTrigger=PropertyChanged}" Width="60" Margin="8,0,0,0" ToolTip="Requested minutes: standard 1-60, emergency 1-15; the server can enforce a smaller maximum."/>
@@ -997,8 +997,8 @@
                                     <Button Content="Reject selected" Command="{Binding RejectJitCommand}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Reject an unactivated request as a configured non-requester approver. No native access is changed."/>
                                     <Button Content="Read JIT audit" Command="{Binding JitAuditCommand}" Margin="8,0,0,0" Style="{StaticResource QuietButton}" ToolTip="Read the selected request's append-only audit events. DBAs can alter storage; this is not a WORM archive."/>
                                 </WrapPanel>
-                                <CheckBox Content="I authorize live activation of my selected, dual-approved JIT request" IsChecked="{Binding JitLiveConsent}" Margin="0,8,0,0" ToolTip="One-time explicit consent to the saved provider's bounded human grant. Target and duration are fixed by the approved request; consent resets after use or selection changes."/>
-                                <Button Content="Activate selected JIT request" Command="{Binding ActivateJitCommand}" HorizontalAlignment="Left" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Requester-only activation after two approvals. The server verifies configuration/authorization and uses a fixed UTC expiry; unknown submission outcomes are reconciled, never blindly retried."/>
+                                <CheckBox Content="I authorize live activation of my selected, approved JIT request" IsChecked="{Binding JitLiveConsent}" Margin="0,8,0,0" ToolTip="One-time explicit consent to the saved provider's bounded human grant. Target and duration are fixed by the approved request; consent resets after use or selection changes."/>
+                                <Button Content="Activate selected JIT request" Command="{Binding ActivateJitCommand}" HorizontalAlignment="Left" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Requester-only activation after the saved approval threshold. The server verifies configuration/authorization and uses a fixed UTC expiry; unknown submission outcomes are reconciled, never blindly retried."/>
                                 <CheckBox Content="I authorize ending/cancelling the selected grant now" IsChecked="{Binding JitRevokeConsent}" Margin="0,8,0,0" ToolTip="Requester or one current configured authorized approver may end access with reason and saved version. Queued/unknown is not verified revocation. Consent resets after use/selection changes."/>
                                 <WrapPanel Margin="0,8,0,0">
                                     <Button Content="End / cancel selected JIT access" Command="{Binding RevokeJitCommand}" Style="{StaticResource QuietButton}" ToolTip="Requester or one current configured authorized approver ends this exact grant with reason, current version and explicit consent. Unissued requests cancel without cloud calls; queued or unknown revocation is not verified removal."/>
@@ -1011,10 +1011,18 @@
                                         <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="80"/>
                                         <DataGridTextColumn Header="State" Binding="{Binding Status}" Width="120"/>
                                         <DataGridTextColumn Header="Minutes" Binding="{Binding DurationMinutes}" Width="60"/>
+                                        <DataGridTextColumn Header="Approvals" Binding="{Binding ApprovedBy.Count}" Width="75"/>
+                                        <DataGridTextColumn Header="Required" Binding="{Binding RequiredApprovals}" Width="65"/>
+                                        <DataGridTextColumn Header="Screening risk" Binding="{Binding RiskAssessment.RiskScore}" Width="100"/>
+                                        <DataGridTextColumn Header="Screening severity" Binding="{Binding RiskAssessment.Severity}" Width="115"/>
+                                        <DataGridTextColumn Header="Confidence" Binding="{Binding RiskAssessment.Confidence}" Width="85"/>
                                         <DataGridTextColumn Header="Expires UTC" Binding="{Binding ExpiresAtUtc, StringFormat={}{0:u}}" Width="170"/>
+                                        <DataGridTextColumn Header="Next revoke retry UTC" Binding="{Binding NextRevocationAttemptAtUtc, StringFormat={}{0:u}}" Width="170"/>
+                                        <DataGridTextColumn Header="Revoke attempts" Binding="{Binding RevocationAttemptCount}" Width="105"/>
                                         <DataGridTextColumn Header="Verification issue" Binding="{Binding FailureCode}" Width="*"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                                <TextBlock Text="{Binding SelectedJitRiskDetails}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
                                 <DataGrid ItemsSource="{Binding JitAudit}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="140" Margin="0,8,0,0">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="UTC" Binding="{Binding AtUtc, StringFormat={}{0:u}}" Width="170"/>

@@ -39,6 +39,7 @@
     <EmbeddedResource Include="..\..\infra\postgres\012-break-glass-reports.sql" LogicalName="CloudEntitle.LicenseServer.BreakGlassSchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\013-continuous-change-feeds.sql" LogicalName="CloudEntitle.LicenseServer.ContinuousChangeFeedSchema.sql" />
     <EmbeddedResource Include="..\..\infra\postgres\014-authoritative-decisions.sql" LogicalName="CloudEntitle.LicenseServer.AuthoritativeDecisionSchema.sql" />
+    <EmbeddedResource Include="..\..\infra\postgres\015-jit-safety-guards.sql" LogicalName="CloudEntitle.LicenseServer.JitSafetyGuardsSchema.sql" />
   </ItemGroup>
 
   <Target Name="BuildOperationsConsole" BeforeTargets="PrepareForBuild" Condition="'$(BuildWebConsole)' == 'true'">

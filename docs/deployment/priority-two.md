@@ -14,7 +14,7 @@ Readiness checks JIT tables, the valid status/time index and enabled audit guard
 | Capability | Implemented boundary |
 |---|---|
 | Multi-cloud JIT | Azure native PIM, client-owned AWS human-session broker protocol (not a native AWS adapter), GCP native PAM with explicit human mapping; two non-requester approvals, activation consent, exact-grant early revocation and durable audit |
-| Emergency access | Online emergency JIT retains both approvals and shorter duration; separate client-owned post-outage break-glass reporting/review does not issue access |
+| Emergency access | Online emergency JIT retains the configured approval threshold and shorter duration; separate client-owned post-outage break-glass reporting/review does not issue access |
 | Change monitoring | Existing scan drift, saved comparisons, on-demand trust/credential observations and opt-in durable Azure/AWS/GCP client-bridge feeds; source-reported coverage/gaps remain unverified |
 | Behavior | First-observed configured privileged actions, source-enriched unusual countries, configured permission-change bursts and privileged calls outside business hours |
 | Decision transitions | Native GCP v3beta Preview capture for project setIamPolicy only; exact-context NOT_GRANTED-to-GRANTED IAM decision confirmation when complete provider evidence passes the gate; AWS/Azure remain Unsupported |
@@ -58,7 +58,8 @@ Configure a bounded target through the server configuration/secret provider:
         "<organization-guid>": {
           "TenantId": "<same-tenant-guid>",
           "Enabled": false,
-          "ApproverIds": ["<manager-object-id>", "<security-object-id>"],
+        "RequiredApprovals": 2,
+        "ApproverIds": ["<manager-object-id>", "<security-object-id>"],
           "Targets": {
             "investigation": {
               "SubscriptionId": "<bound-subscription-guid>",
@@ -85,10 +86,14 @@ revocation continue for outstanding grants; retain native read/revoke credential
 until outcomes are resolved. Removing the requester from organization membership
 does not stop a current configured authorized security approver from revoking.
 
-Both configured approvers must be active organization members with
+The approval threshold is configurable from one to two (default two), and the
+configured approver list must contain at least that many distinct identities.
+Every approver must be an active organization member with
 ManageRemediations, ViewInventory and ViewFindings and use delegated
 `access_as_user` authentication for decisions. Neither can request access
-under this fixed two-approver policy. Requesters need ViewInventory/ViewFindings
+for their own request. The threshold is snapshotted with each request, so
+configuration changes do not silently reinterpret an in-flight approval.
+Requesters need ViewInventory/ViewFindings
 and delegated `access_as_user` authentication; the target is always their Entra
 object ID, never a submitted arbitrary user/device/service principal.
 Manager/security relationships are explicitly configured object IDs, not guessed
@@ -99,18 +104,32 @@ In Organizations:
 1. Enter the target alias, reason and requested minutes; choose Emergency only
    when appropriate. Standard maximum is 60 minutes; emergency maximum is
    smaller than the standard maximum and no more than 15.
-2. Request access. Each approver refreshes, selects the request and records a
-   justified approval. Duplicate/self approvals and stale versions are rejected.
-3. The requester refreshes, selects the dual-approved request, ticks one-time
+2. Request access. Each required approver refreshes, selects the request and
+   records a justified approval. Duplicate/self approvals and stale versions are rejected.
+   The request displays a low-confidence screening score based on configured
+   scope, duration and emergency status; this is not a full provider permission
+   evaluation.
+3. The requester refreshes, selects the approved request, ticks one-time
    live consent and activates. All approvals/activation must occur within 30
    minutes of the request. Changed configuration, membership or bindings block
    queued activation when the worker rechecks.
-4. Refresh JIT requests and read audit to observe native outcomes.
+4. Refresh JIT requests and read audit to observe native outcomes. A matching
+   provider read that still shows the exact grant active may permit a revocation
+   retry with bounded exponential backoff. Unknown, pending, expired or
+   not-found observations never trigger another mutation. Revocation remains
+   unverified until provider read-back confirms it.
 5. To end access early, select the latest request, enter a reason, tick the
    separate **ending/cancelling** consent and choose **End / cancel**. The
    requester may end their own request; either current configured approver with
    the required organization permissions may revoke without a second approval.
    Stale version, missing consent/reason and unauthorized actors are rejected.
+
+The database migration `015-jit-safety-guards.sql` prevents duplicate
+outstanding grants for the same requester, provider account, scope and role.
+If it detects pre-existing duplicates, it stops without deleting records;
+verify provider state and resolve them before reapplying the migration. Failed
+grant/revocation reconciliation emits high-severity operational events and
+remains visible through existing notification and JIT status surfaces.
 
 The server uses PIM `AdminAssign` to create a temporary **active** Azure resource
 role schedule. This is not PIM self-activation of an existing eligible schedule,
@@ -131,7 +150,7 @@ Network timeouts, crashes and uncertain submissions are reconciled using GET,
 must inspect Azure and resolve it; native deletion is not automatically guessed.
 
 Monitor the `privileged-access` worker heartbeat and `jit.expirypending`,
-`jit.outcomeunknown` and `jit.failed` events. Native expiration removes only this
+`jit.outcomeunknown`, `jit.grant_failed` and `jit.revocation_unverified` events. Native expiration removes only this
 schedule, not independent existing grants or already obtained tokens/sessions.
 Clients must test actual authorization expiry, provider propagation and session
 behavior. Emergency requests also emit high-severity governance events.

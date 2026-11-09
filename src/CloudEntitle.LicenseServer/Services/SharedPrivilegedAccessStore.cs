@@ -122,10 +122,19 @@ public sealed partial class SharedWorkspaceStore
         insert.Parameters.AddWithValue("now", audit.AtUtc);
         insert.Parameters.AddWithValue("payload", JsonSerializer.Serialize(audit, JsonOptions));
         await insert.ExecuteNonQueryAsync(token);
+        var operationalEventType = current.Status switch
+        {
+            "Failed" => "jit.grant_failed",
+            "RevokeOutcomeUnknown" => "jit.revocation_unverified",
+            "Revoked" => "jit.revoked",
+            _ => $"jit.{action.ToLowerInvariant()}"
+        };
+        var severity = current.Status is "Failed" or "RevokeOutcomeUnknown" || current.Emergency || current.FailureCode is not null
+            ? SharedAlertSeverity.High : SharedAlertSeverity.Medium;
         await RecordOperationalEventAsync(connection, transaction, tenant, organization,
             new(audit.EventId, Guid.Empty, Guid.Empty, current.Provider, current.SubscriptionId, "jit", "Changed",
-                request.ToString("D"), current.Emergency || current.FailureCode is not null ? SharedAlertSeverity.High : SharedAlertSeverity.Medium,
-                null, null, audit.AtUtc.UtcDateTime) { EventType = $"jit.{action.ToLowerInvariant()}", SubjectId = request }, token);
+                request.ToString("D"), severity, null, null, audit.AtUtc.UtcDateTime)
+                { EventType = operationalEventType, SubjectId = request }, token);
         await transaction.CommitAsync(token);
         return current;
     }
@@ -136,6 +145,9 @@ public sealed partial class SharedWorkspaceStore
         await using var command = new NpgsqlCommand("""
             SELECT TenantId,OrganizationId,PayloadJson FROM SharedPrivilegedAccessRequests
             WHERE Status IN ('Queued','Issuing','Submitted','Active','ExpiryPending','OutcomeUnknown','RevokeQueued','RevokeIssuing','RevokeOutcomeUnknown')
+              AND (Status NOT IN ('RevokeQueued','RevokeIssuing','RevokeOutcomeUnknown')
+                OR PayloadJson::jsonb->>'nextRevocationAttemptAtUtc' IS NULL
+                OR (PayloadJson::jsonb->>'nextRevocationAttemptAtUtc')::timestamptz <= now())
             ORDER BY UpdatedAtUtc LIMIT 50;
             """, connection);
         var rows = new List<PrivilegedAccessWork>();

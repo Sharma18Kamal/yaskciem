@@ -27,8 +27,21 @@ public sealed partial class OrganizationViewModel
     public PrivilegedAccessRequest? SelectedJitRequest
     {
         get => _selectedJitRequest;
-        set { if (SetProperty(ref _selectedJitRequest, value)) { _priorityCancellation?.Cancel(); JitLiveConsent = false; JitRevokeConsent = false; JitAudit = []; } }
+        set
+        {
+            if (SetProperty(ref _selectedJitRequest, value))
+            {
+                _priorityCancellation?.Cancel();
+                JitLiveConsent = false;
+                JitRevokeConsent = false;
+                JitAudit = [];
+                OnPropertyChanged(nameof(SelectedJitRiskDetails));
+            }
+        }
     }
+    public string SelectedJitRiskDetails => SelectedJitRequest?.RiskAssessment is { } assessment
+        ? $"Factors: {string.Join("; ", assessment.Factors)}. Limitations: {assessment.Limitations}"
+        : "Select a request to review its risk screening. Older requests may not include an assessment.";
     public IReadOnlyList<PrivilegedAccessRequest> JitRequests { get => _jitRequests; private set => SetProperty(ref _jitRequests, value); }
     public IReadOnlyList<PrivilegedAccessAudit> JitAudit { get => _jitAudit; private set => SetProperty(ref _jitAudit, value); }
     public IReadOnlyList<IdentityBehaviorAnomaly> BehaviorAnomalies { get => _behaviorAnomalies; private set => SetProperty(ref _behaviorAnomalies, value); }
@@ -69,7 +82,7 @@ public sealed partial class OrganizationViewModel
         if (operation is "approve" or "reject" or "activate" or "revoke" or "handoff" or "audit" && selected is null)
         { PriorityTwoStatus = "Select a saved JIT request first."; return; }
         if (operation == "activate" && (!JitLiveConsent || selected!.RequestedBy != _identity?.UserId || selected.Status != "Approved"))
-        { PriorityTwoStatus = "Only the requester can activate after both approvals and explicit live consent."; return; }
+        { PriorityTwoStatus = "Only the requester can activate after the configured approvals and explicit live consent."; return; }
         if (operation == "revoke" && (!JitRevokeConsent || string.IsNullOrWhiteSpace(JitReason)
             || selected!.RequestedBy != _identity?.UserId && !IsAllowed(OrganizationAction.ManageRemediations)))
         { PriorityTwoStatus = "Ending access needs explicit consent, a reason, and requester or authorized configured approver access."; return; }

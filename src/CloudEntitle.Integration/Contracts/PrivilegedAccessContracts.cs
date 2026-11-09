@@ -12,7 +12,17 @@ public sealed record PrivilegedAccessRequest(Guid RequestId, Guid RequestedBy, s
     string? ScheduleId = null, string? FailureCode = null,
     CloudEntitle.Domain.CloudProvider Provider = CloudEntitle.Domain.CloudProvider.Azure,
     string? HumanPrincipal = null, string? BrokerEndpoint = null, string? AuthSecretKey = null,
-    string? RevocationAuthSecretKey = null, Guid? RevokeId = null, string? RevokeReason = null);
+    string? RevocationAuthSecretKey = null, Guid? RevokeId = null, string? RevokeReason = null)
+{
+    public int RequiredApprovals { get; init; } = 2;
+    public IReadOnlyList<Guid> EligibleApprovers { get; init; } = [];
+    public JitRiskAssessment? RiskAssessment { get; init; }
+    public int RevocationAttemptCount { get; init; }
+    public DateTimeOffset? NextRevocationAttemptAtUtc { get; init; }
+}
+/// <summary>A conservative, pre-approval screening score for a configured time-bound grant; it is not provider authorization proof.</summary>
+public sealed record JitRiskAssessment(int RiskScore, string Severity, string Confidence, DateTimeOffset AssessedAtUtc,
+    IReadOnlyList<string> Factors, string Limitations);
 /// <summary>An append-only governance event, not a WORM or provider-signed record.</summary>
 public sealed record PrivilegedAccessAudit(Guid EventId, Guid RequestId, Guid ActorId, string Action, string Reason, DateTimeOffset AtUtc);
 /// <summary>A configured eligible target. Configuration alone does not connect or grant access.</summary>

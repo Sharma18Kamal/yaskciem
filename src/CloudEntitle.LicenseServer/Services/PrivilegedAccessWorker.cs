@@ -60,27 +60,37 @@ public sealed class PrivilegedAccessWorker(SharedWorkspaceStore store, IConfigur
                 else if (current.RevokeId is not null)
                 {
                     var observed = await transport.ObserveAsync(work.TenantId, current, token);
-                    if (observed.Status == "Revoked")
-                        await TransitionAsync(work, current, "Revoked", null, token, schedule: observed.ScheduleId);
-                    else if (observed.Status == "Failed")
-                        await TransitionAsync(work, current, "RevokeOutcomeUnknown", observed.FailureCode ?? "native_failure_not_removal_evidence",
-                            token, schedule: observed.ScheduleId);
-                    else if (current.Status == "RevokeQueued" && (observed.ScheduleId ?? current.ScheduleId) is not null)
+                    var exactGrantObserved = current.ScheduleId is not null
+                        && string.Equals(observed.ScheduleId, current.ScheduleId, StringComparison.Ordinal);
+                    if (observed.Status == "Revoked" && exactGrantObserved)
+                        await TransitionAsync(work, current, "Revoked", null, token, schedule: observed.ScheduleId,
+                            clearNextRevocationAttempt: true);
+                    else if (observed.Status is "Active" or "ExpiryPending"
+                        && exactGrantObserved)
                     {
-                        current = await TransitionAsync(work, current, "RevokeIssuing", null, token, schedule: observed.ScheduleId);
+                        current = await TransitionAsync(work, current, "RevokeIssuing", null, token,
+                            schedule: observed.ScheduleId, revocationAttemptCount: current.RevocationAttemptCount + 1,
+                            clearNextRevocationAttempt: true);
                         PimObservation result;
                         try { result = await transport.RevokeAsync(work.TenantId, current, token); }
                         catch (Exception exception) when (exception is not OperationCanceledException || !token.IsCancellationRequested)
                         { result = new("RevokeOutcomeUnknown", current.ScheduleId, "revocation_outcome_unknown"); }
                         using var completion = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                        await TransitionAsync(work, current, "RevokeOutcomeUnknown", result.FailureCode, completion.Token, schedule: result.ScheduleId);
+                        await TransitionAsync(work, current, "RevokeOutcomeUnknown",
+                            result.FailureCode ?? "revocation_accepted_unverified", completion.Token,
+                            schedule: result.ScheduleId, nextRevocationAttempt: DateTimeOffset.UtcNow
+                                .Add(RevocationRetryDelay(current.RevocationAttemptCount)));
                     }
                     else
                     {
-                        // Issuing/unknown revocations are GET-only, even if GET still shows Active or 404.
-                        var status = current.Status == "RevokeQueued" ? "RevokeQueued" : "RevokeOutcomeUnknown";
-                        if (status != current.Status || observed.ScheduleId != current.ScheduleId || observed.FailureCode != current.FailureCode)
-                            await TransitionAsync(work, current, status, observed.FailureCode ?? "revocation_not_verified", token, schedule: observed.ScheduleId);
+                        // Only a matching provider GET that still shows the exact grant active permits a retry.
+                        // Unknown, pending, denied, expired, and not-found outcomes never trigger another mutation.
+                        await TransitionAsync(work, current, "RevokeOutcomeUnknown",
+                            observed.FailureCode ?? (observed.Status is "Active" or "ExpiryPending" or "Revoked"
+                                ? "revocation_observed_different_grant" : "revocation_not_verified"),
+                            token, schedule: current.ScheduleId,
+                            nextRevocationAttempt: DateTimeOffset.UtcNow.Add(RevocationRetryDelay(
+                                Math.Max(1, current.RevocationAttemptCount))));
                     }
                 }
                 else
@@ -99,10 +109,45 @@ public sealed class PrivilegedAccessWorker(SharedWorkspaceStore store, IConfigur
                     try { await TransitionAsync(work, current, "Failed", "authorization_or_configuration_changed", token); }
                     catch (InvalidOperationException) { logger.LogWarning("Concurrent JIT transition for request {RequestId}; refresh required.", current.RequestId); }
                 }
+                else if (current.RevokeId is not null)
+                {
+                    try
+                    {
+                        using var completion = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        await TransitionAsync(work, current, "RevokeOutcomeUnknown", "revocation_observation_failed",
+                            completion.Token, nextRevocationAttempt: DateTimeOffset.UtcNow.Add(RevocationRetryDelay(
+                                Math.Max(1, current.RevocationAttemptCount))));
+                    }
+                    catch (Exception persistenceException)
+                    {
+                        logger.LogError("JIT revocation failure for request {RequestId} could not be persisted ({ErrorType}); provider state remains unverified.",
+                            current.RequestId, persistenceException.GetType().Name);
+                    }
+                    logger.LogWarning("JIT revocation observation failed for request {RequestId} ({ErrorType}); provider state remains unverified.",
+                        current.RequestId, exception.GetType().Name);
+                }
                 else logger.LogWarning("JIT transition conflict for request {RequestId}; the next iteration will reconcile.", current.RequestId);
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !token.IsCancellationRequested)
-            { logger.LogWarning("JIT observation failed for request {RequestId} ({ErrorType}); revocation remains unverified.", current.RequestId, exception.GetType().Name); }
+            {
+                if (current.RevokeId is not null)
+                {
+                    try
+                    {
+                        using var completion = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        await TransitionAsync(work, current, "RevokeOutcomeUnknown", "revocation_observation_failed",
+                            completion.Token, nextRevocationAttempt: DateTimeOffset.UtcNow.Add(RevocationRetryDelay(
+                                Math.Max(1, current.RevocationAttemptCount))));
+                    }
+                    catch (Exception persistenceException)
+                    {
+                        logger.LogError("JIT revocation failure for request {RequestId} could not be persisted ({ErrorType}); provider state remains unverified.",
+                            current.RequestId, persistenceException.GetType().Name);
+                    }
+                }
+                logger.LogWarning("JIT observation failed for request {RequestId} ({ErrorType}); revocation remains unverified.",
+                    current.RequestId, exception.GetType().Name);
+            }
             finally
             {
                 if (!token.IsCancellationRequested) await store.TouchPrivilegedAccessAsync(work, token);
@@ -110,12 +155,20 @@ public sealed class PrivilegedAccessWorker(SharedWorkspaceStore store, IConfigur
         }
     }
     private Task<PrivilegedAccessRequest> TransitionAsync(PrivilegedAccessWork work, PrivilegedAccessRequest current, string status,
-        string? failure, CancellationToken token, DateTimeOffset? start = null, DateTimeOffset? expires = null, string? schedule = null)
+        string? failure, CancellationToken token, DateTimeOffset? start = null, DateTimeOffset? expires = null, string? schedule = null,
+        int? revocationAttemptCount = null, DateTimeOffset? nextRevocationAttempt = null, bool clearNextRevocationAttempt = false)
         => store.UpdatePrivilegedAccessAsync(work.TenantId, work.OrganizationId, current.RequestId, Guid.Empty, status,
             failure ?? "Native PIM state transition; no success inferred from acceptance or local expiry.", previous =>
             {
                 if (previous is null || previous.Version != current.Version) throw new InvalidOperationException("Concurrent JIT transition.");
                 return previous with { Status = status, FailureCode = failure, Version = previous.Version + 1,
-                    StartsAtUtc = start ?? previous.StartsAtUtc, ExpiresAtUtc = expires ?? previous.ExpiresAtUtc, ScheduleId = schedule ?? previous.ScheduleId };
+                    StartsAtUtc = start ?? previous.StartsAtUtc, ExpiresAtUtc = expires ?? previous.ExpiresAtUtc,
+                    ScheduleId = schedule ?? previous.ScheduleId,
+                    RevocationAttemptCount = revocationAttemptCount ?? previous.RevocationAttemptCount,
+                    NextRevocationAttemptAtUtc = clearNextRevocationAttempt ? null
+                        : nextRevocationAttempt ?? previous.NextRevocationAttemptAtUtc };
             }, token);
+
+    private static TimeSpan RevocationRetryDelay(int attempt)
+        => TimeSpan.FromSeconds(Math.Min(3600, 30 * Math.Pow(2, Math.Clamp(attempt - 1, 0, 7))));
 }

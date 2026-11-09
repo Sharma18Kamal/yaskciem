@@ -63,6 +63,54 @@ public static class PrivilegedAccessPolicy
             section.GetValue<bool>("Enabled") && target.GetValue<bool>("Connected"));
     }
 
+    public static int RequiredApprovals(IConfiguration configuration, Guid tenant, Guid organization)
+    {
+        var required = Section(configuration, tenant, organization).GetValue<int?>("RequiredApprovals") ?? 2;
+        if (required is < 1 or > 2)
+            throw new ArgumentException("Configure one or two required JIT approvers; self-approval is not supported.");
+        return required;
+    }
+
+    public static JitRiskAssessment AssessRisk(PrivilegedAccessTarget target, int durationMinutes, bool emergency,
+        DateTimeOffset assessedAtUtc)
+    {
+        var factors = new List<string>();
+        var score = 15;
+        factors.Add("Base human-scoped temporary grant: 15");
+        var durationScore = (int)Math.Ceiling(20d * durationMinutes / Math.Max(1, emergency
+            ? target.EmergencyMaximumMinutes : target.MaximumMinutes));
+        score += durationScore;
+        factors.Add($"Requested duration relative to configured maximum: +{durationScore}");
+
+        var broadScope = target.Provider switch
+        {
+            CloudEntitle.Domain.CloudProvider.Azure => target.Scope.Count(character => character == '/') <= 2,
+            CloudEntitle.Domain.CloudProvider.Aws => true,
+            CloudEntitle.Domain.CloudProvider.Gcp => target.Scope.StartsWith("organizations/", StringComparison.Ordinal)
+                || target.Scope.StartsWith("folders/", StringComparison.Ordinal),
+            _ => true
+        };
+        if (broadScope)
+        {
+            score += 25;
+            factors.Add("Configured target has account, subscription, folder, or organization scope: +25");
+        }
+        else factors.Add("Configured target is narrower than account/subscription/folder scope: +0");
+
+        if (emergency)
+        {
+            score += 20;
+            factors.Add("Emergency request: +20");
+        }
+
+        score += 20;
+        factors.Add("Provider role semantics are not independently evaluated in this screening: +20 uncertainty");
+        score = Math.Clamp(score, 0, 100);
+        var severity = score >= 80 ? "Critical" : score >= 60 ? "High" : score >= 35 ? "Medium" : "Low";
+        return new(score, severity, "Low", assessedAtUtc, factors,
+            "Screening uses configured provider, target scope, duration and emergency flag only. It does not resolve provider role permissions, inherited grants, conditions, current effective access, or operational dependencies.");
+    }
+
     internal static bool SafeBroker(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri)
         && uri.Scheme == "https" && string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Query)
         && string.IsNullOrEmpty(uri.Fragment) && !uri.IsLoopback;
@@ -99,7 +147,8 @@ public static class PrivilegedAccessPolicy
             throw new InvalidOperationException("The request is terminal or revocation is already queued.");
         return current with { Status = current.StartsAtUtc is null && current.Status is ("PendingApproval" or "Approved" or "Queued")
                 ? "Cancelled" : "RevokeQueued",
-            RevokeId = Guid.NewGuid(), RevokeReason = decision.Reason.Trim(), Version = current.Version + 1 };
+            RevokeId = Guid.NewGuid(), RevokeReason = decision.Reason.Trim(), RevocationAttemptCount = 0,
+            NextRevocationAttemptAtUtc = null, Version = current.Version + 1 };
     }
 
     public static bool IsApprover(IConfiguration configuration, Guid tenant, Guid organization, Guid user)
@@ -108,10 +157,10 @@ public static class PrivilegedAccessPolicy
     public static IReadOnlyList<Guid> Approvers(IConfiguration configuration, Guid tenant, Guid organization)
     {
         var values = Section(configuration, tenant, organization).GetSection("ApproverIds").GetChildren().Select(child => child.Value).ToArray();
-        if (values.Length != 2 || values.Any(value => !Guid.TryParse(value, out var id) || id == Guid.Empty))
-            throw new ArgumentException("Configure two distinct manager/security approver object IDs.");
+        if (values.Length is < 1 or > 2 || values.Any(value => !Guid.TryParse(value, out var id) || id == Guid.Empty))
+            throw new ArgumentException("Configure one or two distinct manager/security approver object IDs.");
         var ids = values.Select(value => Guid.Parse(value!)).ToArray();
-        if (ids.Distinct().Count() != 2) throw new ArgumentException("Manager/security approvers must be distinct.");
+        if (ids.Distinct().Count() != values.Length) throw new ArgumentException("Configured JIT approvers must be distinct.");
         return ids;
     }
 

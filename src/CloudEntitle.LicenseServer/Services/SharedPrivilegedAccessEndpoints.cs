@@ -2,6 +2,7 @@ using System.Security.Claims;
 using CloudEntitle.Domain;
 using CloudEntitle.Integration.Contracts;
 using CloudEntitle.OrganizationManagement.Models;
+using Npgsql;
 
 namespace CloudEntitle.LicenseServer.Services;
 
@@ -40,7 +41,10 @@ public static partial class SharedWorkspaceEndpoints
                 PrivilegedAccessPolicy.ValidateReason(request.Reason);
                 var target = PrivilegedAccessPolicy.Target(configuration, tenant, organizationId, request.Target);
                 var approvers = PrivilegedAccessPolicy.Approvers(configuration, tenant, organizationId);
-                if (approvers.Contains(actor.UserId)) throw new ArgumentException("Requesters must differ from both configured approvers.");
+                var requiredApprovals = PrivilegedAccessPolicy.RequiredApprovals(configuration, tenant, organizationId);
+                if (approvers.Count < requiredApprovals)
+                    throw new ArgumentException("The configured approver list is smaller than RequiredApprovals.");
+                if (approvers.Contains(actor.UserId)) throw new ArgumentException("Requesters cannot approve their own access.");
                 if (!target.Connected) throw new InvalidOperationException("The client must configure and explicitly connect this JIT target first.");
                 if (!service.GetTenantBindings(organizationId, actor).Any(binding => binding.Provider == target.Provider
                     && string.Equals(binding.ExternalTenantId, target.SubscriptionId, StringComparison.OrdinalIgnoreCase))) return Results.Forbid();
@@ -49,15 +53,28 @@ public static partial class SharedWorkspaceEndpoints
                 var id = Guid.NewGuid();
                 var now = DateTimeOffset.UtcNow;
                 var human = PrivilegedAccessPolicy.Human(configuration, tenant, organizationId, target, actor.UserId);
-                var created = await store.UpdatePrivilegedAccessAsync(tenant, organizationId, id, actor.UserId, "Requested", request.Reason,
-                    _ => new(id, actor.UserId, target.Alias, target.SubscriptionId, target.Scope, target.RoleDefinitionId,
-                        request.DurationMinutes, request.Emergency, request.Reason.Trim(), now, now.AddMinutes(30), "PendingApproval", 0, [],
-                        Provider: target.Provider, HumanPrincipal: human.Principal, BrokerEndpoint: target.BrokerEndpoint,
-                        AuthSecretKey: string.IsNullOrEmpty(human.SecretKey) ? null : human.SecretKey,
-                        RevocationAuthSecretKey: target.RevocationAuthSecretKey), token);
+                var risk = PrivilegedAccessPolicy.AssessRisk(target, request.DurationMinutes, request.Emergency, now);
+                PrivilegedAccessRequest created;
+                try
+                {
+                    created = await store.UpdatePrivilegedAccessAsync(tenant, organizationId, id, actor.UserId, "Requested", request.Reason,
+                        _ => new(id, actor.UserId, target.Alias, target.SubscriptionId, target.Scope, target.RoleDefinitionId,
+                            request.DurationMinutes, request.Emergency, request.Reason.Trim(), now, now.AddMinutes(30), "PendingApproval", 0, [],
+                            Provider: target.Provider, HumanPrincipal: human.Principal, BrokerEndpoint: target.BrokerEndpoint,
+                            AuthSecretKey: string.IsNullOrEmpty(human.SecretKey) ? null : human.SecretKey,
+                            RevocationAuthSecretKey: target.RevocationAuthSecretKey)
+                            { RequiredApprovals = requiredApprovals, EligibleApprovers = approvers, RiskAssessment = risk }, token);
+                }
+                catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation
+                    && string.Equals(exception.ConstraintName, "UX_SharedPrivilegedAccessRequests_LiveGrant",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Conflict(Error("jit_request_already_active",
+                        "A matching JIT request or grant is already active. Refresh the request list before creating another."));
+                }
                 return Results.Created($"/api/v1/organizations/{organizationId:D}/privileged-access/{id:D}", Envelope(created));
             })).RequireAuthorization("CiemApiAccess").WithName("RequestPrivilegedAccess")
-            .WithSummary("Request caller-owned Azure PIM, AWS broker human sessions or GCP PAM from a connected allowlist; two distinct non-requester approvals are required.")
+            .WithSummary("Request caller-owned Azure PIM, AWS broker human sessions or GCP PAM from a connected allowlist; configured distinct non-requester approvals are required.")
             .Produces<ApiEnvelope<PrivilegedAccessRequest>>(201).Produces(400).Produces(403).Produces(409);
         foreach (var action in new[] { "approve", "reject", "activate" })
         {
@@ -81,7 +98,7 @@ public static partial class SharedWorkspaceEndpoints
                         if (decision == "activate")
                         {
                             if (current.RequestedBy != actor.UserId) throw new UnauthorizedAccessException();
-                            if (current.Status != "Approved" || !request.LiveConsent) throw new InvalidOperationException("Both approvals and explicit live activation consent are required.");
+                            if (current.Status != "Approved" || !request.LiveConsent) throw new InvalidOperationException("The configured approval threshold and explicit live activation consent are required.");
                             ValidateJitTarget(configuration, tenant, organizationId, current);
                             return current with { Status = "Queued", Version = current.Version + 1 };
                         }
@@ -89,9 +106,15 @@ public static partial class SharedWorkspaceEndpoints
                         if (current.RequestedBy == actor.UserId) throw new UnauthorizedAccessException();
                         if (current.Status is not ("PendingApproval" or "Approved")) throw new InvalidOperationException("Only unactivated requests may be decided.");
                         if (decision == "reject") return current with { Status = "Rejected", Version = current.Version + 1 };
+                        var eligibleApprovers = current.EligibleApprovers.Count == 0
+                            ? PrivilegedAccessPolicy.Approvers(configuration, tenant, organizationId)
+                            : current.EligibleApprovers;
+                        if (!eligibleApprovers.Contains(actor.UserId))
+                            throw new UnauthorizedAccessException("This identity was not an approver for this request.");
                         if (current.ApprovedBy.Contains(actor.UserId)) throw new InvalidOperationException("This approver already decided; duplicate approvals cannot satisfy dual control.");
                         var approvals = current.ApprovedBy.Append(actor.UserId).ToArray();
-                        return current with { ApprovedBy = approvals, Status = approvals.Length == 2 ? "Approved" : "PendingApproval", Version = current.Version + 1 };
+                        return current with { ApprovedBy = approvals, EligibleApprovers = eligibleApprovers,
+                            Status = approvals.Length >= current.RequiredApprovals ? "Approved" : "PendingApproval", Version = current.Version + 1 };
                     }, token);
                     return Results.Ok(Envelope(updated));
                 })).RequireAuthorization("CiemApiAccess").WithName("PrivilegedAccess" + decision)
@@ -127,12 +150,18 @@ public static partial class SharedWorkspaceEndpoints
     {
         var target = PrivilegedAccessPolicy.Target(configuration, tenant, organization, request.Target);
         var human = PrivilegedAccessPolicy.Human(configuration, tenant, organization, target, request.RequestedBy);
+        var requiredApprovals = PrivilegedAccessPolicy.RequiredApprovals(configuration, tenant, organization);
+        var approvers = PrivilegedAccessPolicy.Approvers(configuration, tenant, organization);
+        var eligibleApprovers = request.EligibleApprovers.Count == 0 ? approvers : request.EligibleApprovers;
         if (!target.Connected || target.SubscriptionId != request.SubscriptionId || target.Scope != request.Scope
             || target.Provider != request.Provider || target.BrokerEndpoint != request.BrokerEndpoint
             || (request.Provider != CloudProvider.Azure && (human.Principal != request.HumanPrincipal
                 || human.SecretKey != request.AuthSecretKey || target.RevocationAuthSecretKey != request.RevocationAuthSecretKey))
             || target.RoleDefinitionId != request.RoleDefinitionId || request.DurationMinutes > (request.Emergency ? target.EmergencyMaximumMinutes : target.MaximumMinutes)
-            || !PrivilegedAccessPolicy.Approvers(configuration, tenant, organization).Order().SequenceEqual(request.ApprovedBy.Order()))
+            || request.RequiredApprovals != requiredApprovals || approvers.Count < requiredApprovals
+            || !eligibleApprovers.Order().SequenceEqual(approvers.Order())
+            || request.ApprovedBy.Count < requiredApprovals || request.ApprovedBy.Distinct().Count() != request.ApprovedBy.Count
+            || request.ApprovedBy.Any(id => id == request.RequestedBy || !eligibleApprovers.Contains(id)))
             throw new InvalidOperationException("The configured target or approval policy changed; create a new request.");
     }
 }

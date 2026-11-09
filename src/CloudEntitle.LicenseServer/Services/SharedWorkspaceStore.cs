@@ -262,6 +262,11 @@ public sealed partial class SharedWorkspaceStore : IDisposable
         using var decisionReader = new StreamReader(decisionSchema);
         await using var decisionCommand = new NpgsqlCommand(await decisionReader.ReadToEndAsync(cancellationToken), connection);
         await decisionCommand.ExecuteNonQueryAsync(cancellationToken);
+        using var jitSafetySchema = typeof(SharedWorkspaceStore).Assembly.GetManifestResourceStream("CloudEntitle.LicenseServer.JitSafetyGuardsSchema.sql")
+            ?? throw new InvalidOperationException("The JIT safety-guard schema resource is missing.");
+        using var jitSafetyReader = new StreamReader(jitSafetySchema);
+        await using var jitSafetyCommand = new NpgsqlCommand(await jitSafetyReader.ReadToEndAsync(cancellationToken), connection);
+        await jitSafetyCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)

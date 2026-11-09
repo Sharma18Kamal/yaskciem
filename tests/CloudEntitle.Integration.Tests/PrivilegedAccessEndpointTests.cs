@@ -50,7 +50,19 @@ public sealed partial class SharedWorkspaceEndpointTests
             [$"{root}:Targets:investigation:SubscriptionId"] = subscription,
             [$"{root}:Targets:investigation:Scope"] = $"/subscriptions/{subscription}",
             [$"{root}:Targets:investigation:RoleDefinitionId"] = $"/subscriptions/{subscription}/providers/Microsoft.Authorization/roleDefinitions/{Guid.NewGuid():D}",
-            [$"{root}:Targets:investigation:Connected"] = "true"
+            [$"{root}:Targets:investigation:Connected"] = "true",
+            [$"{root}:Targets:emergency:SubscriptionId"] = subscription,
+            [$"{root}:Targets:emergency:Scope"] = $"/subscriptions/{subscription}/resourceGroups/jit-emergency",
+            [$"{root}:Targets:emergency:RoleDefinitionId"] = $"/subscriptions/{subscription}/providers/Microsoft.Authorization/roleDefinitions/{Guid.NewGuid():D}",
+            [$"{root}:Targets:emergency:Connected"] = "true",
+            [$"{root}:Targets:malformed:SubscriptionId"] = subscription,
+            [$"{root}:Targets:malformed:Scope"] = $"/subscriptions/{subscription}/resourceGroups/jit-malformed",
+            [$"{root}:Targets:malformed:RoleDefinitionId"] = $"/subscriptions/{subscription}/providers/Microsoft.Authorization/roleDefinitions/{Guid.NewGuid():D}",
+            [$"{root}:Targets:malformed:Connected"] = "true",
+            [$"{root}:Targets:single-approval:SubscriptionId"] = subscription,
+            [$"{root}:Targets:single-approval:Scope"] = $"/subscriptions/{subscription}/resourceGroups/jit-single-approval",
+            [$"{root}:Targets:single-approval:RoleDefinitionId"] = $"/subscriptions/{subscription}/providers/Microsoft.Authorization/roleDefinitions/{Guid.NewGuid():D}",
+            [$"{root}:Targets:single-approval:Connected"] = "true"
         });
         builder.Services.AddAuthentication(TestAuthenticationHandler.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(TestAuthenticationHandler.SchemeName, _ => { });
@@ -80,6 +92,13 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var current = (await created.Content.ReadFromJsonAsync<ApiEnvelope<PrivilegedAccessRequest>>())!.Data;
         Assert.Equal(requester.UserId, current.RequestedBy);
+        Assert.Equal(2, current.RequiredApprovals);
+        Assert.Equal(new[] { manager.UserId, security.UserId }.Order(), current.EligibleApprovers.Order());
+        var riskAssessment = Assert.IsType<JitRiskAssessment>(current.RiskAssessment);
+        Assert.InRange(riskAssessment.RiskScore, 0, 100);
+        Assert.Equal("Low", riskAssessment.Confidence);
+        using var duplicateRequest = await Send(prefix, requester, new CreatePrivilegedAccessRequest("investigation", 60, false, "Duplicate request"));
+        Assert.Equal(HttpStatusCode.Conflict, duplicateRequest.StatusCode);
         var path = prefix + $"/{current.RequestId:D}";
         using var self = await Send(path + "/approve", requester, new PrivilegedAccessDecision(0, "Self"));
         Assert.Equal(HttpStatusCode.Forbidden, self.StatusCode);
@@ -118,7 +137,7 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Contains(audit, item => item.ActorId == manager.UserId && item.Action == "approve");
         Assert.Contains(audit, item => item.ActorId == security.UserId && item.Action == "approve");
         Assert.Empty(await store.GetPrivilegedAccessAsync(Guid.NewGuid(), org.Id));
-        using var emergency = await Send(prefix, requester, new CreatePrivilegedAccessRequest("investigation", 10, true, "Emergency access"));
+        using var emergency = await Send(prefix, requester, new CreatePrivilegedAccessRequest("emergency", 10, true, "Emergency access"));
         var emergencyRequest = (await emergency.Content.ReadFromJsonAsync<ApiEnvelope<PrivilegedAccessRequest>>())!.Data;
         var emergencyPath = prefix + $"/{emergencyRequest.RequestId:D}";
         using var emergencyManager = await Send(emergencyPath + "/approve", manager, new PrivilegedAccessDecision(0, "Manager emergency approval"));
@@ -129,13 +148,13 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Equal(HttpStatusCode.OK, emergencySecurity.StatusCode);
         using var emergencyActivate = await Send(emergencyPath + "/activate", requester, new PrivilegedAccessDecision(2, "Emergency consent", true));
         Assert.Equal(HttpStatusCode.OK, emergencyActivate.StatusCode);
-        builder.Configuration[$"{root}:Targets:investigation:Connected"] = "false";
+        builder.Configuration[$"{root}:Targets:emergency:Connected"] = "false";
         await worker.ProcessOnceAsync(default);
         Assert.Equal(1, transport.Submissions);
         Assert.Equal("Failed", (await store.GetPrivilegedAccessAsync(tenant, org.Id, emergencyRequest.RequestId))!.Status);
         Assert.Equal("authorization_or_configuration_changed", (await store.GetPrivilegedAccessAsync(tenant, org.Id, emergencyRequest.RequestId))!.FailureCode);
-        builder.Configuration[$"{root}:Targets:investigation:Connected"] = "true";
-        using var malformedCreated = await Send(prefix, requester, new CreatePrivilegedAccessRequest("investigation", 10, true, "Configuration-change test"));
+        builder.Configuration[$"{root}:Targets:emergency:Connected"] = "true";
+        using var malformedCreated = await Send(prefix, requester, new CreatePrivilegedAccessRequest("malformed", 10, true, "Configuration-change test"));
         var malformed = (await malformedCreated.Content.ReadFromJsonAsync<ApiEnvelope<PrivilegedAccessRequest>>())!.Data;
         var malformedPath = prefix + $"/{malformed.RequestId:D}";
         using var malformedManager = await Send(malformedPath + "/approve", manager, new PrivilegedAccessDecision(0, "Manager approval"));
@@ -149,7 +168,7 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Equal(1, transport.Submissions);
         Assert.Equal("Failed", (await store.GetPrivilegedAccessAsync(tenant, org.Id, malformed.RequestId))!.Status);
         builder.Configuration[$"{root}:ApproverIds:1"] = security.UserId.ToString("D");
-        using var cancellableResponse = await Send(prefix, requester, new CreatePrivilegedAccessRequest("investigation", 10, true, "Cancel before activation"));
+        using var cancellableResponse = await Send(prefix, requester, new CreatePrivilegedAccessRequest("emergency", 10, true, "Cancel before activation"));
         var cancellable = (await cancellableResponse.Content.ReadFromJsonAsync<ApiEnvelope<PrivilegedAccessRequest>>())!.Data;
         var cancelPath = prefix + $"/{cancellable.RequestId:D}/revoke";
         using var cancelNoConsent = await Send(cancelPath, requester, new PrivilegedAccessDecision(0, "Cancel"));
@@ -161,6 +180,29 @@ public sealed partial class SharedWorkspaceEndpointTests
         var cancelled = (await cancelledResponse.Content.ReadFromJsonAsync<ApiEnvelope<PrivilegedAccessRequest>>())!.Data;
         Assert.Equal("Cancelled", cancelled.Status);
         Assert.NotNull(cancelled.RevokeId);
+        builder.Configuration[$"{root}:RequiredApprovals"] = "1";
+        using var singleApprovalResponse = await Send(prefix, requester,
+            new CreatePrivilegedAccessRequest("single-approval", 10, false, "One configured approval"));
+        Assert.Equal(HttpStatusCode.Created, singleApprovalResponse.StatusCode);
+        var singleApproval = (await singleApprovalResponse.Content.ReadFromJsonAsync<ApiEnvelope<PrivilegedAccessRequest>>())!.Data;
+        Assert.Equal(1, singleApproval.RequiredApprovals);
+        var singleApprovalPath = prefix + $"/{singleApproval.RequestId:D}";
+        using var onlyApproval = await Send(singleApprovalPath + "/approve", manager,
+            new PrivilegedAccessDecision(0, "Configured single approval"));
+        Assert.Equal(HttpStatusCode.OK, onlyApproval.StatusCode);
+        var approvedOnce = (await onlyApproval.Content.ReadFromJsonAsync<ApiEnvelope<PrivilegedAccessRequest>>())!.Data;
+        Assert.Equal("Approved", approvedOnce.Status);
+        Assert.Single(approvedOnce.ApprovedBy);
+        builder.Configuration[$"{root}:ApproverIds:1"] = Guid.NewGuid().ToString("D");
+        using var changedApproverPolicyActivation = await Send(singleApprovalPath + "/activate", requester,
+            new PrivilegedAccessDecision(approvedOnce.Version, "Approver policy changed", true));
+        Assert.Equal(HttpStatusCode.Conflict, changedApproverPolicyActivation.StatusCode);
+        builder.Configuration[$"{root}:ApproverIds:1"] = security.UserId.ToString("D");
+        builder.Configuration[$"{root}:RequiredApprovals"] = "2";
+        using var changedPolicyActivation = await Send(singleApprovalPath + "/activate", requester,
+            new PrivilegedAccessDecision(approvedOnce.Version, "Policy changed", true));
+        Assert.Equal(HttpStatusCode.Conflict, changedPolicyActivation.StatusCode);
+        builder.Configuration[$"{root}:RequiredApprovals"] = null;
         var submissionsBeforeCancelWorker = transport.Submissions;
         await worker.ProcessOnceAsync(default);
         Assert.Equal(submissionsBeforeCancelWorker, transport.Submissions);
@@ -181,15 +223,34 @@ public sealed partial class SharedWorkspaceEndpointTests
         Assert.Equal("RevokeQueued", queuedRevoke.Status);
         Assert.Equal(schedule, queuedRevoke.ScheduleId);
         Assert.NotEqual(queuedRevoke.RequestId, queuedRevoke.RevokeId);
-        transport.Observation = new("Active", schedule);
+        transport.Observation = new("Active", schedule + "-different");
         await Task.WhenAll(worker.ProcessOnceAsync(default), worker.ProcessOnceAsync(default));
-        Assert.Equal(1, transport.Revocations);
+        Assert.Equal(0, transport.Revocations);
         Assert.Equal(submissionsBeforeCancelWorker, transport.Submissions);
         current = (await store.GetPrivilegedAccessAsync(tenant, org.Id, current.RequestId))!;
         Assert.Equal("RevokeOutcomeUnknown", current.Status);
+        Assert.Equal(schedule, current.ScheduleId);
+        current = await store.UpdatePrivilegedAccessAsync(tenant, org.Id, current.RequestId, Guid.Empty, "test-retry-due",
+            "Make scheduled retry due in integration test", previous => previous! with
+            { NextRevocationAttemptAtUtc = DateTimeOffset.UtcNow.AddSeconds(-1), Version = previous!.Version + 1 });
+        transport.Observation = new("Active", schedule);
         await worker.ProcessOnceAsync(default);
         Assert.Equal(1, transport.Revocations);
+        current = (await store.GetPrivilegedAccessAsync(tenant, org.Id, current.RequestId))!;
+        Assert.Equal("RevokeOutcomeUnknown", current.Status);
+        Assert.Equal(1, current.RevocationAttemptCount);
+        Assert.NotNull(current.NextRevocationAttemptAtUtc);
+        await worker.ProcessOnceAsync(default);
+        Assert.Equal(1, transport.Revocations);
+        current = await store.UpdatePrivilegedAccessAsync(tenant, org.Id, current.RequestId, Guid.Empty, "test-retry-due",
+            "Make provider confirmation check due in integration test", previous => previous! with
+            { NextRevocationAttemptAtUtc = DateTimeOffset.UtcNow.AddSeconds(-1), Version = previous!.Version + 1 });
+        transport.Observation = new("Revoked", schedule + "-different");
+        await worker.ProcessOnceAsync(default);
         Assert.Equal("RevokeOutcomeUnknown", (await store.GetPrivilegedAccessAsync(tenant, org.Id, current.RequestId))!.Status);
+        current = await store.UpdatePrivilegedAccessAsync(tenant, org.Id, current.RequestId, Guid.Empty, "test-retry-due",
+            "Make exact provider confirmation due in integration test", previous => previous! with
+            { NextRevocationAttemptAtUtc = DateTimeOffset.UtcNow.AddSeconds(-1), Version = previous!.Version + 1 });
         transport.Observation = new("Revoked", schedule);
         await worker.ProcessOnceAsync(default);
         Assert.Equal("Revoked", (await store.GetPrivilegedAccessAsync(tenant, org.Id, current.RequestId))!.Status);
@@ -209,7 +270,7 @@ public sealed partial class SharedWorkspaceEndpointTests
         public Task<PimObservation> SubmitAsync(Guid tenant, PrivilegedAccessRequest request, CancellationToken token)
         {
             Submissions++;
-            Assert.Equal(2, request.ApprovedBy.Distinct().Count());
+            Assert.Equal(request.RequiredApprovals, request.ApprovedBy.Distinct().Count());
             Assert.DoesNotContain(request.RequestedBy, request.ApprovedBy);
             return Task.FromResult(new PimObservation("Submitted"));
         }
