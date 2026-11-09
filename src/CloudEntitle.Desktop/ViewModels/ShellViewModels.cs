@@ -1297,7 +1297,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
             {
                 connectedProviders.Add(provider);
                 UpdateProviderStates(connectedProviders);
-                ConnectionGuidance = $"{provider} CLI sign-in detected. Discover accounts and verify the intended account identity, then go to Dashboard and select Scan Now to validate read permissions and coverage.";
+                ConnectionGuidance = $"{provider} CLI sign-in detected. Account discovery and scans require an active YASK-CIEM trial or license: sign in under Organizations, then start or refresh the trial. Cloud sign-in alone does not start the trial.";
                 OnPropertyChanged(nameof(ConnectionGuidance));
                 return;
             }
@@ -1318,7 +1318,7 @@ public sealed class CloudAccountsViewModel : WorkspaceViewModel
                     connectedProviders = Providers.Where(option => option.IsConnected).Select(option => option.Provider).ToHashSet();
                     connectedProviders.Add(provider);
                     UpdateProviderStates(connectedProviders);
-                    ConnectionGuidance = $"{provider} CLI sign-in detected. Discover accounts and verify the intended account identity, then select Scan Now in Dashboard and review source coverage. YASK-CIEM does not receive or store cloud credentials.";
+                    ConnectionGuidance = $"{provider} CLI sign-in detected. Account discovery and scans require an active YASK-CIEM trial or license: sign in under Organizations, then start or refresh the trial. Verify the intended account before scanning. YASK-CIEM does not receive or store cloud credentials.";
                     OnPropertyChanged(nameof(ConnectionGuidance));
                     return;
                 }

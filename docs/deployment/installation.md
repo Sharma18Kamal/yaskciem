@@ -1,6 +1,6 @@
 # Install YASK-CIEM on Windows
 
-## Current server-managed trial candidate: 1.0.0.65
+## Current server-managed trial candidate: 1.0.0.66
 
 Version 1.0.0.65 replaces the unlimited free edition with a server-managed 30-day
 trial. Configure the License Server HTTPS URL and Entra registrations using the
@@ -10,8 +10,18 @@ Legacy trial files remain ignored; cloud and organization permissions are unchan
 After expiry or failed online validation, existing data remains readable/exportable,
 but new scans and privileged operations are blocked.
 
-- [Native MSI test candidate](../../artifacts/native-installers-1.0.0.65/YASK-CIEM-1.0.0.65.msi)
-- [Interactive Setup EXE test candidate](../../artifacts/native-installers-1.0.0.65/YASK-CIEM-Setup-1.0.0.65.exe)
+- [Native MSI test candidate](../../artifacts/native-installers-1.0.0.66/YASK-CIEM-1.0.0.66.msi)
+- [Interactive Setup EXE test candidate](../../artifacts/native-installers-1.0.0.66/YASK-CIEM-Setup-1.0.0.66.exe)
+
+Version 1.0.0.66 fixes a 1.0.0.65 regression that license-gated Azure's
+pre-login subscription check and AWS profile discovery/identity checks.
+Cloud CLI sign-in detection and disconnection now work without a configured
+License Server or active trial, including AWS named profiles and GCP active
+account checks. Account/resource discovery, scans, and cloud changes still
+require online validation of an active trial or license. Cloud provider sign-in
+does not start the YASK-CIEM trial; organization sign-in and trial registration
+are separate. The 1.0.0.65 License Server remains compatible; no server migration
+is needed for this desktop fix.
 
 Close the app before installing. For an existing MSI installation, use the new
 MSI or native Setup EXE, not MSIX; switching package technologies is not an

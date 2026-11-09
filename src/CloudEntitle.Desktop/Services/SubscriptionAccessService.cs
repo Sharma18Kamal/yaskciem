@@ -68,12 +68,17 @@ public sealed class LicensedCloudCommandRunner(ICloudCommandRunner inner, Subscr
 
     internal static bool IsSessionOperation(string command, IReadOnlyList<string> arguments)
     {
-        var prefix = string.Join(' ', arguments.Take(3));
+        var offset = command == "aws" && arguments.Count >= 2 && arguments[0] == "--profile" ? 2 : 0;
+        var verb = arguments.Count > offset ? arguments[offset] : null;
+        var action = arguments.Count > offset + 1 ? arguments[offset + 1] : null;
         return command switch
         {
-            "az" => prefix == "logout" || prefix.StartsWith("account show", StringComparison.Ordinal),
-            "aws" => prefix.StartsWith("sts get-caller-identity", StringComparison.Ordinal) || prefix == "sso logout",
-            "gcloud" => prefix.StartsWith("auth list", StringComparison.Ordinal) || prefix.StartsWith("auth revoke", StringComparison.Ordinal),
+            "az" => verb == "logout" && arguments.Count == 1
+                || verb == "account" && action is "show" or "list",
+            "aws" => verb == "sts" && action == "get-caller-identity"
+                || verb == "configure" && action == "list-profiles"
+                || verb == "sso" && action == "logout",
+            "gcloud" => verb == "auth" && action is "list" or "revoke",
             _ => false
         };
     }
