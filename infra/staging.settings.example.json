@@ -3,7 +3,7 @@
     "Instance": "https://login.microsoftonline.com/",
     "TenantId": "56c9fa43-26a9-40e2-80b1-899780a2d78f",
     "ClientId": "<staging-api-client-id>",
-    "Audience": "api://<staging-api-client-id>"
+    "Audience": "<staging-api-client-id>"
   },
   "WebConsole": {
     "Enabled": true,

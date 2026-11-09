@@ -52,15 +52,15 @@ $schema = Join-Path $bundle 'infra\postgres'
 $scripts = Join-Path $bundle 'scripts'
 $config = Join-Path $bundle 'config'
 New-Item -ItemType Directory -Path $schema, $scripts, $config -Force | Out-Null
-foreach ($name in @(
-    '001-schema.sql', '002-central-monitoring.sql', '003-governance-deadlines.sql',
-    '004-operational-integrations.sql', '005-operations-scale.sql', '006-security-connectors.sql', '007-cloud-activity.sql', '008-inbound-security.sql', '009-entitlement-evidence.sql', '010-priority-two.sql', '011-trust-credential-monitoring.sql', '012-break-glass-reports.sql', '013-continuous-change-feeds.sql', '014-authoritative-decisions.sql', 'backup-roles.sql'
-)) {
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot "infra\postgres\$name") -Destination $schema
-}
+$migrations = @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'infra\postgres') -Filter '*.sql' |
+    Where-Object Name -Match '^\d{3}-' | Sort-Object Name)
+$migrations | Copy-Item -Destination $schema
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'infra\postgres\backup-roles.sql') -Destination $schema
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'infra\postgres\license-server.settings.example.json') -Destination $config
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'infra\staging.settings.example.json') -Destination $config
-foreach ($name in @('configure-audit-archive.ps1', 'backup-postgres.ps1', 'test-postgres-restore.ps1')) {
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'infra\postgres\azure-blob-archive.settings.example.json') -Destination $config
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs\deployment\azure-blob-audit-archive.md') -Destination $bundle
+foreach ($name in @('configure-audit-archive.ps1', 'configure-license-server.ps1', 'credential-writer.ps1', 'backup-postgres.ps1', 'test-postgres-restore.ps1')) {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts\$name") -Destination $scripts
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-StagingPackage.ps1') -Destination $scripts
@@ -71,7 +71,7 @@ $manifest = [ordered]@{
     runtime = 'win-x64'
     createdUtc = [DateTime]::UtcNow.ToString('o')
     includesWebConsole = $true
-    migrations = @('001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012')
+    migrations = @($migrations | ForEach-Object { $_.Name.Substring(0, 3) })
     configuration = 'Host-supplied; no staging credentials are included.'
     files = @(Get-ChildItem -LiteralPath $bundle -Recurse -File | ForEach-Object {
         [ordered]@{

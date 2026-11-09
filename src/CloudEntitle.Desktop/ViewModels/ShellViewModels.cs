@@ -108,6 +108,11 @@ public sealed class MainWindowViewModel : ObservableObject
         _navigation = navigation;
         ScanProgress = navigation.CurrentViewModel as DashboardViewModel;
         _cloudConnectionState = cloudConnectionState ?? new CloudConnectionState();
+        foreach (var provider in Enum.GetValues<CloudProviderType>().Where(provider =>
+            !_cloudConnectionState.ConnectedProviders.Contains(provider) && _cloudConnectionState.PendingProvider != provider))
+        {
+            _cloudConnectionState.DisconnectProvider(provider);
+        }
         _authenticationLauncher = authenticationLauncher;
         _subscription = subscription;
         if (subscription is not null) subscription.Changed += (_, _) => OnPropertyChanged(nameof(EditionDisplayName));
@@ -176,6 +181,11 @@ public sealed class MainWindowViewModel : ObservableObject
             await _subscription.RefreshAsync(register);
             StatusMessage = EditionDisplayName;
         }
+        catch (OrganizationSignInRequiredException exception)
+        {
+            _navigation.NavigateTo<OrganizationViewModel>();
+            StatusMessage = exception.Message;
+        }
         catch (Exception exception)
         {
             StatusMessage = $"License validation failed: {exception.Message}";
@@ -204,6 +214,8 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             try
             {
+                if (_cloudConnectionState.IsExplicitlyDisconnected(provider))
+                    return (Provider: provider, IsConnected: false);
                 return (Provider: provider, IsConnected: await _authenticationLauncher.IsConnectedAsync(provider));
             }
             catch

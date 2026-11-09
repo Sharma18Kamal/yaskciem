@@ -14,6 +14,7 @@
     <PackageReference Include="Npgsql" Version="9.0.4" />
     <PackageReference Include="AWSSDK.S3" Version="3.7.400.0" />
     <PackageReference Include="Azure.Identity" Version="1.17.2" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.25.1" />
     <ProjectReference Include="..\CloudEntitle.Licensing\CloudEntitle.Licensing.csproj" />
     <ProjectReference Include="..\CloudEntitle.Integration\CloudEntitle.Integration.csproj" />
     <ProjectReference Include="..\CloudEntitle.Security\CloudEntitle.Security.csproj" />

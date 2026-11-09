@@ -41,6 +41,13 @@ public sealed class SubscriptionAccessService(HttpClient client, IApiAccessToken
             Changed?.Invoke(this, EventArgs.Empty);
             return result;
         }
+        catch (OrganizationSignInRequiredException)
+        {
+            Status = "License Server sign-in required: open Organizations and select Sign in";
+            Changed?.Invoke(this, EventArgs.Empty);
+            Log.Information("Subscription validation requires organization sign-in; licensed operations are blocked.");
+            throw;
+        }
         catch (Exception exception) when (exception is not OperationCanceledException || !token.IsCancellationRequested)
         {
             Status = "License validation unavailable: existing data is read-only";

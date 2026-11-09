@@ -3,7 +3,7 @@
     "Instance": "https://login.microsoftonline.com/",
     "TenantId": "organizations",
     "ClientId": "<api-app-client-id>",
-    "Audience": "<api-app-id-uri>"
+    "Audience": "<api-app-client-id>"
   },
   "ConnectionStrings": {
     "Postgres": "<set-through-secret-provider>"

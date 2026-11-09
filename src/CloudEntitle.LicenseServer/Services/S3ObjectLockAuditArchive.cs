@@ -189,7 +189,7 @@ public sealed class AuditArchiveWorker(
                     || laggedBy > TimeSpan.FromMinutes(maximumLagMinutes);
                 var details = lagging
                     ? $"WORM archive lag threshold exceeded: {progress.PendingEvents} pending event(s), oldest pending age {laggedBy.TotalMinutes:F0} minute(s)."
-                    : "S3-compatible audit archive is reachable with versioning and COMPLIANCE Object Lock retention.";
+                    : "WORM audit archive is reachable and its required immutable retention has been verified.";
                 var ready = !lagging;
                 var changed = status.Set(ready, details, progress);
                 if (lagging)

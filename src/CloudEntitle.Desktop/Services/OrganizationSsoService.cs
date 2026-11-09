@@ -17,6 +17,14 @@ public interface IApiAccessTokenProvider
     Task<string> GetApiAccessTokenAsync(CancellationToken cancellationToken = default);
 }
 
+public sealed class OrganizationSignInRequiredException : InvalidOperationException
+{
+    public OrganizationSignInRequiredException()
+        : base("Open Organizations, enter your Microsoft Entra tenant ID, and select Sign in. Then select Start 30-day trial or Refresh license before scanning. Azure/AWS cloud connections do not sign you in to the License Server.")
+    {
+    }
+}
+
 public sealed class EntraOrganizationSsoService : IOrganizationSsoService, IApiAccessTokenProvider
 {
     private const string ClientIdEnvironmentVariable = "YASK_CIEM_ENTRA_CLIENT_ID";
@@ -48,8 +56,6 @@ public sealed class EntraOrganizationSsoService : IOrganizationSsoService, IApiA
         var result = await application.AcquireTokenInteractive(new[] { "User.Read" })
             .WithPrompt(Prompt.SelectAccount)
             .ExecuteAsync(cancellationToken);
-        _application = application;
-        _signedInAccount = result.Account;
         if (!string.IsNullOrWhiteSpace(_apiScope))
         {
             try
@@ -94,15 +100,17 @@ public sealed class EntraOrganizationSsoService : IOrganizationSsoService, IApiA
         else if (profile.RootElement.TryGetProperty("userPrincipalName", out var userPrincipalName) && !string.IsNullOrWhiteSpace(userPrincipalName.GetString()))
             email = userPrincipalName.GetString()!;
 
+        _application = application;
+        _signedInAccount = result.Account;
         return new OrganizationIdentity(userId, subject, authenticatedTenant.ToString(), email.Trim());
     }
 
     public async Task<string> GetApiAccessTokenAsync(CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(_apiScope))
-            throw new InvalidOperationException($"Configure {ApiScopeEnvironmentVariable} with the API's delegated scope before synchronizing central audit events.");
+            throw new InvalidOperationException($"Configure {ApiScopeEnvironmentVariable} with the License Server API's delegated scope, then restart Desktop.");
         if (_application is null || _signedInAccount is null)
-            throw new InvalidOperationException("Sign in with Entra ID before synchronizing central audit events.");
+            throw new OrganizationSignInRequiredException();
 
         var result = await _application.AcquireTokenSilent(new[] { _apiScope }, _signedInAccount)
             .ExecuteAsync(cancellationToken);

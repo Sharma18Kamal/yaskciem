@@ -809,6 +809,7 @@
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="MICROSOFT ENTRA SSO" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="Sign in here for License Server access, then select Start 30-day trial or Refresh license. Connecting Azure or AWS is a separate cloud CLI sign-in." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,8"/>
                                 <TextBlock Text="{Binding SignedInAs}" Foreground="{StaticResource PrimaryBrush}" Margin="0,6,0,8" TextWrapping="Wrap"/>
                                 <TextBox Text="{Binding SignInTenantId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Entra tenant ID for the selected organization"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">

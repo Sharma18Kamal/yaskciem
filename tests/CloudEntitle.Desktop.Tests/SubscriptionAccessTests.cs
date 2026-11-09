@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Desktop.Services;
+using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Domain;
 using CloudEntitle.Integration.Contracts;
 using Xunit;
@@ -11,6 +12,65 @@ namespace CloudEntitle.Desktop.Tests;
 
 public sealed class SubscriptionAccessTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void LicenseCommands_WhenSignedOut_NavigateToOrganizationsWithoutCallingServer(bool registerTrial)
+    {
+        var handler = new UnavailableHandler();
+        var subscription = new SubscriptionAccessService(new HttpClient(handler) { BaseAddress = new("https://localhost:7443/") },
+            new SignedOutTokens());
+        var navigation = new SignInNavigation();
+        var viewModel = new MainWindowViewModel(navigation, subscription: subscription);
+
+        var command = registerTrial ? viewModel.StartTrialCommand : viewModel.RefreshLicenseCommand;
+        command.Execute(null);
+
+        Assert.True(command.CanExecute(null));
+        Assert.Equal(typeof(OrganizationViewModel), navigation.Destination);
+        Assert.Contains("Open Organizations", viewModel.StatusMessage);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    private sealed class SignInNavigation : INavigationService
+    {
+        public object CurrentViewModel { get; } = new object();
+        public Type? Destination { get; private set; }
+        public event EventHandler? CurrentViewModelChanged;
+
+        public void NavigateTo<TViewModel>() where TViewModel : class
+        {
+            Destination = typeof(TViewModel);
+            CurrentViewModelChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    [Fact]
+    public async Task MissingOrganizationSignIn_BlocksCloudCommandsWithActionableGuidance()
+    {
+        var handler = new UnavailableHandler();
+        var subscription = new SubscriptionAccessService(new HttpClient(handler) { BaseAddress = new("https://localhost:7443/") },
+            new SignedOutTokens());
+        var inner = new Runner();
+        var runner = new LicensedCloudCommandRunner(inner, subscription);
+
+        var exception = await Assert.ThrowsAsync<OrganizationSignInRequiredException>(() =>
+            runner.RunAsync("az", ["resource", "list"]));
+
+        Assert.Contains("Open Organizations", exception.Message);
+        Assert.Contains("Start 30-day trial", exception.Message);
+        Assert.DoesNotContain("synchronizing central audit", exception.Message);
+        Assert.Contains("sign-in required", subscription.Status);
+        Assert.Equal(0, handler.Calls);
+        Assert.Equal(0, inner.Calls);
+    }
+
+    private sealed class SignedOutTokens : IApiAccessTokenProvider
+    {
+        public Task<string> GetApiAccessTokenAsync(CancellationToken cancellationToken = default)
+            => throw new OrganizationSignInRequiredException();
+    }
+
     [Theory]
     [InlineData("Trial", true)]
     [InlineData("Licensed", true)]

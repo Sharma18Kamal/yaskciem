@@ -10,6 +10,15 @@ using Npgsql;
 using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
+var localSettingsPath = builder.Configuration["LocalSettingsPath"];
+if (!string.IsNullOrWhiteSpace(localSettingsPath))
+{
+    if (!builder.Environment.IsDevelopment())
+        throw new InvalidOperationException("LocalSettingsPath is allowed only in Development.");
+    builder.Configuration.AddJsonFile(Path.GetFullPath(localSettingsPath), optional: false, reloadOnChange: false);
+    builder.Configuration.AddEnvironmentVariables();
+    builder.Configuration.AddCommandLine(args);
+}
 
 builder.Services.AddHealthChecks()
 	.AddCheck<OperationsReadinessHealthCheck>("operations-ready", tags: ["ready"])
@@ -38,6 +47,11 @@ if (string.IsNullOrWhiteSpace(apiClientId))
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(entraConfiguration);
+builder.Services.Configure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+{
+    // Policies and endpoint tenant boundaries use the original Entra claim names.
+    options.MapInboundClaims = false;
+});
 builder.Services.AddAuthorization(options =>
 {
 	options.AddPolicy("CiemApiAccess", policy => policy
@@ -136,6 +150,9 @@ builder.Services.AddHostedService<OperationsTelemetrySampler>();
 builder.Services.AddHostedService<OperationsRetentionWorker>();
 
 var auditArchiveConfiguration = builder.Configuration.GetSection("AuditArchive");
+var auditArchiveProvider = auditArchiveConfiguration["Provider"];
+var isAzureBlobArchive = auditArchiveProvider?.Equals("AzureBlob", StringComparison.OrdinalIgnoreCase) == true;
+var isS3Archive = auditArchiveProvider?.Equals("S3ObjectLock", StringComparison.OrdinalIgnoreCase) == true;
 var archiveCredentialError = string.Empty;
 WindowsGenericCredential? archiveDatabaseCredential = null;
 WindowsGenericCredential? s3Credential = null;
@@ -146,7 +163,7 @@ try
 	var s3CredentialTarget = auditArchiveConfiguration["S3CredentialTarget"]
 		?? "YASK-CIEM/LicenseServer/AuditArchive/S3";
 	archiveDatabaseCredential = WindowsGenericCredentialStore.Read(databaseCredentialTarget);
-	s3Credential = WindowsGenericCredentialStore.Read(s3CredentialTarget);
+	if (isS3Archive) s3Credential = WindowsGenericCredentialStore.Read(s3CredentialTarget);
 }
 catch (Exception exception)
 {
@@ -154,21 +171,23 @@ catch (Exception exception)
 	auditArchiveStatus.Set(false, $"Unable to read archive credentials from Windows Credential Manager: {archiveCredentialError}");
 }
 var auditArchiveDatabase = builder.Configuration.GetConnectionString("AuditArchive") ?? archiveDatabaseCredential?.Secret;
-var auditArchiveProvider = auditArchiveConfiguration["Provider"];
 var archiveAccessKey = auditArchiveConfiguration["AccessKey"] ?? s3Credential?.UserName;
 var archiveSecretKey = auditArchiveConfiguration["SecretKey"] ?? s3Credential?.Secret;
-if (auditArchiveProvider?.Equals("S3ObjectLock", StringComparison.OrdinalIgnoreCase) == true
+if ((isS3Archive || isAzureBlobArchive)
     && !string.IsNullOrWhiteSpace(auditArchiveDatabase)
     && string.IsNullOrEmpty(archiveCredentialError)
     && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Endpoint"])
-    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Region"])
-    && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Bucket"])
-	&& !string.IsNullOrWhiteSpace(archiveAccessKey)
-	&& !string.IsNullOrWhiteSpace(archiveSecretKey)
+    && (isAzureBlobArchive
+        ? !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Container"])
+            && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["StorageAccountResourceId"])
+        : !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Region"])
+            && !string.IsNullOrWhiteSpace(auditArchiveConfiguration["Bucket"])
+            && !string.IsNullOrWhiteSpace(archiveAccessKey)
+            && !string.IsNullOrWhiteSpace(archiveSecretKey))
     && integrityKeyBytes is not null)
 {
 	NpgsqlDataSource? archiveDataSource = null;
-	S3ObjectLockAuditArchive? archiveDestination = null;
+	IAuditSegmentArchive? archiveDestination = null;
 	try
 	{
 		archiveDataSource = new NpgsqlDataSourceBuilder(auditArchiveDatabase).Build();
@@ -180,9 +199,28 @@ if (auditArchiveProvider?.Equals("S3ObjectLock", StringComparison.OrdinalIgnoreC
 		var maximumLagMinutes = auditArchiveConfiguration.GetValue("MaxLagMinutes", 60);
 		var alertWebhookUrl = builder.Configuration["Monitoring:AlertWebhookUrl"]
 			?? Environment.GetEnvironmentVariable("YASK_CIEM_ALERT_WEBHOOK_URL");
-		archiveDestination = new S3ObjectLockAuditArchive(
-			auditArchiveConfiguration["Endpoint"]!, auditArchiveConfiguration["Region"]!, auditArchiveConfiguration["Bucket"]!,
-			archiveAccessKey!, archiveSecretKey!, archiveRetentionDays);
+		if (isAzureBlobArchive)
+		{
+			var authentication = auditArchiveConfiguration["Authentication"] ?? "ManagedIdentity";
+			Azure.Core.TokenCredential credential = authentication switch
+			{
+				"ManagedIdentity" => string.IsNullOrWhiteSpace(auditArchiveConfiguration["ManagedIdentityClientId"])
+					? new Azure.Identity.ManagedIdentityCredential()
+					: new Azure.Identity.ManagedIdentityCredential(Azure.Identity.ManagedIdentityId.FromUserAssignedClientId(
+						auditArchiveConfiguration["ManagedIdentityClientId"]!)),
+				"AzureCli" when builder.Environment.IsDevelopment() => new Azure.Identity.AzureCliCredential(),
+				_ => throw new InvalidOperationException("Azure archive authentication must be ManagedIdentity; AzureCli is allowed only in Development.")
+			};
+			archiveDestination = new AzureBlobAuditArchive(
+				auditArchiveConfiguration["Endpoint"]!, auditArchiveConfiguration["StorageAccountResourceId"]!,
+				auditArchiveConfiguration["Container"]!, credential, archiveRetentionDays);
+		}
+		else
+		{
+			archiveDestination = new S3ObjectLockAuditArchive(
+				auditArchiveConfiguration["Endpoint"]!, auditArchiveConfiguration["Region"]!, auditArchiveConfiguration["Bucket"]!,
+				archiveAccessKey!, archiveSecretKey!, archiveRetentionDays);
+		}
 		var segmentArchiver = new PostgresAuditSegmentArchiver(archiveDataSource, integrityKeys!,
 			segmentEventCount, archiveRetentionDays, objectPrefix);
 		builder.Services.AddSingleton(archiveDataSource);
@@ -198,14 +236,14 @@ if (auditArchiveProvider?.Equals("S3ObjectLock", StringComparison.OrdinalIgnoreC
 	}
 	catch (Exception exception)
 	{
-		archiveDestination?.Dispose();
+		(archiveDestination as IDisposable)?.Dispose();
 		archiveDataSource?.Dispose();
 		auditArchiveStatus.Set(false, $"WORM audit archive configuration failed: {SensitiveDataRedactor.RedactText(exception.Message)}");
 	}
 }
 else
 {
-	auditArchiveStatus.Set(false, "Configure AuditArchive:Provider=S3ObjectLock, the independent archive PostgreSQL connection, HTTPS endpoint, bucket, region, and secret-provider credentials.");
+	auditArchiveStatus.Set(false, "Configure AuditArchive:Provider=AzureBlob with the Blob HTTPS endpoint, container, storage account resource ID and managed identity, or S3ObjectLock with bucket, region and secret-provider credentials. Both require the independent archive PostgreSQL connection and audit integrity keys.");
 }
 if (integrityKeyBytes is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(integrityKeyBytes);
 

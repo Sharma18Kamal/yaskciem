@@ -47,17 +47,19 @@ try {
         Where-Object Name -Match '^\d{3}-' |
         Copy-Item -Destination $schemaDirectory
     Copy-Item -LiteralPath $settingsTemplate -Destination (Join-Path $configDirectory 'license-server.settings.example.json')
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'infra\postgres\azure-blob-archive.settings.example.json') -Destination $configDirectory
     Copy-Item -LiteralPath $archiveWizard -Destination $scriptsDirectory
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'credential-writer.ps1') -Destination $scriptsDirectory
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'configure-license-server.ps1') -Destination $scriptsDirectory
     Copy-Item -LiteralPath $deploymentGuide -Destination (Join-Path $bundleRoot 'README.md')
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs\deployment\azure-blob-audit-archive.md') -Destination $bundleRoot
 
     $manifest = [pscustomobject]@{
         Product = 'YASK-CIEM Self-Hosted License Server'
         Version = $PackageVersion
         Runtime = $Runtime
         Includes = @('Self-contained License Server publish output', 'All numbered PostgreSQL migrations', 'Non-secret configuration template', 'Server and archive Credential Manager setup wizards', 'Deployment guide')
-        ExternalPrerequisites = @('PostgreSQL 15+', 'S3-compatible Object Lock COMPLIANCE archive', 'Microsoft Entra API app registration')
+        ExternalPrerequisites = @('PostgreSQL 15+', 'Azure Blob version-level locked immutable archive or S3-compatible Object Lock COMPLIANCE archive', 'Microsoft Entra API app registration')
         ContainsSecrets = $false
     } | ConvertTo-Json -Depth 4
     [IO.File]::WriteAllText((Join-Path $bundleRoot 'package-manifest.json'), $manifest + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))

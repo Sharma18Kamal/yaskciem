@@ -1,12 +1,14 @@
 # Self-Hosted License Server Deployment
 
-This deployment bundle runs the ASP.NET Core License Server on Windows x64. It is separate from the YASK-CIEM desktop MSI/MSIX. It does not install PostgreSQL or an S3-compatible Object Lock service; provision those separately before starting the API.
+For Desktop testing without an Azure VM, follow [laptop setup](local-license-server.md).
+
+This deployment bundle runs the ASP.NET Core License Server on Windows x64. It is separate from the YASK-CIEM desktop MSI/MSIX. It does not provision PostgreSQL or immutable archive storage; provision those separately before starting the API. For an Azure-only archive, use [native Azure Blob immutable storage](azure-blob-audit-archive.md) instead of the S3 destination.
 
 ## Prerequisites
 
 - Windows Server 2019 or later (or an organization-approved Windows Server release), with the .NET runtime included in the self-contained bundle.
 - PostgreSQL 15+ reachable from the License Server host; apply `infra/postgres/001-schema.sql` and create the dedicated `yask_ciem_runtime` and `yask_ciem_archiver` logins as described in [PostgreSQL setup](../../infra/postgres/README.md).
-- An independently administered S3-compatible bucket with versioning and Object Lock enabled, default COMPLIANCE retention at least equal to the audit retention policy, and a least-privilege archive identity.
+- An independently administered S3-compatible bucket with versioning and Object Lock enabled, default COMPLIANCE retention at least equal to the audit retention policy, and a least-privilege archive identity; or an Azure Blob archive configured as described in [Azure archive setup](azure-blob-audit-archive.md).
 - A multitenant Entra API app registration, its client ID/audience, and the required scopes/roles.
 - A service identity that can read its configuration and Windows Credential Manager entries and reach the database and archive endpoint.
 
@@ -32,7 +34,7 @@ This deployment bundle runs the ASP.NET Core License Server on Windows x64. It i
      -SettingsPath '.\publish\appsettings.Production.json'
    ```
 
-   The wizard prompts for the Object Lock endpoint, signing region, bucket, archive database connection string, S3 access key, and S3 secret key. It stores only non-secret values in JSON; database and S3 secrets go to that identity's Windows Credential Manager. Run the server under the same identity so it can retrieve those credentials.
+   The default S3 wizard prompts for the Object Lock endpoint, signing region, bucket, archive database connection string, S3 access key, and S3 secret key. For Azure Blob, add `-Provider AzureBlob`; it requests the Blob endpoint, storage account ARM resource ID, container and optional managed identity client ID instead of S3 credentials. It stores only non-secret values in JSON; database and S3 secrets go to that identity's Windows Credential Manager. Run the server under the same identity so it can retrieve those credentials.
 5. Configure Entra settings and the integrity-key ring using the service identity's secret/configuration provider. Provide every historical audit key still needed to verify retained rows and archived segments. Configure `YASK_CIEM_ALERT_WEBHOOK_URL` or `Monitoring__AlertWebhookUrl` through the protected service environment if alert delivery is required.
 6. Restrict inbound access to the License Server HTTPS reverse proxy and required private networks. Do not expose PostgreSQL (5432) or the S3 API/console to the public internet. Configure TLS at the approved reverse proxy and set the API's URL binding to a private listener.
 7. Start the server executable under the configured service identity using the organization's approved Windows service/process supervisor. For a foreground smoke test from the package directory:

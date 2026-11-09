@@ -26,7 +26,7 @@ try {
     $databaseTarget = 'YASK-CIEM/LicenseServer/Runtime/Postgres'
     $keyTarget = 'YASK-CIEM/LicenseServer/AuditIntegrity/v1'
     $settings = @{
-        AzureAd = @{ Instance = 'https://login.microsoftonline.com/'; TenantId = 'organizations'; ClientId = "$ApiClientId"; Audience = "api://$ApiClientId" }
+        AzureAd = @{ Instance = 'https://login.microsoftonline.com/'; TenantId = 'organizations'; ClientId = "$ApiClientId"; Audience = "$ApiClientId" }
         DatabaseCredentialTarget = $databaseTarget
         AuditRetention = @{ Provider = 'Postgres'; MinimumRetentionDays = 2555; IntegrityKeyId = 'v1'; IntegrityCredentialTarget = $keyTarget }
         PrivilegedAccess = @{ Organizations = @{} }
@@ -49,4 +49,4 @@ finally {
 }
 Write-Host "Prepared non-secret server settings: $path"
 Write-Host "Desktop: set YASK_CIEM_API_BASE_URL=$($ApiBaseUri.AbsoluteUri), YASK_CIEM_ENTRA_CLIENT_ID=$DesktopClientId, YASK_CIEM_API_SCOPE=api://$ApiClientId/access_as_user, then restart."
-Write-Warning 'Apply every numbered PostgreSQL migration, configure the Object Lock archive with configure-audit-archive.ps1, arrange HTTPS/process supervision, and verify /api/v1/readiness before use. This wizard has not deployed or started the server.'
+Write-Warning 'Apply every numbered PostgreSQL migration, configure the immutable archive with configure-audit-archive.ps1 (-Provider AzureBlob or S3ObjectLock), arrange HTTPS/process supervision, and verify /api/v1/readiness before use. This wizard has not deployed or started the server.'

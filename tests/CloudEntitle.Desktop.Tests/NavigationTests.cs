@@ -85,7 +85,7 @@ public sealed class NavigationTests
     }
 
     [Fact]
-    public async Task MainWindowViewModel_ShouldRefreshAndShareCloudCliStatusAtStartup()
+    public async Task MainWindowViewModel_ShouldNotActivateCachedCloudCredentialsAtStartup()
     {
         var services = new ServiceCollection();
         services.AddSingleton<IDemoDataService, NoopDemoDataService>();
@@ -96,11 +96,21 @@ public sealed class NavigationTests
         var cloudState = new CloudConnectionState();
         var authenticationLauncher = new RecordingCloudAuthenticationLauncher();
         authenticationLauncher.LaunchedProviders.Add(CloudProviderType.Azure);
+        authenticationLauncher.LaunchedProviders.Add(CloudProviderType.Aws);
         var viewModel = new MainWindowViewModel(provider.GetRequiredService<INavigationService>(), cloudState, authenticationLauncher);
 
         await viewModel.RefreshCloudConnectionStatusAsync();
 
+        Assert.Equal("No active CLI sign-in", viewModel.CloudConnectionStatus);
+        Assert.Empty(cloudState.ConnectedProviders);
+        Assert.True(await authenticationLauncher.IsConnectedAsync(CloudProviderType.Azure));
+        Assert.True(await authenticationLauncher.IsConnectedAsync(CloudProviderType.Aws));
+
+        cloudState.AllowConnection(CloudProviderType.Azure);
+        cloudState.Update([CloudProviderType.Azure]);
+        await viewModel.RefreshCloudConnectionStatusAsync();
         Assert.Equal("Azure connected", viewModel.CloudConnectionStatus);
+        Assert.DoesNotContain(CloudProviderType.Aws, cloudState.ConnectedProviders);
     }
 
     [Fact]
@@ -125,6 +135,7 @@ public sealed class NavigationTests
         var changed = new List<string?>();
         viewModel.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
+        state.AllowConnection(CloudProviderType.Azure);
         state.Update(new[] { CloudProviderType.Azure });
 
         Assert.True(viewModel.CanDisconnectCloud);

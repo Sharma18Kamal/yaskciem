@@ -1,0 +1,15 @@
+{
+  "AuditArchive": {
+    "Provider": "AzureBlob",
+    "Endpoint": "https://<storage-account>.blob.core.windows.net",
+    "StorageAccountResourceId": "/subscriptions/<subscription-guid>/resourceGroups/<resource-group>/providers/Microsoft.Storage/storageAccounts/<storage-account>",
+    "Container": "ciem-audit",
+    "Authentication": "ManagedIdentity",
+    "DatabaseCredentialTarget": "YASK-CIEM/LicenseServer/AuditArchive/Postgres",
+    "ObjectPrefix": "yask-ciem/audit/v1",
+    "SegmentEventCount": 500,
+    "PollIntervalSeconds": 60,
+    "MaxPendingEvents": 5000,
+    "MaxLagMinutes": 60
+  }
+}

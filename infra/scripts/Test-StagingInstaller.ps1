@@ -9,6 +9,7 @@ try {
     $bundle = Join-Path $root 'bundle'
     New-Item -ItemType Directory -Path $bundle | Out-Null
     $files = @(
+        'infra\postgres\015-jit-safety-guards.sql', 'infra\postgres\017-subscriptions.sql',
         'publish\CloudEntitle.LicenseServer.exe', 'publish\wwwroot\console\index.html',
         'infra\postgres\001-schema.sql', 'infra\postgres\002-central-monitoring.sql',
         'infra\postgres\003-governance-deadlines.sql', 'infra\postgres\004-operational-integrations.sql',
