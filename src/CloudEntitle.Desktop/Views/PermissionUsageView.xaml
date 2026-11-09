@@ -1,0 +1,172 @@
+<UserControl x:Class="CloudEntitle.Desktop.Views.PermissionUsageView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+        <StackPanel Margin="24">
+            <TextBlock Text="{Binding Title}" FontSize="26" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}"/>
+            <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,18"/>
+
+            <WrapPanel>
+                <ComboBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}" DisplayMemberPath="Name"
+                          MinWidth="250" Margin="0,0,10,10" ToolTip="Saved local cloud inventory; live collection is always on demand."/>
+                <ComboBox ItemsSource="{Binding ProviderFilters}" SelectedItem="{Binding ProviderFilter}"
+                          MinWidth="110" Margin="0,0,10,10" ToolTip="Filter permission and history results by provider."/>
+                <ComboBox ItemsSource="{Binding Identities}" SelectedItem="{Binding SelectedIdentity}" DisplayMemberPath="Name"
+                          MinWidth="220" Margin="0,0,10,10" ToolTip="Filter to one identity."/>
+                <ComboBox ItemsSource="{Binding ObservationPeriods}" SelectedItem="{Binding SelectedObservationDays}"
+                          MinWidth="105" Margin="0,0,10,10" ToolTip="Permission evidence window for summaries and risk review."/>
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" MinWidth="220" Margin="0,0,10,10"
+                         Style="{StaticResource SearchBox}" ToolTip="Search identity, permission, action, resource and evidence."/>
+                <Button Content="Analyze saved evidence" Command="{Binding AnalyzeCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,10"/>
+                <Button Content="Refresh accounts" Command="{Binding RefreshAccountsCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,10"/>
+                <Button Content="Load Demo Mode" Command="{Binding LoadDemoCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,10"/>
+                <Button Content="Export usage CSV" Command="{Binding ExportCommand}" IsEnabled="{Binding CanExport}" Style="{StaticResource QuietButton}" Margin="0,0,8,10"/>
+            </WrapPanel>
+
+            <Border Style="{StaticResource SectionCard}">
+                <StackPanel>
+                    <TextBlock Text="On-demand cloud activity collection" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}"/>
+                    <TextBlock Text="Configure client-owned audit sources first. Collection performs read-only provider API/CLI queries; no endpoint is contacted until consent and the button are selected."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,10"/>
+                    <WrapPanel>
+                        <ComboBox ItemsSource="{Binding ActivitySources}" SelectedItem="{Binding SelectedActivitySource}" MinWidth="190" Margin="0,0,8,8"/>
+                        <TextBox Text="{Binding Region, UpdateSourceTrigger=PropertyChanged}" MinWidth="110" Margin="0,0,8,8" ToolTip="AWS region where required"/>
+                        <TextBox Text="{Binding Profile, UpdateSourceTrigger=PropertyChanged}" MinWidth="130" Margin="0,0,8,8" ToolTip="Optional local cloud CLI profile"/>
+                        <TextBox Text="{Binding Destination, UpdateSourceTrigger=PropertyChanged}" MinWidth="220" Margin="0,0,8,8" ToolTip="Optional workspace or archive destination configured by the client"/>
+                        <TextBox Text="{Binding Container, UpdateSourceTrigger=PropertyChanged}" MinWidth="120" Margin="0,0,8,8" ToolTip="Client-owned archive bucket or container where required"/>
+                        <TextBox Text="{Binding Prefix, UpdateSourceTrigger=PropertyChanged}" MinWidth="180" Margin="0,0,8,8" ToolTip="Narrow client-configured archive prefix where required"/>
+                        <CheckBox Content="I authorize a read-only audit query for the selected client account"
+                                  IsChecked="{Binding LiveCollectionConsent}" VerticalAlignment="Center" Margin="4,0,12,8"/>
+                        <Button Content="Collect and analyze" Command="{Binding CollectCommand}" IsEnabled="{Binding LiveCollectionConsent}"
+                                Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"/>
+                    </WrapPanel>
+                    <TextBlock Text="{Binding ActivityStatus}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SectionCard}" Background="#EAF3FC">
+                <TextBlock Text="{Binding Notice}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap"/>
+            </Border>
+
+            <WrapPanel>
+                <Border Style="{StaticResource MetricCard}" MinWidth="180"><StackPanel><TextBlock Text="EFFECTIVE PERMISSIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding TotalEffectivePermissions}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}" MinWidth="150"><StackPanel><TextBlock Text="USED (90 DAYS)" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding UsedPermissions}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}" MinWidth="170"><StackPanel><TextBlock Text="NOT OBSERVED" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding NotObservedPermissions}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+                <Border Style="{StaticResource MetricCard}" MinWidth="160"><StackPanel><TextBlock Text="INCONCLUSIVE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding InconclusivePermissions}" Style="{StaticResource CardValue}"/></StackPanel></Border>
+            </WrapPanel>
+
+            <TabControl MinHeight="360">
+                <TabItem Header="Permission usage">
+                    <DataGrid ItemsSource="{Binding FilteredPermissionRows}" IsReadOnly="True" AutoGenerateColumns="False"
+                              CanUserSortColumns="True" CanUserResizeColumns="True" AlternationCount="2" MinHeight="340">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" SortMemberPath="Provider"/>
+                            <DataGridTextColumn Header="Identity" Binding="{Binding Identity}" SortMemberPath="Identity" MinWidth="170"/>
+                            <DataGridTextColumn Header="Permission" Binding="{Binding Permission}" SortMemberPath="Permission" MinWidth="170"/>
+                            <DataGridTextColumn Header="Action" Binding="{Binding Action}" SortMemberPath="Action" MinWidth="190"/>
+                            <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" SortMemberPath="Resource" MinWidth="150"/>
+                            <DataGridTextColumn Header="30d" Binding="{Binding State30Days}" SortMemberPath="State30Days"/>
+                            <DataGridTextColumn Header="60d" Binding="{Binding State60Days}" SortMemberPath="State60Days"/>
+                            <DataGridTextColumn Header="90d" Binding="{Binding State90Days}" SortMemberPath="State90Days"/>
+                            <DataGridTextColumn Header="Actions 30d" Binding="{Binding Actions30Days}" SortMemberPath="Actions30Days"/>
+                            <DataGridTextColumn Header="Actions 60d" Binding="{Binding Actions60Days}" SortMemberPath="Actions60Days"/>
+                            <DataGridTextColumn Header="Actions 90d" Binding="{Binding Actions90Days}" SortMemberPath="Actions90Days"/>
+                            <DataGridTextColumn Header="First used UTC" Binding="{Binding FirstUsedUtc}" MinWidth="155"/>
+                            <DataGridTextColumn Header="Last used UTC" Binding="{Binding LastUsedUtc}" MinWidth="155"/>
+                            <DataGridTextColumn Header="Attribution" Binding="{Binding Correlation}" MinWidth="220"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </TabItem>
+                <TabItem Header="Identity / unused analysis">
+                    <DataGrid ItemsSource="{Binding FilteredPermissionRows}" IsReadOnly="True" AutoGenerateColumns="False"
+                              CanUserSortColumns="True" AlternationCount="2" MinHeight="340">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Identity" Binding="{Binding Identity}" SortMemberPath="Identity" MinWidth="190"/>
+                            <DataGridTextColumn Header="Permission" Binding="{Binding Permission}" SortMemberPath="Permission" MinWidth="180"/>
+                            <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" MinWidth="170"/>
+                            <DataGridTextColumn Header="90-day evidence" Binding="{Binding State90Days}" SortMemberPath="State90Days" MinWidth="150"/>
+                            <DataGridTextColumn Header="Successful actions" Binding="{Binding Actions90Days}" SortMemberPath="Actions90Days"/>
+                            <DataGridTextColumn Header="Correlation limitations" Binding="{Binding Correlation}" MinWidth="260"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </TabItem>
+                <TabItem Header="Historical activity">
+                    <StackPanel>
+                        <WrapPanel Margin="8">
+                            <TextBlock Text="From UTC" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <DatePicker SelectedDate="{Binding EventStartDate}" Width="150" Margin="0,0,12,0"/>
+                            <TextBlock Text="Through UTC" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <DatePicker SelectedDate="{Binding EventEndDate}" Width="150"/>
+                        </WrapPanel>
+                        <DataGrid ItemsSource="{Binding FilteredHistoryRows}" IsReadOnly="True" AutoGenerateColumns="False"
+                                  CanUserSortColumns="True" AlternationCount="2" MinHeight="300">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Timestamp UTC" Binding="{Binding EventTimestamp}" SortMemberPath="EventTimestamp" MinWidth="190"/>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" SortMemberPath="Provider"/>
+                                <DataGridTextColumn Header="Identity" Binding="{Binding Identity}" SortMemberPath="Identity" MinWidth="170"/>
+                                <DataGridTextColumn Header="API action" Binding="{Binding Action}" SortMemberPath="Action" MinWidth="200"/>
+                                <DataGridTextColumn Header="Permission mapping" Binding="{Binding PermissionAction}" MinWidth="190"/>
+                                <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" MinWidth="160"/>
+                                <DataGridTextColumn Header="Outcome" Binding="{Binding Outcome}" SortMemberPath="Outcome"/>
+                                <DataGridTextColumn Header="Source" Binding="{Binding Source}" MinWidth="150"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <DataGrid ItemsSource="{Binding FilteredTrendRows}" IsReadOnly="True" AutoGenerateColumns="False"
+                                  CanUserSortColumns="True" AlternationCount="2" MinHeight="170" Margin="0,10,0,0">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Bucket" Binding="{Binding BucketType}" SortMemberPath="BucketType"/>
+                                <DataGridTextColumn Header="Start UTC" Binding="{Binding BucketStartUtc}" SortMemberPath="BucketStartUtc"/>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" SortMemberPath="Provider"/>
+                                <DataGridTextColumn Header="Observed" Binding="{Binding ObservedActionCount}" SortMemberPath="ObservedActionCount"/>
+                                <DataGridTextColumn Header="Candidates" Binding="{Binding CandidateActionCount}" SortMemberPath="CandidateActionCount"/>
+                                <DataGridTextColumn Header="Unknown mapping" Binding="{Binding UnknownMappingCount}" SortMemberPath="UnknownMappingCount"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <DataGrid ItemsSource="{Binding ObservationWindows}" IsReadOnly="True" AutoGenerateColumns="False"
+                                  CanUserSortColumns="True" AlternationCount="2" MinHeight="140" Margin="0,10,0,0">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" SortMemberPath="Provider"/>
+                                <DataGridTextColumn Header="Source" Binding="{Binding Source}" SortMemberPath="Source" MinWidth="150"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" SortMemberPath="Status"/>
+                                <DataGridTextColumn Header="From UTC" Binding="{Binding ObservedFromUtc}" SortMemberPath="ObservedFromUtc"/>
+                                <DataGridTextColumn Header="Through UTC" Binding="{Binding ObservedThroughUtc}" SortMemberPath="ObservedThroughUtc"/>
+                                <DataGridTextColumn Header="Records" Binding="{Binding RecordCount}" SortMemberPath="RecordCount"/>
+                                <DataGridCheckBoxColumn Header="Truncated" Binding="{Binding Truncated}"/>
+                                <DataGridTextColumn Header="Coverage details" Binding="{Binding Details}" MinWidth="220"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </TabItem>
+                <TabItem Header="Risk findings &amp; recommendations">
+                    <StackPanel>
+                        <DataGrid ItemsSource="{Binding FindingRows}" IsReadOnly="True" AutoGenerateColumns="False"
+                                  CanUserSortColumns="True" AlternationCount="2" MinHeight="170">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" SortMemberPath="Severity"/>
+                                <DataGridTextColumn Header="Risk score" Binding="{Binding RiskScore}" SortMemberPath="RiskScore"/>
+                                <DataGridTextColumn Header="Identity" Binding="{Binding Identity}" SortMemberPath="Identity" MinWidth="170"/>
+                                <DataGridTextColumn Header="Permission" Binding="{Binding Permission}" MinWidth="170"/>
+                                <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence}" SortMemberPath="Confidence"/>
+                                <DataGridTextColumn Header="Observation days" Binding="{Binding ObservationWindowDays}"/>
+                                <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" MinWidth="260"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <DataGrid ItemsSource="{Binding RecommendationRows}" IsReadOnly="True" AutoGenerateColumns="False"
+                                  CanUserSortColumns="True" AlternationCount="2" MinHeight="170" Margin="0,10,0,0">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Type" Binding="{Binding Type}" SortMemberPath="Type"/>
+                                <DataGridTextColumn Header="Recommendation" Binding="{Binding Title}" SortMemberPath="Title" MinWidth="190"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding State}" SortMemberPath="State"/>
+                                <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" MinWidth="220"/>
+                                <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" MinWidth="220"/>
+                                <DataGridCheckBoxColumn Header="Executable" Binding="{Binding Executable}"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="Recommendations are review-only. This milestone does not remove or modify permissions."
+                                   Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="8"/>
+                    </StackPanel>
+                </TabItem>
+            </TabControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

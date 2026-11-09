@@ -3,6 +3,7 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Normalization.Models;
 using CloudEntitle.RiskEngine.Services;
 using CloudEntitle.RiskEngine.Models;
+using CloudEntitle.RiskEngine.Rules;
 using Xunit;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
@@ -483,6 +484,7 @@ public sealed class RiskEngineTests
             Provider = fixture.Effective.Provider,
             CloudAccountId = fixture.Effective.CloudAccountId,
             PrincipalId = fixture.Effective.PrincipalId,
+            ResourceId = database.Id,
             PermissionId = iamPermission.Id,
             Decision = AccessDecision.Allow,
             EvaluationStatus = EvaluationStatus.FullyEvaluated
@@ -573,7 +575,317 @@ public sealed class RiskEngineTests
         Assert.DoesNotContain(result.Findings, item => item.RuleId == Stable("CIEM-022"));
     }
 
+    [Theory]
+    [InlineData(CloudProvider.Aws, "s3:GetObject", "s3:PutBucketPolicy")]
+    [InlineData(CloudProvider.Azure, "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read", "Microsoft.Storage/storageAccounts/write")]
+    [InlineData(CloudProvider.Gcp, "storage.objects.get", "storage.buckets.setIamPolicy")]
+    public async Task ProviderSpecificSensitiveStoragePair_ShouldCreateEvidenceBackedPotentialFinding(
+        CloudProvider provider, string readAction, string exposureAction)
+    {
+        var fixture = ToxicFixture.Create(provider, readAction, exposureAction);
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+        Assert.Equal(RiskEvaluationState.Potential, finding.EvaluationState);
+        Assert.Equal(RiskSeverity.High, finding.Severity);
+        Assert.Contains("FirstEffectiveAccessId", finding.Evidence.Details.Keys);
+        Assert.Contains("SecondEffectiveAccessId", finding.Evidence.Details.Keys);
+        Assert.Contains("Test classification", finding.Evidence.Details["ResourceEvidence"]);
+    }
+
+    [Fact]
+    public async Task GcpPermissionMatching_IsCaseSensitive()
+    {
+        var fixture = ToxicFixture.Create(CloudProvider.Gcp, "Storage.objects.get", "storage.buckets.setIamPolicy");
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request);
+
+        Assert.DoesNotContain(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+    }
+
+    [Fact]
+    public async Task InheritedAndConditionalPair_IsPotentialWithReducedConfidenceAndTraceableEvidence()
+    {
+        var fixture = ToxicFixture.Create(CloudProvider.Aws, "s3:GetObject", "s3:PutBucketPolicy");
+        fixture.Accesses[0].IsInherited = true;
+        fixture.Accesses[0].IsDirect = false;
+        fixture.Accesses[0].AssignmentType = AssignmentType.Inherited;
+        fixture.Accesses[1].Decision = AccessDecision.Conditional;
+        fixture.Accesses[1].IsConditional = true;
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+        Assert.Equal(RiskEvaluationState.Potential, finding.EvaluationState);
+        Assert.Equal("Low", finding.Evidence.Details["Confidence"]);
+        Assert.Equal("True", finding.Evidence.Details["FirstIsInherited"]);
+        Assert.Equal("True", finding.Evidence.Details["SecondIsConditional"]);
+    }
+
+    [Fact]
+    public async Task ToxicCombination_DoesNotCombineDifferentAccountsOrUnclassifiedStorage()
+    {
+        var fixture = ToxicFixture.Create(CloudProvider.Aws, "s3:GetObject", "s3:PutBucketPolicy");
+        fixture.Accesses[1].CloudAccountId = Guid.NewGuid();
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture.Request);
+        Assert.DoesNotContain(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+
+        fixture = ToxicFixture.Create(CloudProvider.Aws, "s3:GetObject", "s3:PutBucketPolicy");
+        fixture.Request.Resources.Single().Tags.Clear();
+        var noClassification = fixture.Request with { ResourceSecuritySignals = Array.Empty<ResourceSecuritySignal>() };
+        result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(noClassification);
+        Assert.DoesNotContain(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+    }
+
+    [Fact]
+    public async Task CrossCloudFederationPath_RequiresConfirmedTrustAndPrivilegedTargetAccess()
+    {
+        var fixture = CreateTrustPathFixture(TrustRelationshipStatus.Confirmed, AuthorizationConditionState.Satisfied);
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(fixture);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+        Assert.Equal(RiskEvaluationState.Potential, finding.EvaluationState);
+        Assert.Equal("TrustPath", finding.Evidence.Details["ResourceRelation"]);
+        Assert.Contains("trust-document-v4", finding.Evidence.Details["TrustPathEvidence"], StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(TrustRelationshipStatus.Unknown, AuthorizationConditionState.Satisfied)]
+    [InlineData(TrustRelationshipStatus.Rejected, AuthorizationConditionState.Satisfied)]
+    [InlineData(TrustRelationshipStatus.Confirmed, AuthorizationConditionState.NotSatisfied)]
+    public async Task CrossCloudFederationPath_RejectsUnprovenOrConditionDeniedEdges(
+        TrustRelationshipStatus status, AuthorizationConditionState conditionState)
+    {
+        var request = CreateTrustPathFixture(status, conditionState);
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.DoesNotContain(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+    }
+
+    [Fact]
+    public async Task FederationTrustMapper_RequiresMatchingIssuerSubjectAndAudience()
+    {
+        var accountId = Guid.NewGuid();
+        var source = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Aws,
+            FederationIssuer = "https://issuer.example/", FederationSubject = "repo:org/project",
+            FederationAudience = "sts.amazonaws.com", FederationInventoryComplete = true
+        };
+        var target = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(), AccountId = Guid.NewGuid(), CloudProvider = CloudProviderType.Gcp,
+            FederationTrustVerified = true, FederationInventoryComplete = true,
+            FederationTrusts = [new WorkloadFederationTrust("https://issuer.example", "repo:org/project",
+                ["sts.amazonaws.com"], "provider trust configuration")]
+        };
+        var mapped = ToxicTrustRelationshipMapper.FromFederationEvidence([source, target]);
+        source.FederationSubject = "repo:other/project";
+        var unmapped = ToxicTrustRelationshipMapper.FromFederationEvidence([source, target]);
+
+        Assert.Single(mapped);
+        Assert.Equal(TrustRelationshipStatus.Confirmed, mapped[0].Status);
+        Assert.Empty(unmapped);
+    }
+
+    [Fact]
+    public async Task ConditionalPermission_IsFilteredWhenNormalizedContextDisprovesItsCondition()
+    {
+        var fixture = ToxicFixture.Create(CloudProvider.Aws, "s3:GetObject", "s3:PutBucketPolicy");
+        fixture.Accesses[1].Decision = AccessDecision.Conditional;
+        fixture.Accesses[1].IsConditional = true;
+        var deniedCondition = Condition(fixture.Accesses[1].Id, "us-east-1", "eu-west-1");
+        var request = fixture.Request with { PermissionConditions = [deniedCondition] };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        Assert.DoesNotContain(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+    }
+
+    [Fact]
+    public async Task ConditionalPermission_IsSupportedWhenNormalizedContextSatisfiesItsCondition()
+    {
+        var fixture = ToxicFixture.Create(CloudProvider.Aws, "s3:GetObject", "s3:PutBucketPolicy");
+        fixture.Accesses[1].Decision = AccessDecision.Conditional;
+        fixture.Accesses[1].IsConditional = true;
+        var satisfiedCondition = Condition(fixture.Accesses[1].Id, "us-east-1", "us-east-1");
+        var request = fixture.Request with { PermissionConditions = [satisfiedCondition] };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+        Assert.Equal("High", finding.Evidence.Details["Confidence"]);
+        Assert.Equal("Satisfied", finding.Evidence.Details["SecondConditionState"]);
+    }
+
+    [Fact]
+    public async Task UnsupportedConditionSemantics_RemainPotentialWithLowConfidence()
+    {
+        var fixture = ToxicFixture.Create(CloudProvider.Gcp, "storage.objects.get", "storage.buckets.setIamPolicy");
+        fixture.Accesses[1].Decision = AccessDecision.Conditional;
+        fixture.Accesses[1].IsConditional = true;
+        var unknownCondition = Condition(fixture.Accesses[1].Id, "region", "region") with
+        {
+            Provider = CloudProvider.Gcp,
+            IsSupported = false
+        };
+        var request = fixture.Request with { PermissionConditions = [unknownCondition] };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
+        Assert.Equal("Low", finding.Evidence.Details["Confidence"]);
+        Assert.Equal("Unknown", finding.Evidence.Details["SecondConditionState"]);
+    }
+
+    [Theory]
+    [InlineData("us-east-1", AuthorizationConditionState.Satisfied)]
+    [InlineData("eu-west-1", AuthorizationConditionState.NotSatisfied)]
+    public void AwsConditionJson_UsesThreeValuedEvaluation(string region, AuthorizationConditionState expected)
+    {
+        var evidence = AuthorizationConditionEvaluator.FromAwsJson(Guid.NewGuid(), "aws-policy-7",
+            """{"StringEquals":{"aws:RequestedRegion":"us-east-1"},"Bool":{"aws:SecureTransport":"true"}}""",
+            new Dictionary<string, string>
+            {
+                ["aws:RequestedRegion"] = region,
+                ["aws:SecureTransport"] = "true"
+            });
+
+        var result = AuthorizationConditionEvaluator.Evaluate(evidence);
+
+        Assert.Equal(expected, result.State);
+        Assert.Contains("aws-policy-7", result.EvidenceSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AwsConditionJson_LeavesMissingContextUnknown()
+    {
+        var evidence = AuthorizationConditionEvaluator.FromAwsJson(Guid.NewGuid(), "aws-policy-7",
+            """{"StringEquals":{"aws:RequestedRegion":"us-east-1"}}""",
+            new Dictionary<string, string>());
+
+        Assert.Equal(AuthorizationConditionState.Unknown, AuthorizationConditionEvaluator.Evaluate(evidence).State);
+    }
+
+    [Fact]
+    public void AwsConditionJson_LeavesUnsupportedOperatorsUnknown()
+    {
+        var evidence = AuthorizationConditionEvaluator.FromAwsJson(Guid.NewGuid(), "aws-policy-8",
+            """{"IpAddress":{"aws:SourceIp":"192.0.2.0/24"}}""",
+            new Dictionary<string, string> { ["aws:SourceIp"] = "192.0.2.10" });
+
+        Assert.False(evidence.IsSupported);
+        Assert.Equal(AuthorizationConditionState.Unknown, AuthorizationConditionEvaluator.Evaluate(evidence).State);
+    }
+
+    private static PermissionConditionEvidence Condition(Guid accessId, string actual, string expected)
+        => new(accessId, CloudProvider.Aws, "condition-policy-v2", "aws:RequestedRegion StringEquals",
+            true, [new AuthorizationConditionClause([
+                new AuthorizationConditionPredicate("aws:RequestedRegion",
+                    AuthorizationConditionOperator.StringEquals, [expected], "StringEquals")
+            ])], new Dictionary<string, string> { ["aws:RequestedRegion"] = actual });
+
+    private static RiskEvaluationRequest CreateTrustPathFixture(
+        TrustRelationshipStatus status, AuthorizationConditionState conditionState)
+    {
+        var sourceAccountId = Guid.NewGuid();
+        var targetAccountId = Guid.NewGuid();
+        var sourcePrincipalId = Guid.NewGuid();
+        var targetPrincipalId = Guid.NewGuid();
+        var sourcePermission = new CloudPermission
+        {
+            Id = Guid.NewGuid(), AccountId = sourceAccountId, Name = "Assume delegated role",
+            Action = "sts:AssumeRole", AccessType = AccessType.Allow
+        };
+        var targetPermission = new CloudPermission
+        {
+            Id = Guid.NewGuid(), AccountId = targetAccountId, Name = "Project owner",
+            Action = "roles/owner", AccessType = AccessType.Allow
+        };
+        var sourceAccess = new DomainEffectiveAccess
+        {
+            Id = Guid.NewGuid(), Provider = CloudProvider.Aws, CloudAccountId = sourceAccountId,
+            PrincipalId = sourcePrincipalId, PermissionId = sourcePermission.Id,
+            Decision = AccessDecision.Allow, EvaluationStatus = EvaluationStatus.FullyEvaluated,
+            AccessType = AccessType.Allow, IsDirect = true
+        };
+        var targetAccess = new DomainEffectiveAccess
+        {
+            Id = Guid.NewGuid(), Provider = CloudProvider.Gcp, CloudAccountId = targetAccountId,
+            PrincipalId = targetPrincipalId, PermissionId = targetPermission.Id,
+            Decision = AccessDecision.Allow, EvaluationStatus = EvaluationStatus.FullyEvaluated,
+            AccessType = AccessType.Allow, IsDirect = true, IsPrivileged = true
+        };
+        var sourceAccount = new CloudAccount
+        {
+            Id = sourceAccountId, Name = "source-account", ExternalAccountId = "source-account",
+            CloudProvider = CloudProviderType.Aws
+        };
+        var targetAccount = new CloudAccount
+        {
+            Id = targetAccountId, Name = "target-account", ExternalAccountId = "target-account",
+            CloudProvider = CloudProviderType.Gcp
+        };
+        var sourcePrincipal = new CloudPrincipal
+        {
+            Id = sourcePrincipalId, AccountId = sourceAccountId, Name = "source-workload",
+            PrincipalId = "source-workload", CloudProvider = CloudProviderType.Aws,
+            IdentityType = IdentityType.ServiceAccount
+        };
+        var targetPrincipal = new CloudPrincipal
+        {
+            Id = targetPrincipalId, AccountId = targetAccountId, Name = "target-owner",
+            PrincipalId = "target-owner", CloudProvider = CloudProviderType.Gcp,
+            IdentityType = IdentityType.ServiceAccount, IsPrivileged = true
+        };
+        var relationship = new ToxicTrustRelationshipEvidence(sourcePrincipalId, sourceAccountId, CloudProvider.Aws,
+            targetPrincipalId, targetAccountId, CloudProvider.Gcp, "Workload federation", status,
+            "GCP workload identity provider", "trust-document-v4", DateTime.UtcNow,
+            RequiresSourcePermission: false,
+            ConditionState: conditionState, ConditionEvidence: $"condition={conditionState}");
+        var trustRule = ToxicCombinationRuleDefaults.Create().Single(item => item.RequireTrustPath);
+        return new RiskEvaluationRequest([sourceAccount, targetAccount], [sourcePrincipal, targetPrincipal],
+            [], [], [], [sourcePermission, targetPermission], [], [sourceAccess, targetAccess], [], [],
+            Options: new(EnabledRules: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "CIEM-021" }),
+            ToxicCombinationRules: [trustRule], ToxicTrustRelationships: [relationship]);
+    }
+
     private static Guid Stable(string rule) => GuidUtility.Create(GuidUtility.Namespace, rule);
+
+    private sealed record ToxicFixture(RiskEvaluationRequest Request, DomainEffectiveAccess[] Accesses)
+    {
+        public static ToxicFixture Create(CloudProvider provider, string firstAction, string secondAction)
+        {
+            var accountId = Guid.NewGuid();
+            var principalId = Guid.NewGuid();
+            var resourceId = Guid.NewGuid();
+            var firstPermission = new CloudPermission { Id = Guid.NewGuid(), AccountId = accountId, Name = firstAction, Action = firstAction };
+            var secondPermission = new CloudPermission { Id = Guid.NewGuid(), AccountId = accountId, Name = secondAction, Action = secondAction };
+            var first = new DomainEffectiveAccess
+            {
+                Id = Guid.NewGuid(), Provider = provider, CloudAccountId = accountId, PrincipalId = principalId,
+                PermissionId = firstPermission.Id, ResourceId = resourceId, Decision = AccessDecision.Allow,
+                EvaluationStatus = EvaluationStatus.FullyEvaluated, AccessType = AccessType.Allow, IsDirect = true
+            };
+            var second = new DomainEffectiveAccess
+            {
+                Id = Guid.NewGuid(), Provider = provider, CloudAccountId = accountId, PrincipalId = principalId,
+                PermissionId = secondPermission.Id, ResourceId = resourceId, Decision = AccessDecision.Allow,
+                EvaluationStatus = EvaluationStatus.FullyEvaluated, AccessType = AccessType.Allow, IsDirect = true
+            };
+            var resource = new CloudResource { Id = resourceId, AccountId = accountId, Name = "customer-objects",
+                Type = "Object Storage Bucket", ResourceId = "provider://bucket/customer-objects",
+                Tags = new Dictionary<string, string> { ["classification"] = "sensitive" } };
+            var request = new RiskEvaluationRequest(
+                [new CloudAccount { Id = accountId, Name = "tenant", ExternalAccountId = "test-account" }],
+                [new CloudPrincipal { Id = principalId, AccountId = accountId, Name = "workload",
+                    CloudProvider = (CloudProviderType)provider, IdentityType = IdentityType.ManagedIdentity }],
+                [resource], [], [], [firstPermission, secondPermission], [], [first, second], [], [],
+                Options: new(EnabledRules: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "CIEM-021" }),
+                ResourceSecuritySignals: [new ResourceSecuritySignal(resourceId, ResourceSecuritySignalType.SensitiveData,
+                    "Sensitive", "Test classification", RiskSeverity.High)]);
+            return new ToxicFixture(request, [first, second]);
+        }
+    }
 
     private sealed record FixtureData(RiskEvaluationRequest Request, DomainEffectiveAccess Effective)
     {

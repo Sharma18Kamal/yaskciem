@@ -6,6 +6,10 @@ using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Analytics.Services;
+using CloudEntitle.RiskEngine.Abstractions;
+using CloudEntitle.RiskEngine.Services;
+using CloudEntitle.Recommendations.Abstractions;
+using CloudEntitle.Recommendations.Services;
 using CloudEntitle.Cloud.Aws;
 using CloudEntitle.Cloud.Azure;
 using CloudEntitle.Cloud.Gcp;
@@ -57,6 +61,15 @@ public partial class App : System.Windows.Application
 		services.AddSingleton<IWhatIfSavedData, WhatIfSavedData>();
 		services.AddTransient<WhatIfSimulatorViewModel>();
 		services.AddSingleton<IAnalyticsService, AnalyticsService>();
+		services.AddSingleton<PermissionUsageAnalyticsService>();
+		services.AddSingleton<PermissionUsageTrendService>();
+		services.AddSingleton<ProviderActionPermissionMapper>();
+		services.AddSingleton<IRiskEngine, CloudEntitle.RiskEngine.Services.RiskEngine>();
+		services.AddSingleton<IRecommendationEngine, RecommendationEngine>();
+		services.AddSingleton<IPermissionUsageWorkspaceService, PermissionUsageWorkspaceService>();
+		services.AddSingleton<IToxicCombinationWorkspaceService>(provider => new ToxicCombinationWorkspaceService(
+			provider.GetRequiredService<IDbContextFactory<CloudEntitleDbContext>>(),
+			new CloudEntitle.RiskEngine.Services.RiskEngine()));
 		services.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
 		services.AddSingleton<IReportService, SqliteReportService>();
 		services.AddSingleton<ILiveScanHistoryStore, LocalLiveScanHistoryStore>();
@@ -137,6 +150,8 @@ public partial class App : System.Windows.Application
 		services.AddTransient<ResourcesViewModel>();
 		services.AddTransient<EntitlementsViewModel>();
 		services.AddTransient<EffectiveAccessViewModel>();
+		services.AddTransient<PermissionUsageViewModel>();
+		services.AddTransient<ToxicCombinationViewModel>();
 		services.AddTransient<AccessPathExplorerViewModel>();
 		services.AddTransient<RiskFindingsViewModel>();
 		services.AddTransient<RecommendationsViewModel>();

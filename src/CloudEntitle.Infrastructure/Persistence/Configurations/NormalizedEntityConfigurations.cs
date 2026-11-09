@@ -223,7 +223,194 @@ public sealed class ActivityRecordConfiguration : IEntityTypeConfiguration<Activ
         builder.HasKey(entity => entity.Id);
         builder.HasIndex(entity => new { entity.PrincipalId, entity.CloudAccountId, entity.Timestamp });
         builder.HasIndex(entity => entity.Action);
+        builder.Property(entity => entity.PermissionAction).HasMaxLength(500);
+        builder.Property(entity => entity.PermissionMappingEvidence).HasMaxLength(500);
+        builder.HasIndex(entity => new { entity.CloudAccountId, entity.PrincipalId, entity.PermissionAction, entity.Timestamp });
         builder.HasOne<CloudPrincipal>().WithMany().HasForeignKey(entity => entity.PrincipalId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class CloudActivityEventConfiguration : IEntityTypeConfiguration<CloudActivityEvent>
+{
+    public void Configure(EntityTypeBuilder<CloudActivityEvent> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => item.DeduplicationKey).IsUnique();
+        builder.HasIndex(item => new { item.CloudAccountId, item.Provider, item.EventTimestamp });
+        builder.HasIndex(item => new { item.IdentityId, item.EventTimestamp });
+        builder.HasIndex(item => item.SourceEventId);
+        builder.HasIndex(item => item.Action);
+        builder.HasIndex(item => item.ResourceReference);
+        builder.Property(item => item.TenantOrAccountId).IsRequired().HasMaxLength(200);
+        builder.Property(item => item.ProviderIdentity).IsRequired().HasMaxLength(512);
+        builder.Property(item => item.PrincipalType).IsRequired().HasMaxLength(100);
+        builder.Property(item => item.Action).IsRequired().HasMaxLength(500);
+        builder.Property(item => item.PermissionAction).HasMaxLength(500);
+        builder.Property(item => item.PermissionMappingEvidence).HasMaxLength(500);
+        builder.Property(item => item.ResourceReference).HasMaxLength(2048);
+        builder.Property(item => item.Outcome).IsRequired().HasMaxLength(32);
+        builder.Property(item => item.SourceEventId).IsRequired().HasMaxLength(512);
+        builder.Property(item => item.Source).IsRequired().HasMaxLength(256);
+        builder.Property(item => item.DeduplicationKey).IsRequired().HasMaxLength(64);
+        builder.Property(item => item.RawEvidence).HasColumnType("TEXT");
+    }
+}
+
+public sealed class PermissionUsageRecordConfiguration : IEntityTypeConfiguration<PermissionUsageRecord>
+{
+    public void Configure(EntityTypeBuilder<PermissionUsageRecord> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => new { item.CloudAccountId, item.Provider, item.IdentityId, item.PermissionId, item.ResourceId, item.CalculatedAtUtc });
+        builder.HasIndex(item => new { item.PermissionId, item.State90Days });
+        builder.Property(item => item.Action).IsRequired().HasMaxLength(500);
+        builder.Property(item => item.CorrelationStatus).IsRequired().HasMaxLength(100);
+        builder.Property(item => item.EffectiveAccessIds).IsRequired().HasColumnType("TEXT");
+        builder.Property(item => item.Evidence).HasColumnType("TEXT");
+    }
+}
+
+public sealed class PermissionUsageSummaryConfiguration : IEntityTypeConfiguration<PermissionUsageSummary>
+{
+    public void Configure(EntityTypeBuilder<PermissionUsageSummary> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => new { item.CloudAccountId, item.Provider, item.WindowDays, item.BucketType, item.BucketStartUtc, item.IdentityId }).IsUnique();
+        builder.Property(item => item.BucketType).IsRequired().HasMaxLength(16);
+    }
+}
+
+public sealed class PermissionObservationWindowConfiguration : IEntityTypeConfiguration<PermissionObservationWindow>
+{
+    public void Configure(EntityTypeBuilder<PermissionObservationWindow> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => new { item.CloudAccountId, item.Provider, item.ObservedFromUtc, item.ObservedThroughUtc });
+        builder.HasIndex(item => item.SnapshotId).IsUnique();
+        builder.Property(item => item.Source).IsRequired().HasMaxLength(256);
+        builder.Property(item => item.Status).IsRequired().HasMaxLength(32);
+        builder.Property(item => item.Details).IsRequired().HasMaxLength(4000);
+        builder.Property(item => item.Provenance).IsRequired().HasColumnType("TEXT");
+    }
+}
+
+public sealed class UsageAnalyticsFindingConfiguration : IEntityTypeConfiguration<UsageAnalyticsFinding>
+{
+    public void Configure(EntityTypeBuilder<UsageAnalyticsFinding> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => new { item.CloudAccountId, item.Provider, item.IdentityId, item.ObservedAtUtc });
+        builder.HasIndex(item => new { item.PermissionId, item.Severity });
+        builder.HasIndex(item => item.RiskFindingId).IsUnique();
+        builder.Property(item => item.Evidence).IsRequired().HasColumnType("TEXT");
+    }
+}
+
+public sealed class UsageRecommendationConfiguration : IEntityTypeConfiguration<UsageRecommendation>
+{
+    public void Configure(EntityTypeBuilder<UsageRecommendation> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => item.RecommendationId).IsUnique();
+        builder.HasIndex(item => new { item.CloudAccountId, item.Provider, item.Status, item.CreatedAtUtc });
+        builder.Property(item => item.RecommendationType).IsRequired().HasMaxLength(100);
+        builder.Property(item => item.Status).IsRequired().HasMaxLength(32);
+        builder.Property(item => item.Evidence).IsRequired().HasColumnType("TEXT");
+    }
+}
+
+public sealed class ToxicCombinationRuleConfiguration : IEntityTypeConfiguration<ToxicCombinationRule>
+{
+    public void Configure(EntityTypeBuilder<ToxicCombinationRule> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => item.Key).IsUnique();
+        builder.HasIndex(item => new { item.Provider, item.Enabled });
+        builder.Property(item => item.Key).IsRequired().HasMaxLength(120);
+        builder.Property(item => item.Name).IsRequired().HasMaxLength(240);
+        builder.Property(item => item.Description).IsRequired().HasMaxLength(2000);
+        builder.Property(item => item.FirstPermissionPattern).IsRequired().HasMaxLength(500);
+        builder.Property(item => item.SecondPermissionPattern).IsRequired().HasMaxLength(500);
+        builder.Property(item => item.Recommendation).IsRequired().HasMaxLength(2000);
+        builder.Property(item => item.Version).IsRequired().HasMaxLength(32);
+    }
+}
+
+public sealed class ToxicCombinationFindingConfiguration : IEntityTypeConfiguration<ToxicCombinationFinding>
+{
+    public void Configure(EntityTypeBuilder<ToxicCombinationFinding> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => item.Fingerprint).IsUnique();
+        builder.HasIndex(item => new { item.CloudAccountId, item.Provider, item.PrincipalId, item.Severity });
+        builder.HasIndex(item => new { item.RuleId, item.LastEvaluatedAtUtc });
+        builder.Property(item => item.RuleKey).IsRequired().HasMaxLength(120);
+        builder.Property(item => item.Fingerprint).IsRequired().HasMaxLength(512);
+        builder.Property(item => item.Confidence).IsRequired().HasMaxLength(16);
+        builder.Property(item => item.ResourceRelation).IsRequired().HasMaxLength(32);
+        builder.Property(item => item.EvidenceSummary).IsRequired().HasColumnType("TEXT");
+        builder.Property(item => item.Recommendation).IsRequired().HasMaxLength(2000);
+        builder.HasOne<ToxicCombinationRule>().WithMany().HasForeignKey(item => item.RuleId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class ToxicCombinationEvidenceConfiguration : IEntityTypeConfiguration<ToxicCombinationEvidence>
+{
+    public void Configure(EntityTypeBuilder<ToxicCombinationEvidence> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => new { item.FindingId, item.EffectiveAccessId }).IsUnique();
+        builder.HasIndex(item => new { item.PermissionId, item.ResourceId });
+        builder.Property(item => item.PermissionAction).IsRequired().HasMaxLength(500);
+        builder.Property(item => item.Scope).HasMaxLength(1000);
+        builder.Property(item => item.AssignmentType).IsRequired().HasMaxLength(32);
+        builder.Property(item => item.EvaluationStatus).IsRequired().HasMaxLength(32);
+        builder.Property(item => item.SourceEvidence).IsRequired().HasColumnType("TEXT");
+        builder.HasOne<ToxicCombinationFinding>().WithMany().HasForeignKey(item => item.FindingId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class PermissionCombinationConfiguration : IEntityTypeConfiguration<PermissionCombination>
+{
+    public void Configure(EntityTypeBuilder<PermissionCombination> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => new { item.FindingId, item.FirstEffectiveAccessId, item.SecondEffectiveAccessId }).IsUnique();
+        builder.Property(item => item.FirstAction).IsRequired().HasMaxLength(500);
+        builder.Property(item => item.SecondAction).IsRequired().HasMaxLength(500);
+        builder.Property(item => item.ProviderSemantics).IsRequired().HasMaxLength(1000);
+        builder.Property(item => item.ScopeAssessment).IsRequired().HasMaxLength(32);
+        builder.HasOne<ToxicCombinationFinding>().WithMany().HasForeignKey(item => item.FindingId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class ToxicCombinationRecommendationConfiguration : IEntityTypeConfiguration<ToxicCombinationRecommendation>
+{
+    public void Configure(EntityTypeBuilder<ToxicCombinationRecommendation> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => item.FindingId).IsUnique();
+        builder.Property(item => item.Title).IsRequired().HasMaxLength(240);
+        builder.Property(item => item.Description).IsRequired().HasMaxLength(2000);
+        builder.Property(item => item.Evidence).IsRequired().HasColumnType("TEXT");
+        builder.Property(item => item.Status).IsRequired().HasMaxLength(32);
+        builder.HasOne<ToxicCombinationFinding>().WithMany().HasForeignKey(item => item.FindingId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class ToxicCombinationTrustPathEvidenceConfiguration : IEntityTypeConfiguration<ToxicCombinationTrustPathEvidence>
+{
+    public void Configure(EntityTypeBuilder<ToxicCombinationTrustPathEvidence> builder)
+    {
+        builder.HasKey(item => item.Id);
+        builder.HasIndex(item => new { item.FindingId, item.Sequence }).IsUnique();
+        builder.HasIndex(item => new { item.SourceCloudAccountId, item.SourcePrincipalId, item.TargetCloudAccountId, item.TargetPrincipalId });
+        builder.Property(item => item.RelationshipType).IsRequired().HasMaxLength(120);
+        builder.Property(item => item.Status).IsRequired().HasMaxLength(24);
+        builder.Property(item => item.EvidenceSource).IsRequired().HasMaxLength(500);
+        builder.Property(item => item.EvidenceReference).IsRequired().HasMaxLength(2000);
+        builder.Property(item => item.ConditionEvidence).IsRequired().HasMaxLength(2000);
+        builder.HasOne<ToxicCombinationFinding>().WithMany().HasForeignKey(item => item.FindingId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 

@@ -324,6 +324,28 @@ public sealed class RemoveUnusedPermissionRule : RecommendationRuleBase
         return Task.FromResult<IReadOnlyCollection<RecommendationModel>>(recommendations);
     }
 }
+public sealed class ReviewPotentiallyUnusedPermissionRule : RecommendationRuleBase
+{
+    public override string RuleId => "CIEM-USAGE-001";
+    public override RecommendationType RecommendationType => RecommendationType.RemoveUnusedPermission;
+
+    public override Task<IReadOnlyCollection<RecommendationModel>> EvaluateAsync(
+        RecommendationContext context, CancellationToken cancellationToken = default)
+    {
+        var results = Findings(context, RuleId)
+            .Where(item => item.EvaluationState == RiskEvaluationState.Potential)
+            .Select(finding =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Create(context, finding, "Review privileged permission with no observed use",
+                    "Review the complete activity observation and operational dependencies. No permission is removed or policy generated.",
+                    Permission(context, finding.PermissionId), "Investigate necessity and ownership; require explicit human approval for any future change.",
+                    "A complete action window contained no exact mapped use. This does not establish operational safety.",
+                    RecommendationImpactState.RequiresReview);
+            }).ToArray();
+        return Task.FromResult<IReadOnlyCollection<RecommendationModel>>(results);
+    }
+}
 public sealed class RemoveUnusedRoleRule : RecommendationRuleBase
 {
     public override string RuleId => "CIEM-016";

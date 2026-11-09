@@ -11,7 +11,7 @@ public sealed class RecommendationRuleRegistry : IRecommendationRuleRegistry
 {
     private readonly IReadOnlyList<IRecommendationRule> _rules = new IRecommendationRule[]
     {
-        new RemoveUnusedPermissionRule(), new RemoveUnusedRoleRule(), new GenerateLeastPrivilegePolicyRule(), new NarrowWildcardPermissionRule(), new NarrowResourceScopeRule(), new ReplaceBroadRoleRule(), new RemoveRedundantAccessPathRule(), new RemoveDormantPrivilegeRule(), new ReduceServiceAccountPermissionRule(), new ReducePrivilegedGroupAccessRule(), new ReduceNestedPrivilegeRule(), new ReduceLongPrivilegeChainRule(), new ConsolidateAccessRule(), new JustInTimeAccessRecommendationRule()
+        new RemoveUnusedPermissionRule(), new ReviewPotentiallyUnusedPermissionRule(), new RemoveUnusedRoleRule(), new GenerateLeastPrivilegePolicyRule(), new NarrowWildcardPermissionRule(), new NarrowResourceScopeRule(), new ReplaceBroadRoleRule(), new RemoveRedundantAccessPathRule(), new RemoveDormantPrivilegeRule(), new ReduceServiceAccountPermissionRule(), new ReducePrivilegedGroupAccessRule(), new ReduceNestedPrivilegeRule(), new ReduceLongPrivilegeChainRule(), new ConsolidateAccessRule(), new JustInTimeAccessRecommendationRule()
     };
     public IReadOnlyList<IRecommendationRule> ActiveRules() => _rules;
 }

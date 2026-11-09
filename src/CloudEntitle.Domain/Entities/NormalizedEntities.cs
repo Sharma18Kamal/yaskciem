@@ -156,6 +156,9 @@ public class ActivityRecord
     public DateTime Timestamp { get; set; }
     public string? Source { get; set; }
     public bool Success { get; set; }
+    public string? PermissionAction { get; set; }
+    public PermissionActionMappingStatus PermissionMappingStatus { get; set; } = PermissionActionMappingStatus.Unknown;
+    public string? PermissionMappingEvidence { get; set; }
 }
 
 public class RiskFindingModel

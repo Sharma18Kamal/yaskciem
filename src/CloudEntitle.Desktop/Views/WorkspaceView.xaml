@@ -4,6 +4,12 @@
              xmlns:vm="clr-namespace:CloudEntitle.Desktop.ViewModels"
              xmlns:views="clr-namespace:CloudEntitle.Desktop.Views">
     <UserControl.Resources>
+        <DataTemplate DataType="{x:Type vm:PermissionUsageViewModel}">
+            <views:PermissionUsageView/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ToxicCombinationViewModel}">
+            <views:ToxicCombinationView/>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:WhatIfSimulatorViewModel}">
             <views:WhatIfSimulatorView/>
         </DataTemplate>

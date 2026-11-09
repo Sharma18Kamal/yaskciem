@@ -92,6 +92,39 @@ an action. Without matching inventory, attribution is explicitly unavailable.
 Saved overlapping sources are not merged and continuous cursors are not yet
 implemented.
 
+## Local permission-usage analytics
+
+The Desktop **Permission Usage** workspace analyzes saved effective-access
+inventory and normalized activity in the local SQLite database. Use **Analyze
+saved evidence** to review existing data. The separate **Collect and analyze**
+action requires selecting a non-demo account and explicitly authorizing a
+read-only audit query; it never creates or configures a client endpoint or turns
+on provider logging. Configure and validate audit sources and their read access
+as described above before collection.
+
+The workspace reports used, not observed, insufficient-observation, unknown
+mapping, and incomplete-collection states for 30/60/90-day windows. It preserves
+provider event IDs for deduplication, displays collection-window status and
+truncation, and retains daily/weekly/monthly activity summaries. Azure
+`authorization.action` and GCP `authorizationInfo.permission` are exact evidence
+when supplied by the source. AWS API operations are not generally IAM actions;
+only explicitly curated mappings are candidates. A match does not prove which
+grant authorized an event, especially for inherited, delegated, cross-account,
+or historical access.
+
+No events never proves a permission is unused. Incomplete source coverage,
+unknown mappings, retention gaps, and insufficient observation time remain
+inconclusive. Findings are potential, evidence-linked review signals; generated
+recommendations are non-executable. This milestone does not modify or revoke
+permissions. Demo Mode creates clearly labeled synthetic multi-cloud activity
+and coverage; it is not client telemetry.
+
+Historical activity summaries describe observed API usage, not historical
+entitlement validity. This module does not reconstruct past grants or attribute
+actions to the exact historical role/policy that authorized them. Activity
+evidence is retained in local SQLite; configure OS/database protections
+appropriate for the sensitivity and retention needs of the client.
+
 ### Saved historical browsing
 
 The Desktop's **Refresh saved history** reads snapshot summaries, **Older saved history**

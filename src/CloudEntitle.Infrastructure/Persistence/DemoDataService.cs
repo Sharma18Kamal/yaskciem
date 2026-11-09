@@ -39,6 +39,8 @@ public sealed class DemoDataService : IDemoDataService
         context.AccessPaths.AddRange(generated.AccessPaths);
         context.AccessPathNodes.AddRange(generated.AccessPathNodes);
         context.ActivityRecords.AddRange(generated.ActivityRecords);
+        context.CloudActivityEvents.AddRange(generated.CloudActivityEvents);
+        context.PermissionObservationWindows.AddRange(generated.PermissionObservationWindows);
         context.NormalizedRiskFindings.AddRange(generated.RiskFindings);
         context.NormalizedRecommendations.AddRange(generated.Recommendations);
         context.Scans.AddRange(generated.Scans);
@@ -61,6 +63,24 @@ public sealed class DemoDataService : IDemoDataService
         }
 
         var demoFindingIds = await context.NormalizedRiskFindings.Where(item => accountIds.Contains(item.CloudAccountId)).Select(item => item.Id).ToListAsync(cancellationToken);
+        var toxicFindingIds = await context.ToxicCombinationFindings.Where(item => accountIds.Contains(item.CloudAccountId))
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+        context.ToxicCombinationRecommendations.RemoveRange(await context.ToxicCombinationRecommendations
+            .Where(item => toxicFindingIds.Contains(item.FindingId)).ToListAsync(cancellationToken));
+        context.ToxicCombinationTrustPathEvidence.RemoveRange(await context.ToxicCombinationTrustPathEvidence
+            .Where(item => toxicFindingIds.Contains(item.FindingId)).ToListAsync(cancellationToken));
+        context.PermissionCombinations.RemoveRange(await context.PermissionCombinations
+            .Where(item => toxicFindingIds.Contains(item.FindingId)).ToListAsync(cancellationToken));
+        context.ToxicCombinationEvidence.RemoveRange(await context.ToxicCombinationEvidence
+            .Where(item => toxicFindingIds.Contains(item.FindingId)).ToListAsync(cancellationToken));
+        context.ToxicCombinationFindings.RemoveRange(await context.ToxicCombinationFindings
+            .Where(item => toxicFindingIds.Contains(item.Id)).ToListAsync(cancellationToken));
+        context.CloudActivityEvents.RemoveRange(await context.CloudActivityEvents.Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
+        context.PermissionObservationWindows.RemoveRange(await context.PermissionObservationWindows.Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
+        context.PermissionUsageRecords.RemoveRange(await context.PermissionUsageRecords.Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
+        context.PermissionUsageSummaries.RemoveRange(await context.PermissionUsageSummaries.Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
+        context.UsageAnalyticsFindings.RemoveRange(await context.UsageAnalyticsFindings.Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
+        context.UsageRecommendations.RemoveRange(await context.UsageRecommendations.Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
         context.GroupMemberships.RemoveRange(await context.GroupMemberships.Where(item => accountIds.Contains(item.CloudAccountId)).ToListAsync(cancellationToken));
         context.CloudGroups.RemoveRange(await context.CloudGroups.Where(item => accountIds.Contains(item.AccountId)).ToListAsync(cancellationToken));
         context.NormalizedRecommendations.RemoveRange(await context.NormalizedRecommendations.Where(item => demoFindingIds.Contains(item.RiskFindingId)).ToListAsync(cancellationToken));
@@ -132,6 +152,8 @@ public sealed class DemoDataService : IDemoDataService
         var paths = new List<AccessPath>();
         var pathNodes = new List<AccessPathNode>();
         var activity = new List<ActivityRecord>();
+        var cloudActivityEvents = new List<CloudActivityEvent>();
+        var observationWindows = new List<PermissionObservationWindow>();
         var findings = new List<RiskFindingModel>();
         var recommendations = new List<RecommendationModel>();
         var scans = new List<Scan>();
@@ -139,6 +161,13 @@ public sealed class DemoDataService : IDemoDataService
 
         foreach (var (provider, name, externalId) in providers)
         {
+            var cloudProvider = provider switch
+            {
+                CloudProviderType.Azure => CloudProvider.Azure,
+                CloudProviderType.Aws => CloudProvider.Aws,
+                CloudProviderType.Gcp => CloudProvider.Gcp,
+                _ => throw new InvalidOperationException("Unsupported synthetic demo provider.")
+            };
             var account = new CloudAccount { Id = Stable(provider, "account"), Name = $"{name} Demo Environment", CloudProvider = provider, ExternalAccountId = externalId, AccountType = provider == CloudProviderType.Gcp ? AccountType.Project : AccountType.Subscription, ConnectionStatus = ConnectionStatus.Connected, IsReadOnly = true, CreatedAt = now.AddDays(-90), LastScannedAt = now.AddMinutes(-8) };
             accounts.Add(account);
             var resource = new CloudResource { Id = Stable(provider, "production"), AccountId = account.Id, Name = $"{name} Demo Production", Type = "Production Resource", ResourceId = $"demo-{name.ToLowerInvariant()}-production", ResourceType = ResourceType.Resource, Region = "demo-region" };
@@ -164,25 +193,90 @@ public sealed class DemoDataService : IDemoDataService
                 }
                 var entitlement = new Entitlement { Id = Stable(provider, $"entitlement-{index}"), PrincipalId = index == 1 ? group.Id : principal.Id, RoleId = role.Id, PolicyId = policy.Id, PermissionId = permission.Id, CloudAccountId = account.Id, ResourceId = resource.Id, Scope = "demo-production", AssignmentType = index == 1 ? AssignmentType.Group : AssignmentType.Direct, GrantedAt = now.AddDays(-30), Source = "Synthetic Demo Mode" };
                 entitlements.Add(entitlement);
-                var access = new EffectiveAccess { Id = Stable(provider, $"access-{index}"), PrincipalId = principal.Id, CloudAccountId = account.Id, ResourceId = resource.Id, PermissionId = permission.Id, RoleId = role.Id, PolicyId = policy.Id, Scope = "demo-production", AccessType = AccessType.Allow, AssignmentType = entitlement.AssignmentType, IsDirect = entitlement.AssignmentType == AssignmentType.Direct, IsInherited = entitlement.AssignmentType == AssignmentType.Group, IsPrivileged = principal.IsPrivileged, CalculatedAt = now };
+                var access = new EffectiveAccess { Id = Stable(provider, $"access-{index}"), PrincipalId = principal.Id, CloudAccountId = account.Id, ResourceId = resource.Id, PermissionId = permission.Id, RoleId = role.Id, PolicyId = policy.Id, Scope = "demo-production", AccessType = AccessType.Allow, AssignmentType = entitlement.AssignmentType, IsDirect = entitlement.AssignmentType == AssignmentType.Direct, IsInherited = entitlement.AssignmentType == AssignmentType.Group, IsPrivileged = principal.IsPrivileged, CalculatedAt = now, Provider = cloudProvider, Decision = AccessDecision.Allow, EvaluationStatus = EvaluationStatus.FullyEvaluated };
                 effective.Add(access);
                 var path = new AccessPath { Id = Stable(provider, $"path-{index}"), PrincipalId = principal.Id, CloudAccountId = account.Id, TargetResourceId = resource.Id, PathType = entitlement.AssignmentType == AssignmentType.Group ? AccessPathType.GroupBased : AccessPathType.Direct, Description = "Synthetic demo access path", CreatedAt = now };
                 paths.Add(path);
                 pathNodes.AddRange(new[] { ("Principal", principal.Name, 0), ("Role", role.Name, 1), ("Permission", permission.Name, 2), ("Resource", resource.Name, 3) }.Select(node => new AccessPathNode { Id = Stable(provider, $"path-{index}-{node.Item3}"), AccessPathId = path.Id, NodeType = node.Item1, NodeId = node.Item3 == 0 ? principal.Id : node.Item3 == 1 ? role.Id : node.Item3 == 2 ? permission.Id : resource.Id, Name = node.Item2, Sequence = node.Item3 }));
                 activity.Add(new ActivityRecord { Id = Stable(provider, $"activity-{index}"), PrincipalId = principal.Id, CloudAccountId = account.Id, ResourceId = resource.Id, Action = index == 2 ? "Dormant identity" : "ResourceRead", Service = name, Timestamp = principal.LastActivityAt ?? now, Source = "Synthetic Demo Mode", Success = true });
+                if (index is 0 or 1)
+                {
+                    var apiAction = cloudProvider switch
+                    {
+                        CloudProvider.Azure => "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
+                        CloudProvider.Aws => "s3.amazonaws.com/GetObject",
+                        CloudProvider.Gcp => "storage.objects.get",
+                        _ => throw new InvalidOperationException("Unsupported synthetic demo provider.")
+                    };
+                    foreach (var age in new[] { 4, 28, 63 })
+                    {
+                        var eventId = Stable(provider, $"usage-event-{index}-{age}").ToString("N");
+                        cloudActivityEvents.Add(new CloudActivityEvent
+                        {
+                            Id = Stable(provider, $"usage-event-row-{index}-{age}"),
+                            Provider = cloudProvider,
+                            CloudAccountId = account.Id,
+                            TenantOrAccountId = externalId,
+                            IdentityId = principal.Id,
+                            ProviderIdentity = principal.PrincipalId,
+                            PrincipalType = principal.IdentityType.ToString(),
+                            Action = apiAction,
+                            PermissionAction = apiAction,
+                            PermissionMappingStatus = PermissionActionMappingStatus.ExactProviderEvidence,
+                            PermissionMappingEvidence = $"Synthetic {name} authorization evidence for Demo Mode.",
+                            ResourceReference = resource.ResourceId,
+                            ResourceId = resource.Id,
+                            Outcome = "Succeeded",
+                            OutcomeKnown = true,
+                            SourceEventId = eventId,
+                            Source = "Synthetic Demo Mode",
+                            RawEvidence = System.Text.Json.JsonSerializer.Serialize(new
+                            {
+                                eventId,
+                                principal = principal.PrincipalId,
+                                action = apiAction,
+                                permissionAction = apiAction,
+                                resource = resource.ResourceId,
+                                outcome = "Succeeded",
+                                synthetic = true
+                            }),
+                            EventTimestamp = now.AddDays(-age),
+                            CollectionTimestamp = now,
+                            DeduplicationKey = eventId
+                        });
+                    }
+                }
                 var finding = new RiskFindingModel { Id = Stable(provider, $"finding-{index}"), RuleId = Stable(provider, $"rule-{index % 3}"), CloudProvider = provider == CloudProviderType.Azure ? CloudProvider.Azure : provider == CloudProviderType.Aws ? CloudProvider.Aws : CloudProvider.Gcp, CloudAccountId = account.Id, PrincipalId = principal.Id, ResourceId = resource.Id, EffectiveAccessId = access.Id, Severity = index == 0 ? RiskSeverity.Critical : index == 2 ? RiskSeverity.High : RiskSeverity.Medium, Title = index == 2 ? "External privileged identity" : index == 3 ? "Potentially excessive service permissions" : "Privileged identity", Description = "Synthetic evidence-backed Demo Mode finding.", Evidence = new RiskEvidence($"Principal={principal.Email}; Role={role.Name}; Scope=demo-production; Assignment={entitlement.AssignmentType}; Source=Synthetic Demo Mode"), Recommendation = "Review and reduce the synthetic privilege to the least-privilege role.", CreatedAt = now.AddDays(-index), UpdatedAt = now };
                 findings.Add(finding);
                 recommendations.Add(new RecommendationModel { Id = Stable(provider, $"recommendation-{index}"), RiskFindingId = finding.Id, Title = "Reduce demonstration privilege", Description = "Synthetic Demo Mode recommendation.", CurrentState = $"{role.Name} at demo-production", SuggestedState = "Narrow resource-scoped read access", Reason = "Reduce exposure and align with least privilege.", Priority = index + 1, CreatedAt = now });
             }
             scans.Add(new Scan { Id = Stable(provider, "scan"), CloudAccountId = account.Id, StartedAt = now.AddMinutes(-12), CompletedAt = now.AddMinutes(-8), Status = ScanStatus.Completed, ItemsDiscovered = 13, IdentitiesDiscovered = 5, PermissionsDiscovered = 1, FindingsGenerated = 4 });
+            observationWindows.Add(new PermissionObservationWindow
+            {
+                Id = Stable(provider, "usage-observation"),
+                SnapshotId = Stable(provider, "usage-observation-snapshot"),
+                CloudAccountId = account.Id,
+                Provider = cloudProvider,
+                ObservedFromUtc = now.AddDays(-90),
+                ObservedThroughUtc = now.AddMinutes(1),
+                Source = "Synthetic Demo Mode",
+                Status = "Complete",
+                IncludesActions = true,
+                IncludesResourceIds = true,
+                IncludesRoleIds = false,
+                RecordCount = cloudActivityEvents.Count(item => item.CloudAccountId == account.Id),
+                Details = "Synthetic complete 90-day observation window for demonstration only; not live cloud telemetry.",
+                Provenance = "[\"Synthetic Demo Mode\"]",
+                CollectedAtUtc = now
+            });
         }
 
-        return new GeneratedDemoData(accounts, principals, groups, groupMemberships, resources, roles, policies, permissions, entitlements, effective, paths, pathNodes, activity, findings, recommendations, scans);
+        return new GeneratedDemoData(accounts, principals, groups, groupMemberships, resources, roles, policies, permissions, entitlements, effective, paths, pathNodes, activity, cloudActivityEvents, observationWindows, findings, recommendations, scans);
     }
 
     private static Guid Stable(CloudProviderType provider, string key) => GuidUtility.Create(GuidUtility.Namespace, $"ciem-demo-{provider}-{key}");
 
-    private sealed record GeneratedDemoData(IReadOnlyList<CloudAccount> Accounts, IReadOnlyList<CloudPrincipal> Principals, IReadOnlyList<CloudGroup> Groups, IReadOnlyList<GroupMembership> GroupMemberships, IReadOnlyList<CloudResource> Resources, IReadOnlyList<CloudRole> Roles, IReadOnlyList<CloudPolicy> Policies, IReadOnlyList<CloudPermission> Permissions, IReadOnlyList<Entitlement> Entitlements, IReadOnlyList<EffectiveAccess> EffectiveAccess, IReadOnlyList<AccessPath> AccessPaths, IReadOnlyList<AccessPathNode> AccessPathNodes, IReadOnlyList<ActivityRecord> ActivityRecords, IReadOnlyList<RiskFindingModel> RiskFindings, IReadOnlyList<RecommendationModel> Recommendations, IReadOnlyList<Scan> Scans);
+    private sealed record GeneratedDemoData(IReadOnlyList<CloudAccount> Accounts, IReadOnlyList<CloudPrincipal> Principals, IReadOnlyList<CloudGroup> Groups, IReadOnlyList<GroupMembership> GroupMemberships, IReadOnlyList<CloudResource> Resources, IReadOnlyList<CloudRole> Roles, IReadOnlyList<CloudPolicy> Policies, IReadOnlyList<CloudPermission> Permissions, IReadOnlyList<Entitlement> Entitlements, IReadOnlyList<EffectiveAccess> EffectiveAccess, IReadOnlyList<AccessPath> AccessPaths, IReadOnlyList<AccessPathNode> AccessPathNodes, IReadOnlyList<ActivityRecord> ActivityRecords, IReadOnlyList<CloudActivityEvent> CloudActivityEvents, IReadOnlyList<PermissionObservationWindow> PermissionObservationWindows, IReadOnlyList<RiskFindingModel> RiskFindings, IReadOnlyList<RecommendationModel> Recommendations, IReadOnlyList<Scan> Scans);
 }
 
 internal static class GuidUtility

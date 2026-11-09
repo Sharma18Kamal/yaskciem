@@ -15,7 +15,7 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
 
             modelBuilder.Entity("CloudEntitle.Domain.CloudAccount", b =>
                 {
@@ -711,6 +711,17 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("CloudAccountId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PermissionAction")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PermissionMappingEvidence")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PermissionMappingStatus")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("PrincipalId")
                         .HasColumnType("TEXT");
 
@@ -737,6 +748,8 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.HasIndex("Action");
 
                     b.HasIndex("PrincipalId", "CloudAccountId", "Timestamp");
+
+                    b.HasIndex("CloudAccountId", "PrincipalId", "PermissionAction", "Timestamp");
 
                     b.ToTable("ActivityRecords");
                 });
@@ -778,6 +791,109 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.HasIndex("OrganizationId", "Timestamp");
 
                     b.ToTable("AuditEvents");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.CloudActivityEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CollectionTimestamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeduplicationKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("EventTimestamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("IdentityId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("OutcomeKnown")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PermissionAction")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PermissionMappingEvidence")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PermissionMappingStatus")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PrincipalType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProviderIdentity")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RawEvidence")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResourceReference")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceEventId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TenantOrAccountId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Action");
+
+                    b.HasIndex("DeduplicationKey")
+                        .IsUnique();
+
+                    b.HasIndex("ResourceReference");
+
+                    b.HasIndex("SourceEventId");
+
+                    b.HasIndex("IdentityId", "EventTimestamp");
+
+                    b.HasIndex("CloudAccountId", "Provider", "EventTimestamp");
+
+                    b.ToTable("CloudActivityEvents");
                 });
 
             modelBuilder.Entity("CloudEntitle.Domain.Entities.EffectiveAccess", b =>
@@ -952,6 +1068,265 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.HasIndex("GroupId", "PrincipalId");
 
                     b.ToTable("GroupMemberships");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.PermissionCombination", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FindingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FirstAction")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FirstEffectiveAccessId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FirstPermissionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderSemantics")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ScopeAssessment")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SecondAction")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SecondEffectiveAccessId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SecondPermissionId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FindingId", "FirstEffectiveAccessId", "SecondEffectiveAccessId")
+                        .IsUnique();
+
+                    b.ToTable("PermissionCombinations");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.PermissionObservationWindow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CollectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Details")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IncludesActions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IncludesResourceIds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IncludesRoleIds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("ObservedFromUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ObservedThroughUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provenance")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RecordCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SnapshotId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Truncated")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SnapshotId")
+                        .IsUnique();
+
+                    b.HasIndex("CloudAccountId", "Provider", "ObservedFromUtc", "ObservedThroughUtc");
+
+                    b.ToTable("PermissionObservationWindows");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.PermissionUsageRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CalculatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CorrelationStatus")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("EffectiveAccessId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EffectiveAccessIds")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Evidence")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("FirstObservedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("IdentityId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastObservedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PermissionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("State30Days")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("State60Days")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("State90Days")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SuccessfulActions30Days")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SuccessfulActions60Days")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SuccessfulActions90Days")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PermissionId", "State90Days");
+
+                    b.HasIndex("CloudAccountId", "Provider", "IdentityId", "PermissionId", "ResourceId", "CalculatedAtUtc");
+
+                    b.ToTable("PermissionUsageRecords");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.PermissionUsageSummary", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("BucketEndUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("BucketStartUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BucketType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CalculatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CandidateActionCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CollectionIncomplete")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("IdentityId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("InsufficientObservation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NotObserved")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ObservedEventCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TotalEffectivePermissions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UnknownMapping")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Used")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("WindowDays")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CloudAccountId", "Provider", "WindowDays", "BucketType", "BucketStartUtc", "IdentityId")
+                        .IsUnique();
+
+                    b.ToTable("PermissionUsageSummaries");
                 });
 
             modelBuilder.Entity("CloudEntitle.Domain.Entities.PolicyAssignment", b =>
@@ -1264,6 +1639,455 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.HasIndex("CloudAccountId", "StartedAt", "Status");
 
                     b.ToTable("Scans");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationEvidence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AccessPathId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AssignmentType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("EffectiveAccessId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EvaluationStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FindingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsConditional")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDirect")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsInherited")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PermissionAction")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PermissionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PolicyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RoleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Scope")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceEvidence")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FindingId", "EffectiveAccessId")
+                        .IsUnique();
+
+                    b.HasIndex("PermissionId", "ResourceId");
+
+                    b.ToTable("ToxicCombinationEvidence");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationFinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Confidence")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EvaluationState")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EvidenceSummary")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("FirstDetectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastEvaluatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PrincipalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Recommendation")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResourceRelation")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RiskScore")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("RuleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RuleKey")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Fingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("RuleId", "LastEvaluatedAtUtc");
+
+                    b.HasIndex("CloudAccountId", "Provider", "PrincipalId", "Severity");
+
+                    b.ToTable("ToxicCombinationFindings");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationRecommendation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Evidence")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Executable")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("FindingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FindingId")
+                        .IsUnique();
+
+                    b.ToTable("ToxicCombinationRecommendations");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FirstPermissionPattern")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("FirstRequiresPrivilegedAccess")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Recommendation")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RequireSameResource")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RequireTrustPath")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ResourceRequirement")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RiskScore")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SecondPermissionPattern")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("SecondRequiresPrivilegedAccess")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.HasIndex("Provider", "Enabled");
+
+                    b.ToTable("ToxicCombinationRules");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationTrustPathEvidence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConditionEvidence")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EvidenceReference")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EvidenceSource")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FindingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ObservedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelationshipType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequiredSourcePermissionPattern")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RequiresSourcePermission")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourceCloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourcePrincipalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SourceProvider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TargetCloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TargetPrincipalId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TargetProvider")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FindingId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("SourceCloudAccountId", "SourcePrincipalId", "TargetCloudAccountId", "TargetPrincipalId");
+
+                    b.ToTable("ToxicCombinationTrustPathEvidence");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.UsageAnalyticsFinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Confidence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Evidence")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("IdentityId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ObservationWindowDays")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("ObservedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PermissionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RiskFindingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RiskScore")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RiskFindingId")
+                        .IsUnique();
+
+                    b.HasIndex("PermissionId", "Severity");
+
+                    b.HasIndex("CloudAccountId", "Provider", "IdentityId", "ObservedAtUtc");
+
+                    b.ToTable("UsageAnalyticsFindings");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.UsageRecommendation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CloudAccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Evidence")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FindingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("RecommendationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RecommendationType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecommendationId")
+                        .IsUnique();
+
+                    b.HasIndex("CloudAccountId", "Provider", "Status", "CreatedAtUtc");
+
+                    b.ToTable("UsageRecommendations");
                 });
 
             modelBuilder.Entity("CloudEntitle.Domain.PermissionAssignment", b =>
@@ -1645,6 +2469,15 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.PermissionCombination", b =>
+                {
+                    b.HasOne("CloudEntitle.Domain.Entities.ToxicCombinationFinding", null)
+                        .WithMany()
+                        .HasForeignKey("FindingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("CloudEntitle.Domain.Entities.PolicyAssignment", b =>
                 {
                     b.HasOne("CloudEntitle.Domain.CloudPolicy", null)
@@ -1675,6 +2508,42 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("CloudAccountId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationEvidence", b =>
+                {
+                    b.HasOne("CloudEntitle.Domain.Entities.ToxicCombinationFinding", null)
+                        .WithMany()
+                        .HasForeignKey("FindingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationFinding", b =>
+                {
+                    b.HasOne("CloudEntitle.Domain.Entities.ToxicCombinationRule", null)
+                        .WithMany()
+                        .HasForeignKey("RuleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationRecommendation", b =>
+                {
+                    b.HasOne("CloudEntitle.Domain.Entities.ToxicCombinationFinding", null)
+                        .WithMany()
+                        .HasForeignKey("FindingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Domain.Entities.ToxicCombinationTrustPathEvidence", b =>
+                {
+                    b.HasOne("CloudEntitle.Domain.Entities.ToxicCombinationFinding", null)
+                        .WithMany()
+                        .HasForeignKey("FindingId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

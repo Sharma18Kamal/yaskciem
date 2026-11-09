@@ -108,6 +108,24 @@ public enum MembershipType
     Unknown
 }
 
+public enum PermissionActionMappingStatus
+{
+    Unknown,
+    ExactProviderEvidence,
+    CuratedCandidate
+}
+
+public enum PermissionUsageEvidenceState
+{
+    Used,
+    NotObserved,
+    InsufficientObservation,
+    UnknownMapping,
+    CollectionIncomplete
+}
+
+public enum UsageConfidenceLevel { Low, Medium, High }
+
 public enum AccessPathType
 {
     Direct,

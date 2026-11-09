@@ -26,6 +26,10 @@ public sealed class LiveResourceRiskGraphEvaluator
 {
     private readonly AccessPathEngine _accessPathEngine = new();
     private readonly GraphRiskEngine _riskEngine = new();
+    private readonly IToxicCombinationWorkspaceService? _toxicCombinationWorkspace;
+
+    public LiveResourceRiskGraphEvaluator(IToxicCombinationWorkspaceService? toxicCombinationWorkspace = null)
+        => _toxicCombinationWorkspace = toxicCombinationWorkspace;
 
     public async Task<LiveResourceRiskGraphResult> EvaluateDocumentsAsync(CloudAccount account,
         IReadOnlyList<CloudPrincipal> principals, IReadOnlyList<CloudResource> resources,
@@ -85,10 +89,17 @@ public sealed class LiveResourceRiskGraphEvaluator
             ["Observed documents are partial candidates, not effective authorization."], new(entitlements.Count, 0, entitlements.Count, 0, 0));
         var paths = await _accessPathEngine.BuildAsync(new(access, normalized, scopedResources, [], ResourceSecuritySignals: signals,
             ResourceSecurityCoverage: coverage, EvaluatedAt: documents.CollectedAtUtc.UtcDateTime), token);
-        var risk = await _riskEngine.EvaluateAsync(new([account], scopedPrincipals, scopedResources, [], [], permissions,
+        var toxicRules = _toxicCombinationWorkspace is null
+            ? null
+            : await _toxicCombinationWorkspace.GetEnabledRulesAsync(token);
+        var riskRequest = new RiskEvaluationRequest([account], scopedPrincipals, scopedResources, [], [], permissions,
             entitlements, access, paths.Paths, [], EvaluatedAt: documents.CollectedAtUtc.UtcDateTime,
             Options: new(EnabledRules: new HashSet<string> { "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-021" }),
-            ResourceSecuritySignals: signals, ResourceSecurityCoverage: coverage), token);
+            ResourceSecuritySignals: signals, ResourceSecurityCoverage: coverage, ToxicCombinationRules: toxicRules,
+            ToxicTrustRelationships: Array.Empty<ToxicTrustRelationshipEvidence>());
+        var risk = await _riskEngine.EvaluateAsync(riskRequest, token);
+        if (_toxicCombinationWorkspace is not null)
+            await _toxicCombinationWorkspace.RecordEvaluationAsync(riskRequest, risk.Findings, token);
         foreach (var finding in risk.Findings)
             finding.EvaluationState = RiskEvaluationState.Potential;
         return new(paths.Paths, risk.Findings,
@@ -261,15 +272,22 @@ public sealed class LiveResourceRiskGraphEvaluator
         if (accessPathResult.Diagnostics.Count > 0)
             diagnostics.AddRange(accessPathResult.Diagnostics.Select(diagnostic => diagnostic.Message));
 
+        var toxicRules = _toxicCombinationWorkspace is null
+            ? null
+            : await _toxicCombinationWorkspace.GetEnabledRulesAsync(cancellationToken);
         var options = new RiskRuleOptions(EnabledRules: new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-022"
+            "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-021", "CIEM-022"
         });
-        var riskResult = await _riskEngine.EvaluateAsync(new RiskEvaluationRequest(
+        var riskRequest = new RiskEvaluationRequest(
             accounts, principals.Values.ToArray(), resources, roles.Values.ToArray(), Array.Empty<CloudPolicy>(),
             sourcePermissions.Concat(graphPermissions).ToArray(), entitlements, effectiveAccess, accessPathResult.Paths,
             Array.Empty<ActivityRecord>(), EvaluatedAt: evaluatedAtUtc, Options: options,
-            ResourceSecuritySignals: signals, ResourceSecurityCoverage: coverage), cancellationToken);
+            ResourceSecuritySignals: signals, ResourceSecurityCoverage: coverage, ToxicCombinationRules: toxicRules,
+            ToxicTrustRelationships: ToxicTrustRelationshipMapper.FromFederationEvidence(principals.Values.ToArray()));
+        var riskResult = await _riskEngine.EvaluateAsync(riskRequest, cancellationToken);
+        if (_toxicCombinationWorkspace is not null)
+            await _toxicCombinationWorkspace.RecordEvaluationAsync(riskRequest, riskResult.Findings, cancellationToken);
         diagnostics.AddRange(riskResult.Diagnostics.Select(diagnostic => diagnostic.Message));
         return new LiveResourceRiskGraphResult(accessPathResult.Paths, riskResult.Findings, diagnostics);
     }

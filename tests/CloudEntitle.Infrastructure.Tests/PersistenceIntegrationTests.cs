@@ -3,6 +3,8 @@ using CloudEntitle.Domain.Entities;
 using CloudEntitle.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace CloudEntitle.Infrastructure.Tests;
@@ -34,6 +36,50 @@ public sealed class PersistenceIntegrationTests
                 Directory.Delete(directory, true);
             }
         }
+    }
+
+    [Fact]
+    public async Task PermissionUsageMigration_PreservesLegacyActivityAndMarksItsMappingUnknown()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<CloudEntitleDbContext>().UseSqlite(connection).Options;
+        var accountId = Guid.NewGuid();
+        var principalId = Guid.NewGuid();
+        var activityId = Guid.NewGuid();
+        await using var context = new CloudEntitleDbContext(options);
+        var migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync("20261008233147_AddWorkloadIdentityGovernance");
+        context.CloudAccounts.Add(new CloudAccount
+        {
+            Id = accountId, Name = "Existing account", CloudProvider = CloudProviderType.Azure,
+            ExternalAccountId = "existing-subscription"
+        });
+        context.CloudPrincipals.Add(new CloudPrincipal
+        {
+            Id = principalId, AccountId = accountId, Name = "Existing principal",
+            PrincipalId = "existing-principal", CloudProvider = CloudProviderType.Azure,
+            IdentityType = IdentityType.User
+        });
+        await context.SaveChangesAsync();
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO ActivityRecords (Id, PrincipalId, CloudAccountId, Action, Timestamp, Success) VALUES ({activityId}, {principalId}, {accountId}, {"Read"}, {DateTime.UtcNow}, {true})");
+
+        await migrator.MigrateAsync();
+        context.ChangeTracker.Clear();
+        var activity = await context.ActivityRecords.SingleAsync(item => item.Id == activityId);
+
+        Assert.Equal(PermissionActionMappingStatus.Unknown, activity.PermissionMappingStatus);
+        Assert.Equal("Read", activity.Action);
+        Assert.Equal(0, await context.CloudActivityEvents.CountAsync());
+        Assert.Contains("20261109022710_AddToxicCombinationEngine", await context.Database.GetAppliedMigrationsAsync());
+        Assert.Equal(0, await context.ToxicCombinationRules.CountAsync());
+        Assert.Equal(0, await context.ToxicCombinationFindings.CountAsync());
+        Assert.Equal(0, await context.ToxicCombinationEvidence.CountAsync());
+        Assert.Equal(0, await context.PermissionCombinations.CountAsync());
+        Assert.Equal(0, await context.ToxicCombinationRecommendations.CountAsync());
+        Assert.Equal(0, await context.ToxicCombinationTrustPathEvidence.CountAsync());
+        Assert.Contains("20261109041336_AddTrustSourcePermissionEvidence", await context.Database.GetAppliedMigrationsAsync());
     }
 
     [Fact]

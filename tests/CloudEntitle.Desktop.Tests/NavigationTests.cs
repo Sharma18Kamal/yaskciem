@@ -69,7 +69,9 @@ public sealed class NavigationTests
         var navigation = provider.GetRequiredService<INavigationService>();
         var viewModel = new MainWindowViewModel(navigation);
 
-        Assert.Equal(16, viewModel.NavigationItems.Count);
+        Assert.Equal(18, viewModel.NavigationItems.Count);
+        Assert.Contains(viewModel.NavigationItems, item => item.Title == "Permission Usage");
+        Assert.Contains(viewModel.NavigationItems, item => item.Title == "Toxic Combinations");
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "What-if Simulator");
         Assert.Equal("Dashboard", viewModel.CurrentNavigationItem.Title);
         Assert.Contains(viewModel.NavigationItems, item => item.Title == "Effective Access");

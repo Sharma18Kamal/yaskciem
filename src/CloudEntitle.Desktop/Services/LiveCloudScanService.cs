@@ -107,16 +107,17 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
     private readonly PostureHistoryService _postureHistoryService = new();
     private readonly IPostureNotificationChannel _postureNotificationChannel;
     private readonly ApplicationRiskEngine _riskEngine = new();
-    private readonly LiveResourceRiskGraphEvaluator _resourceRiskGraphEvaluator = new();
+    private readonly LiveResourceRiskGraphEvaluator _resourceRiskGraphEvaluator;
     private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly ICloudAuthenticationLauncher? _authenticationLauncher;
 
     public LiveCloudScanResult? CurrentResult { get; private set; }
     public event EventHandler? ScanCompleted;
 
-    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null, IPostureNotificationChannel? postureNotificationChannel = null, ICloudAuthenticationLauncher? authenticationLauncher = null)
+    public LiveCloudScanService(IEnumerable<ICloudProvider> providers, ILiveScanHistoryStore? historyStore = null, IKubernetesRbacProvider? kubernetesRbacProvider = null, CloudConnectionState? cloudConnectionState = null, IPostureNotificationChannel? postureNotificationChannel = null, ICloudAuthenticationLauncher? authenticationLauncher = null, IToxicCombinationWorkspaceService? toxicCombinationWorkspace = null)
     {
         _providers = providers.ToArray();
+        _resourceRiskGraphEvaluator = new LiveResourceRiskGraphEvaluator(toxicCombinationWorkspace);
         _historyStore = historyStore;
         _kubernetesRbacProvider = kubernetesRbacProvider;
         _cloudConnectionState = cloudConnectionState;

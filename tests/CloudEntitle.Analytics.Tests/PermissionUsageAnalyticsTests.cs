@@ -1,8 +1,8 @@
 using CloudEntitle.Analytics.Models;
-using CloudEntitle.Analytics.Services;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.RiskEngine.Models;
+using CloudEntitle.Analytics.Services;
 using Xunit;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 
@@ -131,7 +131,8 @@ public sealed class PermissionUsageAnalyticsTests
         var unattributed = Activity(access, permission.Action, now.AddDays(-1));
         unattributed.RoleId = null;
         result = service.Calculate(new[] { access }, new[] { permission }, new[] { unattributed }, coverage, now);
-        Assert.All(Assert.Single(result.Permissions).Windows, item => Assert.Equal(PermissionUsageState.Unknown, item.State));
+        Assert.All(Assert.Single(result.Permissions).Windows, item => Assert.Equal(PermissionUsageState.Used, item.State));
+        Assert.Contains("does not identify which role or policy granted it", Assert.Single(result.Permissions).CorrelationStatus);
         Assert.Throws<ArgumentException>(() => service.Calculate(new[] { access }, Array.Empty<CloudPermission>(), Array.Empty<ActivityRecord>(), coverage, now));
     }
 
@@ -144,7 +145,78 @@ public sealed class PermissionUsageAnalyticsTests
             RoleId = access.RoleId,
             ResourceId = access.ResourceId,
             Action = action,
+            PermissionAction = action,
+            PermissionMappingStatus = PermissionActionMappingStatus.ExactProviderEvidence,
+            PermissionMappingEvidence = "Test provider authorization evidence",
             Timestamp = timestamp,
             Success = true
         };
+
+    [Fact]
+    public void Calculate_DistinguishesUsageStatesAndAvoidsGuessingOperationMappings()
+    {
+        var now = new DateTime(2026, 11, 9, 0, 0, 0, DateTimeKind.Utc);
+        var access = CreateAccess();
+        var permission = new CloudPermission { Id = access.PermissionId, Name = "Read objects", Action = "s3:GetObject" };
+        var candidates = new[]
+        {
+            new ActivityRecord { Id = Guid.NewGuid(), CloudAccountId = access.CloudAccountId, PrincipalId = access.PrincipalId,
+                ResourceId = access.ResourceId, Action = "s3:GetObject", PermissionAction = "s3:GetObject", PermissionMappingStatus = PermissionActionMappingStatus.CuratedCandidate,
+                Timestamp = now.AddDays(-1), Success = true }
+        };
+        var partial = new[] { new ActivityEvidenceCoverage(access.CloudAccountId, access.Provider, now.AddDays(-90), now,
+            ActivityCoverageStatus.Partial, true, true, false, 1) };
+        var service = new PermissionUsageAnalyticsService();
+        var unknownMapping = service.Calculate(new[] { access }, new[] { permission }, candidates, partial, now);
+        Assert.All(Assert.Single(unknownMapping.Permissions).Windows,
+            item => Assert.Equal(PermissionUsageEvidenceState.UnknownMapping, item.EvidenceState));
+        Assert.Equal(1, Assert.Single(unknownMapping.Permissions).CandidateActionCount90Days);
+
+        var noCoverage = service.Calculate(new[] { access }, new[] { permission }, Array.Empty<ActivityRecord>(), Array.Empty<ActivityEvidenceCoverage>(), now);
+        Assert.All(Assert.Single(noCoverage.Permissions).Windows,
+            item => Assert.Equal(PermissionUsageEvidenceState.InsufficientObservation, item.EvidenceState));
+
+        var incomplete = service.Calculate(new[] { access }, new[] { permission }, Array.Empty<ActivityRecord>(), partial, now);
+        Assert.All(Assert.Single(incomplete.Permissions).Windows,
+            item => Assert.Equal(PermissionUsageEvidenceState.CollectionIncomplete, item.EvidenceState));
+    }
+
+    [Fact]
+    public void ProviderActionMapper_UsesOnlyExplicitAuthorizationEvidenceOrReviewedCandidates()
+    {
+        var mapper = new ProviderActionPermissionMapper();
+        Assert.Equal(PermissionActionMappingStatus.ExactProviderEvidence,
+            mapper.Map(CloudProvider.Gcp, "storage.objects.get", "storage.objects.get", "authorizationInfo.permission").Status);
+        var aws = mapper.Map(CloudProvider.Aws, "s3.amazonaws.com/GetObject", null, null);
+        Assert.Equal(PermissionActionMappingStatus.CuratedCandidate, aws.Status);
+        Assert.Equal("s3:GetObject", aws.PermissionAction);
+        Assert.Equal(PermissionActionMappingStatus.ExactProviderEvidence,
+            mapper.Map(CloudProvider.Aws, "s3.amazonaws.com/GetObject", "s3:GetObject", "CloudTrail authorization evidence").Status);
+        Assert.Equal(PermissionActionMappingStatus.ExactProviderEvidence,
+            mapper.Map(CloudProvider.Azure, "GetBlob", "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read", "authorization.action").Status);
+        Assert.Equal(PermissionActionMappingStatus.Unknown,
+            mapper.Map(CloudProvider.Gcp, "storage.objects.get", null, null).Status);
+    }
+
+    [Fact]
+    public void PermissionUsageTrends_AggregateDailyWeeklyMonthlyByIdentityAndProvider()
+    {
+        var account = Guid.NewGuid();
+        var identity = Guid.NewGuid();
+        var time = new DateTimeOffset(2026, 11, 9, 1, 0, 0, TimeSpan.Zero);
+        var events = new[]
+        {
+            new CloudActivityEvent { Id = Guid.NewGuid(), Provider = CloudProvider.Azure, CloudAccountId = account,
+                IdentityId = identity, EventTimestamp = time, Outcome = "Succeeded",
+                OutcomeKnown = true, PermissionMappingStatus = PermissionActionMappingStatus.ExactProviderEvidence },
+            new CloudActivityEvent { Id = Guid.NewGuid(), Provider = CloudProvider.Azure, CloudAccountId = account,
+                IdentityId = identity, EventTimestamp = time.AddHours(1), Outcome = "Succeeded",
+                PermissionMappingStatus = PermissionActionMappingStatus.CuratedCandidate }
+        };
+        var result = new PermissionUsageTrendService().Calculate(events);
+        Assert.Equal(3, result.Count);
+        Assert.All(result, item => { Assert.Equal(identity, item.IdentityId); Assert.Equal(1, item.ObservedActionCount); Assert.Equal(1, item.CandidateActionCount); });
+        Assert.Contains(result, item => item.BucketType == "Weekly" && item.BucketStartUtc.DayOfWeek == DayOfWeek.Monday);
+        Assert.Contains(result, item => item.BucketType == "Monthly" && item.BucketStartUtc.Day == 1);
+    }
 }

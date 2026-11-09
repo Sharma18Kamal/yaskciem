@@ -6,6 +6,7 @@ using CloudEntitle.Desktop.ViewModels;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.Integration.Contracts;
+using ProviderActivityEvent = CloudEntitle.Integration.Contracts.CloudActivityEvent;
 using CloudEntitle.OrganizationManagement.Models;
 using CloudEntitle.OrganizationManagement.Services;
 using Xunit;
@@ -510,7 +511,7 @@ public sealed partial class OrganizationViewModelTests
             LastQuery = query;
             LastSnapshot = new CloudActivitySnapshot(Guid.NewGuid(), query.Provider, query.AccountId,
                 query.ThroughUtc.AddDays(-90), query.ThroughUtc, "CloudTrail regional event history", "Partial management only", false,
-                new[] { new CloudActivityEvent("event", "reader", "GetObject", null, null, query.ThroughUtc.AddDays(-1), true) });
+                new[] { new ProviderActivityEvent("event", "reader", "GetObject", null, null, query.ThroughUtc.AddDays(-1), true) });
             return PendingRead?.Task ?? Task.FromResult(LastSnapshot);
         }
     }

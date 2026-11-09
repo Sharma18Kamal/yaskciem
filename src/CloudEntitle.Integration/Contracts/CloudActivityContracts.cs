@@ -10,6 +10,8 @@ public sealed record CloudActivityEvent(string EventId, string Principal, string
     public string? PermissionEvidenceSource { get; init; }
     public string? SourceIp { get; init; }
     public string? CountryCode { get; init; }
+    public string PrincipalType { get; init; } = "Unknown";
+    public string? RawEvidence { get; init; }
 }
 
 public enum CloudActivitySource { Default, AwsCloudTrailLake, AwsS3Archive, AzureLogAnalytics, AzureBlobArchive }
@@ -30,6 +32,7 @@ public sealed record CloudActivitySnapshot(Guid SnapshotId, CloudProvider Provid
     bool Truncated, IReadOnlyList<CloudActivityEvent> Events)
 {
     public string CoverageStatus => "Partial";
+    public DateTimeOffset CollectedAtUtc { get; init; } = DateTimeOffset.UtcNow;
     public string? SourceScope { get; init; }
     public IReadOnlyList<CloudActivityProvenance> Provenance { get; init; } = Array.Empty<CloudActivityProvenance>();
 }

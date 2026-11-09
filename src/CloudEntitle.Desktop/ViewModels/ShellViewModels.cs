@@ -128,6 +128,8 @@ public sealed class MainWindowViewModel : ObservableObject
             new("Resources", "◇", typeof(ResourcesViewModel)),
             new("Entitlements", "◆", typeof(EntitlementsViewModel)),
             new("Effective Access", "↳", typeof(EffectiveAccessViewModel)),
+            new("Permission Usage", "◷", typeof(PermissionUsageViewModel)),
+            new("Toxic Combinations", "⚠", typeof(ToxicCombinationViewModel)),
             new("What-if Simulator", "?", typeof(WhatIfSimulatorViewModel)),
             new("Access Paths", "⇢", typeof(AccessPathExplorerViewModel)),
             new("Risk Findings", "!", typeof(RiskFindingsViewModel)),

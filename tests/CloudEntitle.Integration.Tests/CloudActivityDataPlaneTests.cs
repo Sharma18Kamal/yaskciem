@@ -8,6 +8,7 @@ using CloudEntitle.Integration.Services;
 using CloudEntitle.LicenseServer.Services;
 using Xunit;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
+using ProviderActivityEvent = CloudEntitle.Integration.Contracts.CloudActivityEvent;
 
 namespace CloudEntitle.Integration.Tests;
 
@@ -257,7 +258,7 @@ public sealed class CloudActivityDataPlaneTests
         Assert.Empty(runner.Paths);
         var snapshot = new CloudActivitySnapshot(Guid.NewGuid(), query.Provider, query.AccountId, query.ThroughUtc.AddDays(-90),
             query.ThroughUtc, "Archive", "Partial", false, [
-                new CloudActivityEvent("one", "reader", "GetObject", null, null, query.ThroughUtc, true) { OutcomeKnown = false } ]);
+                new ProviderActivityEvent("one", "reader", "GetObject", null, null, query.ThroughUtc, true) { OutcomeKnown = false } ]);
         Assert.Throws<ArgumentException>(() => SharedWorkspaceStore.ValidateCloudActivity(snapshot));
         Assert.Throws<ArgumentException>(() => SharedWorkspaceStore.ValidateCloudActivity(snapshot with { Events = [],
             Provenance = [new("source", "not-a-digest", 1)] }));
@@ -274,7 +275,7 @@ public sealed class CloudActivityDataPlaneTests
             PrincipalId = principal.Id, ResourceId = resource.Id, PermissionId = permission.Id, Decision = AccessDecision.Allow,
             EvaluationStatus = EvaluationStatus.FullyEvaluated };
         var now = DateTimeOffset.UtcNow;
-        var observation = new CloudActivityEvent("event", principal.ExternalId, "storage.objects.get", "storage.objects.get",
+        var observation = new ProviderActivityEvent("event", principal.ExternalId, "storage.objects.get", "storage.objects.get",
             resource.ExternalId, now.AddDays(-1), true) { PermissionEvidenceSource = "GCP authorizationInfo.permission" };
         var snapshot = new CloudActivitySnapshot(Guid.NewGuid(), account.Provider, account.ExternalId!, now.AddDays(-90), now, "GCP", "Partial", false, [observation]);
         var service = new ActivityEntitlementAttributionService();
@@ -307,7 +308,7 @@ public sealed class CloudActivityDataPlaneTests
         var now = DateTimeOffset.UtcNow;
         var snapshot = new CloudActivitySnapshot(Guid.NewGuid(), CloudProvider.Azure, Guid.NewGuid().ToString(),
             now.AddDays(-90), now, "Blob archive", "Partial", false,
-            [new CloudActivityEvent("event", "Unattributed", "GetBlob", null, "resource", now.AddDays(-1), false) { OutcomeKnown = false }])
+            [new ProviderActivityEvent("event", "Unattributed", "GetBlob", null, "resource", now.AddDays(-1), false) { OutcomeKnown = false }])
         { SourceScope = "selected-client-prefix", Provenance = [new("client-object", new string('A', 64), 1)] };
         await store.SaveCloudActivityAsync(tenant, organization, Guid.NewGuid(), snapshot);
         var loaded = await store.GetCloudActivityAsync(tenant, organization, snapshot.Provider, snapshot.AccountId);

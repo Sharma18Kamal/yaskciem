@@ -58,6 +58,19 @@ public sealed class DemoDataServiceTests
         Assert.NotEmpty(snapshot.RiskFindings);
         Assert.NotEmpty(snapshot.Recommendations);
         Assert.NotEmpty(snapshot.Scans);
+        var usageEvents = await setup.CloudActivityEvents.AsNoTracking().ToArrayAsync();
+        Assert.Equal(18, usageEvents.Length);
+        Assert.Equal(new[] { CloudProvider.Azure, CloudProvider.Aws, CloudProvider.Gcp },
+            usageEvents.Select(item => item.Provider).Distinct().Order().ToArray());
+        Assert.All(usageEvents, item =>
+        {
+            Assert.Equal(PermissionActionMappingStatus.ExactProviderEvidence, item.PermissionMappingStatus);
+            Assert.Equal("Succeeded", item.Outcome);
+            Assert.Contains("Synthetic", item.Source);
+        });
+        var usageWindows = await setup.PermissionObservationWindows.AsNoTracking().ToArrayAsync();
+        Assert.Equal(3, usageWindows.Length);
+        Assert.All(usageWindows, window => Assert.Equal("Complete", window.Status));
         Assert.Equal(4, await setup.CloudAccounts.CountAsync());
     }
 
@@ -83,6 +96,8 @@ public sealed class DemoDataServiceTests
         Assert.Equal(firstCount, secondCount);
         Assert.Equal(1, await setup.CloudAccounts.CountAsync());
         Assert.Equal(realId, (await setup.CloudAccounts.SingleAsync()).Id);
+        Assert.Empty(await setup.CloudActivityEvents.ToArrayAsync());
+        Assert.Empty(await setup.PermissionObservationWindows.ToArrayAsync());
         Assert.False(service.IsDemoMode);
     }
 

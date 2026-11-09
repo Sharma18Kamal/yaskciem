@@ -25,19 +25,19 @@ public sealed class LiveResourceRiskGraphTests
         var snapshot = new EntitlementEvidenceSnapshot(Guid.NewGuid(), CloudProvider.Aws, account.ExternalId!, now.AddMinutes(-1), now, grants, ["Partial"]);
         var evaluator = new LiveResourceRiskGraphEvaluator();
         var result = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource], snapshot);
-        Assert.Contains(result.Findings, finding => finding.Title == "Sensitive storage access plus public-access control");
+        Assert.Contains(result.Findings, finding => finding.Title == "Sensitive storage read plus public access control");
         Assert.All(result.Findings, finding => Assert.Equal(RiskEvaluationState.Potential, finding.EvaluationState));
         Assert.All(result.AccessPaths, path => Assert.NotEqual(AccessPathStatus.Complete, path.PathStatus));
         resource.ResourceUri = resource.ResourceId;
         resource.ResourceId = null;
         var uriOnly = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource], snapshot);
-        Assert.Contains(uriOnly.Findings, finding => finding.Title == "Sensitive storage access plus public-access control");
+        Assert.Contains(uriOnly.Findings, finding => finding.Title == "Sensitive storage read plus public access control");
         var conditional = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource],
             snapshot with { Grants = [grants[0], grants[1] with { HasCondition = true }] });
-        Assert.DoesNotContain(conditional.Findings, finding => finding.Title == "Sensitive storage access plus public-access control");
+        Assert.DoesNotContain(conditional.Findings, finding => finding.Title == "Sensitive storage read plus public access control");
         var denied = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource],
             snapshot with { Grants = [grants[0], grants[1] with { Effect = "Deny" }] });
-        Assert.DoesNotContain(denied.Findings, finding => finding.Title == "Sensitive storage access plus public-access control");
+        Assert.DoesNotContain(denied.Findings, finding => finding.Title == "Sensitive storage read plus public access control");
         principal.Name = principal.PrincipalId;
         principal.PrincipalId = "arn:aws:iam::123456789012:user/other";
         var nameOnly = await evaluator.EvaluateDocumentsAsync(account, [principal], [resource], snapshot);

@@ -3,6 +3,7 @@ using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.RiskEngine.Models;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
+using AnalyticsPermissionUsageRecord = CloudEntitle.Analytics.Models.PermissionUsageRecord;
 
 namespace CloudEntitle.Analytics.Services;
 
@@ -30,12 +31,13 @@ public sealed class PermissionUsageAnalyticsService
         var records = effectiveAccess
             .Where(access => access.Decision is AccessDecision.Allow or AccessDecision.Conditional)
             .Where(access => permissionById.ContainsKey(access.PermissionId))
-            .OrderBy(access => access.Provider)
-            .ThenBy(access => access.CloudAccountId)
-            .ThenBy(access => access.PrincipalId)
-            .ThenBy(access => access.PermissionId)
-            .ThenBy(access => access.Id)
-            .Select(access => Analyze(access, permissionById[access.PermissionId], activityRecords, activityCoverage, evaluatedAtUtc))
+            .GroupBy(access => (access.Provider, access.CloudAccountId, access.PrincipalId, access.PermissionId, access.ResourceId))
+            .OrderBy(group => group.Key.Provider)
+            .ThenBy(group => group.Key.CloudAccountId)
+            .ThenBy(group => group.Key.PrincipalId)
+            .ThenBy(group => group.Key.PermissionId)
+            .ThenBy(group => group.Key.ResourceId)
+            .Select(group => Analyze(group.ToArray(), permissionById[group.Key.PermissionId], activityRecords, activityCoverage, evaluatedAtUtc))
             .ToArray();
 
         var summaries = ObservationWindows.Select(days =>
@@ -45,65 +47,97 @@ public sealed class PermissionUsageAnalyticsService
                 days,
                 windowResults.Count(window => window.State == PermissionUsageState.Used),
                 windowResults.Count(window => window.State == PermissionUsageState.Unused),
-                windowResults.Count(window => window.State == PermissionUsageState.Unknown));
+                windowResults.Count(window => window.State == PermissionUsageState.Unknown))
+            {
+                NotObserved = windowResults.Count(window => window.EvidenceState == PermissionUsageEvidenceState.NotObserved),
+                InsufficientObservation = windowResults.Count(window => window.EvidenceState == PermissionUsageEvidenceState.InsufficientObservation),
+                UnknownMapping = windowResults.Count(window => window.EvidenceState == PermissionUsageEvidenceState.UnknownMapping),
+                CollectionIncomplete = windowResults.Count(window => window.EvidenceState == PermissionUsageEvidenceState.CollectionIncomplete)
+            };
         }).ToArray();
 
         return new PermissionUsageReport(evaluatedAtUtc, records, summaries);
     }
 
-    private static PermissionUsageRecord Analyze(
-        DomainEffectiveAccess access,
+    private static AnalyticsPermissionUsageRecord Analyze(
+        IReadOnlyList<DomainEffectiveAccess> accessSet,
         CloudPermission permission,
         IReadOnlyList<ActivityRecord> activityRecords,
         IReadOnlyList<ActivityEvidenceCoverage> activityCoverage,
         DateTime evaluatedAtUtc)
     {
+        var access = accessSet[0];
         var actionPattern = permission.Action ?? string.Empty;
         var attributedActions = string.IsNullOrWhiteSpace(actionPattern)
             ? Array.Empty<ActivityRecord>()
             : activityRecords
-            .Where(activity => activity.CloudAccountId == access.CloudAccountId
+            .Where(activity => accessSet.Any(access => activity.CloudAccountId == access.CloudAccountId
                 && activity.PrincipalId == access.PrincipalId
+                && activity.ActionMappingStatusForUsage() == PermissionActionMappingStatus.ExactProviderEvidence
                 && activity.Success
-                && !string.IsNullOrWhiteSpace(activity.Action)
+                && !string.IsNullOrWhiteSpace(activity.PermissionAction ?? activity.Action)
                 && activity.Timestamp.ToUniversalTime() <= evaluatedAtUtc
-                && (!access.RoleId.HasValue || activity.RoleId == access.RoleId)
+                && (!activity.RoleId.HasValue || access.RoleId == activity.RoleId)
                 && (!access.ResourceId.HasValue || activity.ResourceId == access.ResourceId)
-                && ActivityUsageEvaluator.ActionMatches(access.Provider, actionPattern, activity.Action))
+                && ActivityUsageEvaluator.ActionMatches(access.Provider, actionPattern, activity.PermissionAction ?? activity.Action)))
             .OrderByDescending(activity => activity.Timestamp.ToUniversalTime())
             .ToArray();
+        var candidateActions = string.IsNullOrWhiteSpace(actionPattern) ? Array.Empty<ActivityRecord>()
+            : activityRecords.Where(activity => accessSet.Any(access => activity.CloudAccountId == access.CloudAccountId
+                && activity.PrincipalId == access.PrincipalId && activity.Success
+                && activity.PermissionMappingStatus == PermissionActionMappingStatus.CuratedCandidate
+                && !string.IsNullOrWhiteSpace(activity.PermissionAction)
+                && activity.Timestamp.ToUniversalTime() <= evaluatedAtUtc
+                && (!access.ResourceId.HasValue || activity.ResourceId == access.ResourceId)
+                && ActivityUsageEvaluator.ActionMatches(access.Provider, actionPattern, activity.PermissionAction)))
+                .ToArray();
+        var unknownMappingActions = string.IsNullOrWhiteSpace(actionPattern) ? Array.Empty<ActivityRecord>()
+            : activityRecords.Where(activity => accessSet.Any(access => activity.CloudAccountId == access.CloudAccountId
+                && activity.PrincipalId == access.PrincipalId && activity.Success
+                && activity.PermissionMappingStatus == PermissionActionMappingStatus.Unknown
+                && activity.Timestamp.ToUniversalTime() >= evaluatedAtUtc.AddDays(-90)
+                && activity.Timestamp.ToUniversalTime() <= evaluatedAtUtc))
+                .ToArray();
 
-        var relevantCoverage = activityCoverage.Where(item =>
-            item.CloudAccountId == access.CloudAccountId && item.Provider == access.Provider).ToArray();
+        var relevantCoverage = activityCoverage.Where(item => accessSet.Any(access =>
+            item.CloudAccountId == access.CloudAccountId && item.Provider == access.Provider)).ToArray();
         var windows = ObservationWindows.Select(days =>
         {
             var windowStartUtc = evaluatedAtUtc.AddDays(-days);
             var matchingActions = attributedActions
                 .Where(activity => activity.Timestamp.ToUniversalTime() >= windowStartUtc)
                 .ToArray();
-            var complete = !string.IsNullOrWhiteSpace(actionPattern) && relevantCoverage.Any(coverage => ActivityUsageEvaluator.Covers(
-                coverage,
-                windowStartUtc,
-                evaluatedAtUtc,
-                requiresActions: true,
-                requiresResourceIds: access.ResourceId.HasValue,
-                requiresRoleIds: access.RoleId.HasValue));
-            var ambiguous = activityRecords.Any(activity => activity.CloudAccountId == access.CloudAccountId
-                && activity.Success && activity.Timestamp.ToUniversalTime() >= windowStartUtc
-                && activity.Timestamp.ToUniversalTime() <= evaluatedAtUtc
-                && (activity.PrincipalId == access.PrincipalId || activity.PrincipalId == Guid.Empty)
-                && (string.IsNullOrWhiteSpace(activity.Action) || ActivityUsageEvaluator.ActionMatches(access.Provider, actionPattern, activity.Action))
-                && (activity.PrincipalId == Guid.Empty || access.ResourceId.HasValue && activity.ResourceId is null
-                    || access.RoleId.HasValue && activity.RoleId is null));
-            var state = matchingActions.Length > 0
-                ? PermissionUsageState.Used
-                : complete && !ambiguous ? PermissionUsageState.Unused : PermissionUsageState.Unknown;
+            var coverage = relevantCoverage.OrderByDescending(item => item.ObservedThroughUtc).FirstOrDefault();
+            var complete = !string.IsNullOrWhiteSpace(actionPattern) && relevantCoverage.Any(item => ActivityUsageEvaluator.Covers(
+                item, windowStartUtc, evaluatedAtUtc, requiresActions: true, requiresResourceIds: access.ResourceId.HasValue));
+            var candidates = candidateActions.Count(activity => activity.Timestamp.ToUniversalTime() >= windowStartUtc
+                && activity.Timestamp.ToUniversalTime() <= evaluatedAtUtc);
+            var unknown = unknownMappingActions.Any(activity => activity.Timestamp.ToUniversalTime() >= windowStartUtc
+                && activity.Timestamp.ToUniversalTime() <= evaluatedAtUtc);
+            var evidenceState = matchingActions.Length > 0 ? PermissionUsageEvidenceState.Used
+                : string.IsNullOrWhiteSpace(actionPattern) || candidates > 0 || unknown
+                    ? PermissionUsageEvidenceState.UnknownMapping
+                : coverage is null || coverage.ObservedFromUtc.ToUniversalTime() > windowStartUtc
+                    ? PermissionUsageEvidenceState.InsufficientObservation
+                : coverage.Status != ActivityCoverageStatus.Complete
+                    ? PermissionUsageEvidenceState.CollectionIncomplete
+                : PermissionUsageEvidenceState.NotObserved;
+            var state = evidenceState switch
+            {
+                PermissionUsageEvidenceState.Used => PermissionUsageState.Used,
+                PermissionUsageEvidenceState.NotObserved => PermissionUsageState.Unused,
+                _ => PermissionUsageState.Unknown
+            };
 
             return new PermissionUsageWindow(
                 days,
                 state,
                 matchingActions.FirstOrDefault()?.Timestamp.ToUniversalTime(),
-                matchingActions.Length);
+                matchingActions.Length)
+            {
+                EvidenceState = evidenceState,
+                CandidateActionCount = candidates
+            };
         }).ToArray();
 
         var ninetyDayStartUtc = evaluatedAtUtc.AddDays(-90);
@@ -115,7 +149,7 @@ public sealed class PermissionUsageAnalyticsService
             .ThenBy(item => item.Action, StringComparer.Ordinal)
             .ToArray();
 
-        return new PermissionUsageRecord(
+        return new AnalyticsPermissionUsageRecord(
             access.Id,
             access.CloudAccountId,
             access.Provider,
@@ -124,6 +158,22 @@ public sealed class PermissionUsageAnalyticsService
             permission.Name,
             attributedActions.FirstOrDefault()?.Timestamp.ToUniversalTime(),
             windows,
-            frequencies);
+            frequencies)
+        {
+            FirstUsedAtUtc = attributedActions.LastOrDefault()?.Timestamp.ToUniversalTime(),
+            ResourceId = access.ResourceId,
+            PermissionAction = permission.Action,
+            EffectiveAccessIds = accessSet.Select(item => item.Id).ToArray(),
+            CorrelationStatus = accessSet.Any(item => item.RoleId.HasValue) && attributedActions.Any(item => !item.RoleId.HasValue)
+                ? "Permission use is correlated to identity/action/resource; provider event does not identify which role or policy granted it."
+                : "Provider-aware exact permission mapping correlated to the identity and available resource evidence.",
+            CandidateActionCount90Days = candidateActions.Count(item => item.Timestamp.ToUniversalTime() >= ninetyDayStartUtc)
+        };
     }
+}
+
+internal static class ActivityRecordMappingExtensions
+{
+    public static PermissionActionMappingStatus ActionMappingStatusForUsage(this ActivityRecord activity)
+        => activity.PermissionMappingStatus;
 }
