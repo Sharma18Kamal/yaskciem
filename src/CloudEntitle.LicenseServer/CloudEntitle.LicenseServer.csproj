@@ -9,9 +9,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Identity.Web" Version="4.16.0" />
-    <!-- Keep Identity.Web's cryptography dependencies patched for downstream test consumers. -->
+    <!-- Keep Identity.Web's cryptography dependency patched for downstream test consumers. -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
     <PackageReference Include="Npgsql" Version="9.0.4" />
     <PackageReference Include="AWSSDK.S3" Version="3.7.400.0" />
     <PackageReference Include="Azure.Identity" Version="1.17.2" />

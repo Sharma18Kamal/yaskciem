@@ -25,6 +25,9 @@ public sealed class WhatIfSavedData(IDbContextFactory<CloudEntitleDbContext> fac
     {
         await using var db = await factory.CreateDbContextAsync(token);
         var account = await db.CloudAccounts.AsNoTracking().SingleAsync(item => item.Id == accountId, token);
+        var sourceSnapshotAtUtc = account.LastScannedAt is { } collectedAt
+            ? DateTime.SpecifyKind(collectedAt, DateTimeKind.Utc)
+            : throw new InvalidOperationException("Saved inventory has no provider collection timestamp; it cannot be used as evidence for a What-if simulation.");
         var principals = await db.CloudPrincipals.AsNoTracking().Where(item => item.AccountId == accountId).ToArrayAsync(token);
         var resources = await db.CloudResources.AsNoTracking().Where(item => item.AccountId == accountId).ToArrayAsync(token);
         var roles = await db.CloudRoles.AsNoTracking().Where(item => item.AccountId == accountId).ToArrayAsync(token);
@@ -43,7 +46,7 @@ public sealed class WhatIfSavedData(IDbContextFactory<CloudEntitleDbContext> fac
             if (string.IsNullOrWhiteSpace(item.Scope))
                 throw new InvalidOperationException("Saved entitlement scope is missing; export a complete offline bundle instead.");
             var evidence = new ProviderEvidence(provider, "SavedInventoryProjection", item.Source ?? item.Id.ToString("D"),
-                permission.Source, null, null, item.Scope, item.AssignmentType.ToString(), now, new Dictionary<string, string>());
+                permission.Source, null, null, item.Scope, item.AssignmentType.ToString(), sourceSnapshotAtUtc, new Dictionary<string, string>());
             return new NormalizedEntitlement(item.Id, provider, accountId, item.PrincipalId, item.ResourceId,
                 item.RoleId, item.PolicyId, item.PermissionId,
                 new NormalizedScope(provider, NormalizedScopeType.Unknown, item.Scope, item.Scope, null,
@@ -53,9 +56,12 @@ public sealed class WhatIfSavedData(IDbContextFactory<CloudEntitleDbContext> fac
                 item.AssignmentType == AssignmentType.Inherited, false, null, NormalizationStatus.Unknown,
                 evidence, item.GrantedAt, item.ExpiresAt, permission.Resource, permission.IsExclusion);
         }).ToArray();
-        return new(new AccessEvaluationRequest(new NormalizationResult(principals, roles, policies, permissions,
+        return new WhatIfInput(new AccessEvaluationRequest(new NormalizationResult(principals, roles, policies, permissions,
             grants, Array.Empty<NormalizationWarning>(), Array.Empty<string>(), new(grants.Length, 0, grants.Length, 0, 0)),
             resources, memberships, EvaluationTime: now), $"Saved local inventory: {account.Name}",
-            new[] { "Saved inventory does not preserve complete native policy, deny, condition or authorization coverage. Results are potential impacts only." });
+            new[] { "Saved inventory does not preserve complete native policy, deny, condition or authorization coverage. Results are potential impacts only." })
+        {
+            SourceSnapshotAtUtc = sourceSnapshotAtUtc
+        };
     }
 }

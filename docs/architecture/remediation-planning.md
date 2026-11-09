@@ -1,43 +1,55 @@
-# Remediation Planning and Simulation
+# Remediation Planning and Execution
 
-The remediation layer is a review-only boundary after Recommendations. It consumes recommendation evidence and EffectiveAccess records to create non-executable policy previews, approval records, conservative simulations, and rollback previews.
-
-The desktop also has a **separate opt-in [native cloud administration workflow](../deployment/cloud-administration.md)** for manually specified role/policy changes using the desktop CLI identity. It does not execute recommendation plans, change their separation-of-duties requirements, or enable automatic least-privilege/SOAR removal. A single authorized administrator may explicitly approve a manual change; its dependency review is an acknowledgment, not computed evidence of operational safety.
+The remediation workflow converts evidence-backed recommendations into approval-bound plans. It reuses the recommendation, effective-access, What-if, organization authorization, and provider administration services; it does not add a second authorization engine.
 
 ```mermaid
 flowchart TD
-    R[Recommendation] --> P[Remediation Planner]
-    E[Effective Access] --> P
-    P --> H[Audited Human Review]
-    H -->|Approve| D[Non-mutating Dry Run]
-    H -->|Reject| X[Rejected and Audited]
-    D --> I[Impact and Diagnostics]
-    D --> V[Verification unavailable unless mutation is confirmed]
-    D --> Rb[Non-executable Rollback Draft]
-    Rb --> H
+    R[Confirmed recommendation] --> W[What-if report from timestamped saved inventory]
+    W --> P[Provider-generated before/after preview]
+    P --> A[Independent reviewer approval]
+    A --> D[Non-mutating structural dry run]
+    D --> F[Independent final approval]
+    F --> C[Explicit dependency and break-glass confirmation]
+    C --> V[Revalidate identity and provider state]
+    V --> X[Provider write and immediate read-back]
+    X --> H[Relational plan, execution, and audit history]
+    X --> U[Unknown result: read-only reconciliation]
+    X --> B[Separate rollback draft and approval]
 ```
 
-## Safety Model
+## Approval and execution controls
 
-Plans contain before/after states, a provider target, rationale, and `Executable=false`. The planner never calls Azure, AWS, or GCP APIs, never obtains credentials, and never emits executable commands. Approval and rejection record an actor, timestamp, rationale, and audit event. A reviewer must differ from the recorded plan creator, and only evidence-confirmed plans can be approved. Initial approval stores a SHA-256 fingerprint over the recommendation preview, forward changes, and rollback changes; dry runs are blocked if any of that content changes. After a completed non-mutating dry run, a second reviewer must approve the exact dry-run result before live execution is even considered. `Approved` is intentionally separate from `Implemented`.
+- New plans default to dry-run mode. The normal workflow first requires an independent review, then completes a structural dry run with no cloud mutation, then requires a second independent approval tied to the dry-run fingerprint.
+- Live execution is currently limited to confirmed `RemoveUnusedPermission` recommendations. The user must prepare a provider-specific read-only preview; approval fingerprints include the provider request, captured before/after state, and What-if evidence.
+- The final write is only available to the identity that prepared the provider preview, with current `ManageRemediations` and `ManagePolicies` authorization, a different final approver, fresh evidence, explicit workload/dependency and break-glass attestation, and a separate confirmation dialog.
+- The cloud administration service rechecks organization authorization, cloud identity, and current provider state before writing. It reads state again after the write. A mismatch or uncertain result is not retried automatically; only read-only reconciliation is offered.
+- Rollback uses the provider service's captured before-state, is a separate plan, requires fresh post-change inventory and What-if analysis, and receives its own approvals and explicit confirmation. Rollback is blocked if the post-change provider snapshot is missing or stale.
+- Provider previews are held in memory by the cloud administration service. The local journal is for audit/recovery evidence and does not authorize replay after restart. A new preview and approval are required in a new session.
 
-Simulation is structural only. It identifies affected EffectiveAccess records but reports `Unknown` access impact and `RequiresReview` status because provider authorization has not been re-evaluated and no mutation has occurred. Incomplete recommendation evidence remains a review concern rather than a false claim of safety. A dry run is gated on audited approval and does not perform a cloud write.
+The manual dependency checkbox is an operator attestation, not computed evidence that workloads are unaffected. Providers do not expose a universal reversible operation; if the captured state cannot be restored safely, do not attempt rollback.
 
-The separate [What-if Simulator](what-if-simulator.md) re-evaluates saved/offline
-authorization models before and after a selected action removal. Its
-non-executable scenario reports do not replace this approval-bound dry-run,
-prove operational safety or enable recommendation/SOAR execution.
+## Current supported scope and limitations
 
-The desktop workflow uses the existing Microsoft Entra interactive sign-in, configured with `YASK_CIEM_ENTRA_CLIENT_ID` and the selected organization's Entra tenant. It binds requester and approver records to Entra user object IDs and requires the `ManageRemediations` organization permission. Organization Admins and Security Analysts receive that permission by default; custom roles can be granted it explicitly. Auditors and Viewers cannot approve. The requester cannot approve or reject their own plan, and final execution approval must come from a different user than the dry-run approver.
+The desktop UI accepts explicit target details and produces a provider-native before/after preview. The current constrained operations are AWS managed-policy detach or inline-policy deletion, Azure role-assignment removal, and GCP allow-policy updates that remove existing bindings or members without introducing roles, members, or changed conditions. Other cloud-administration operations remain available only in the separate manual administration workflow and cannot be selected by this recommendation workflow.
 
-Plan snapshots remain local at `%LOCALAPPDATA%\YASK-CIEM\remediation\plans.json`. Remediation audit entries are also inserted once into the existing local SQLite `AuditEvents` table, with actor and organization IDs. Rollback preparation creates a separate non-executable plan that requires its own review and approval; it does not restore cloud state. This is an interim local audit path, not centralized or tamper-proof storage: the organization directory and SQLite database are both locally mutable. Production recommendation/SOAR execution requires server-side authorization and centralized immutable audit storage before its provider writes are enabled.
+The What-if report models the exact normalized permission action identified by the recommendation. It does **not** prove that the entire provider-native diff removes only that action; the reviewer must inspect the full before/after state. Provider action-to-entitlement correlation, generalized least-privilege policy generation, multi-action policy diffs, and operational dependency analysis remain incomplete. The system therefore does not automatically generate, approve, or remove permissions.
 
-## Cloud Change Engine Boundary
+Execution uses the local desktop provider CLI identity and is an actual cloud write when the user explicitly completes every gate. Automated tests use fake provider command runners; no live cloud mutation is part of the test suite. Live provider integration must be validated in a separately authorized test tenant before production use.
 
-`RemediationEngine` adds the execution lifecycle boundary without enabling mutation. It validates review plans, completes non-mutating structural dry runs, requires independent approval bound to the unchanged preview for execution attempts, and blocks live mode because provider mutation adapters are non-mutating stubs. Azure, AWS, and GCP remediation adapters expose validation, apply, and verify hooks, but no recommendation-driven provider write is enabled.
+## Persistence
 
-The implemented workflow is:
+Application startup applies the EF Core migrations. Remediation plans, proposed actions, approval snapshots, execution history, rollback changes, and audit entries are stored in the existing SQLite database. Existing local JSON plans are imported into SQLite when read; malformed JSON is surfaced and left intact rather than silently replaced. The audit is local and mutable, not centralized or tamper-proof.
 
-`Policy Preview -> Independent Approval -> Non-mutating Dry Run -> Independent Final Approval -> Live Execution Disabled -> Rollback Draft`
+The `RemediationPlanStore` rejects common credential/token patterns before persistence. Raw provider policy state may contain sensitive metadata; access to the local database and backups must be protected using the existing endpoint and backup controls.
 
-The final approval fingerprint covers the change set and dry-run result. Verification is only attempted after an adapter confirms a mutation; otherwise the workflow records `Unavailable`. Rollback drafts remain non-executable and require separate approval. All current provider adapters remain non-mutating, so live apply and rollback are unavailable. No access key, token, secret, or cloud command is acquired or executed by this layer.
+## Manual validation
+
+1. Sign in to an organization with `ManageRemediations` and `ManagePolicies`; bind the provider account.
+2. Select a confirmed `RemoveUnusedPermission` recommendation backed by a recent saved inventory timestamp. Create its plan and check the What-if report, provider target, and complete before/after diff.
+3. Prepare the provider preview. Have a different authorized reviewer approve, then run the non-mutating dry run.
+4. Have a second independent reviewer approve the dry-run result.
+5. In an isolated test account, review operational and break-glass dependencies, check the confirmation box, and explicitly apply. Verify the provider read-back and audit status.
+6. If needed, collect a fresh post-change inventory, prepare a separate rollback draft, review its inverse What-if result, approve it independently, and explicitly roll it back.
+7. Test a simulated unknown-write response and use reconciliation. Do not retry an unknown operation.
+
+Never use production credentials for initial validation. The explicit operator gates do not replace change control or a cloud-side recovery plan.

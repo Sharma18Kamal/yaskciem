@@ -92,11 +92,32 @@ public abstract class NonMutatingProviderAdapter : IRemediationProviderAdapter
 {
     public abstract CloudProvider Provider { get; }
 
-    public Task<ProviderChangeValidation> ValidateAsync(RemediationPlan plan, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new ProviderChangeValidation(plan.Changes.Count > 0 && plan.Changes.All(change => !change.Executable), new[] { "Plan validated as non-executable review data." }));
+    public Task<ProviderChangeValidation> ValidateAsync(RemediationPlan plan, CancellationToken cancellationToken = default)
+    {
+        var reviewOnly = plan.Changes.Count > 0 && plan.Changes.All(change => !change.Executable);
+        var staged = plan.ProviderExecution is { } providerExecution
+            && providerExecution.ProviderPlanId != Guid.Empty
+            && plan.Provider == Provider
+            && !string.IsNullOrWhiteSpace(providerExecution.RequestFingerprint)
+            && plan.Changes.Count > 0;
+        return Task.FromResult(new ProviderChangeValidation(
+            plan.Provider == Provider && (reviewOnly || staged),
+            new[] { staged
+                ? "Provider preview is staged and fingerprint-bound. This adapter does not perform cloud writes."
+                : reviewOnly
+                    ? "Plan validated as non-executable review data."
+                    : "Provider adapter is non-mutating and requires a valid staged preview for executable change data." }));
+    }
 
-    public Task<ProviderChangeValidation> DryRunAsync(RemediationPlan plan, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new ProviderChangeValidation(plan.Changes.Count > 0 && plan.Changes.All(change => !change.Executable), new[] { "Provider dry run is structural only; no commands or cloud changes were executed." }));
+    public Task<ProviderChangeValidation> DryRunAsync(RemediationPlan plan, CancellationToken cancellationToken = default)
+    {
+        var valid = plan.Changes.Count > 0 && plan.Provider == Provider
+            && (plan.Changes.All(change => !change.Executable)
+                || plan.ProviderExecution is { } providerExecution && providerExecution.ProviderPlanId != Guid.Empty);
+        return Task.FromResult(new ProviderChangeValidation(
+            valid,
+            new[] { "Provider dry run is structural only; no commands or cloud changes were executed." }));
+    }
 
     public Task<ProviderChangeResult> ApplyAsync(RemediationPlan plan, CancellationToken cancellationToken = default) =>
         Task.FromResult(new ProviderChangeResult(false, false, new[] { "Provider mutation is intentionally unavailable." }));

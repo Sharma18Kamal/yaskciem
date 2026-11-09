@@ -101,11 +101,15 @@ public class AzureProviderTests
         Assert.True(workload.CredentialInventoryComplete);
         Assert.Equal(DateTime.Parse("2026-01-01T00:00:00Z").ToUniversalTime(), workload.CredentialLastRotatedAtUtc);
         Assert.Equal(DateTime.Parse("2027-01-01T00:00:00Z").ToUniversalTime(), workload.CredentialExpiresAtUtc);
+        Assert.True(workload.FederationInventoryComplete);
+        Assert.Equal("https://token.actions.githubusercontent.com", Assert.Single(workload.FederationTrusts).Issuer);
+        Assert.Contains("Azure managed identity federated credential", workload.FederationTrusts[0].Source, StringComparison.Ordinal);
         var federatedApp = Assert.Single(result.Principals, principal => principal.Name == "Federated Application");
         Assert.True(federatedApp.FederationInventoryComplete);
         Assert.Null(federatedApp.FederationTrustVerified);
         Assert.Equal("https://token.actions.githubusercontent.com", Assert.Single(federatedApp.FederationTrusts).Issuer);
         Assert.Contains("api://AzureADTokenExchange", federatedApp.FederationTrusts[0].Audiences);
+        Assert.Equal("claims['sub'] matches 'repo:org/project:*'", federatedApp.FederationTrusts[0].ConditionExpression);
         Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Active (PIM)" && assignment.Role == "Global Administrator");
         Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Eligible (PIM)" && assignment.Role == "Security Administrator");
         Assert.Contains(result.AccessAssignments, assignment => assignment.AssignmentType == "Active (Directory role)" && assignment.Role == "Global Administrator" && assignment.Principal == "admin@example.com");
@@ -178,7 +182,7 @@ public class AzureProviderTests
             {
                 var url = item.GetProperty("url").GetString() ?? string.Empty;
                 object value = url.Contains("federatedIdentityCredentials", StringComparison.Ordinal)
-                    ? new[] { new { issuer = "https://token.actions.githubusercontent.com", subject = "repo:org/project:environment:prod", audiences = new[] { "api://AzureADTokenExchange" } } }
+                    ? new[] { new { issuer = "https://token.actions.githubusercontent.com", subject = "repo:org/project:environment:prod", audiences = new[] { "api://AzureADTokenExchange" }, claimsMatchingExpression = new { value = "claims['sub'] matches 'repo:org/project:*'" } } }
                     : Array.Empty<object>();
                 if (url.Contains("/owners?", StringComparison.Ordinal)) value = new[] { new { id = "owner-1" } };
                 return new { id = item.GetProperty("id").GetString(), status = 200, body = new { value } };
@@ -188,6 +192,14 @@ public class AzureProviderTests
 
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
+            if (arguments.Count >= 2 && arguments[0] == "identity" && arguments[1] == "list")
+                return Task.FromResult(new CloudCommandResult(0,
+                    "[{\"name\":\"Workload Identity\",\"resourceGroup\":\"rg-workloads\",\"principalId\":\"sp-1\"}]",
+                    string.Empty));
+            if (arguments.Count >= 3 && arguments[0] == "identity" && arguments[1] == "federated-credential")
+                return Task.FromResult(new CloudCommandResult(0,
+                    "[{\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"repo:org/managed:ref:refs/heads/main\",\"audiences\":[\"api://AzureADTokenExchange\"]}]",
+                    string.Empty));
             if (arguments[0] == "resource" && arguments.Contains("list"))
                 return Task.FromResult(new CloudCommandResult(0, "[{\"id\":\"/subscriptions/subscription-001/resourceGroups/rg-prod/providers/Microsoft.Storage/storageAccounts/data\",\"name\":\"data\",\"type\":\"Microsoft.Storage/storageAccounts\",\"tags\":{\"PubliclyAccessible\":\"true\",\"DataClassification\":\"confidential\"},\"properties\":{\"publicNetworkAccess\":\"Enabled\",\"allowBlobPublicAccess\":true,\"networkAcls\":{\"defaultAction\":\"Allow\"}}}]", string.Empty));
             if (arguments.Contains("activity-log"))

@@ -128,10 +128,17 @@ public class AwsProviderTests
             var federatedRole = Assert.Single(identities, identity => identity.Name == "FederatedWorkloadRole");
             Assert.True(federatedRole.FederationInventoryComplete);
             Assert.Null(federatedRole.FederationTrustVerified);
-            Assert.Equal("arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE", Assert.Single(federatedRole.FederationTrusts).Issuer);
+            var awsFederatedTrust = Assert.Single(federatedRole.FederationTrusts);
+            Assert.Equal("arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE", awsFederatedTrust.Issuer);
+            Assert.Contains(":sub", awsFederatedTrust.ConditionExpression, StringComparison.Ordinal);
+            Assert.Contains(":aud", awsFederatedTrust.ConditionExpression, StringComparison.Ordinal);
             Assert.Equal("system:serviceaccount:apps:worker", federatedRole.FederationSubject);
             Assert.Equal("sts.amazonaws.com", federatedRole.FederationAudience);
-            Assert.DoesNotContain(identities, identity => identity.Name == "HumanAssumableRole");
+            var assumableRole = Assert.Single(identities, identity => identity.Name == "HumanAssumableRole");
+            Assert.Equal(IdentityType.Role, assumableRole.IdentityType);
+            Assert.True(assumableRole.FederationInventoryComplete);
+            Assert.Equal("aws-principal:arn:aws:iam::123456789012:root",
+                Assert.Single(assumableRole.FederationTrusts).Issuer);
         }
 
         [Fact]
@@ -176,7 +183,7 @@ public class AwsProviderTests
                     : arguments.Contains("sts")
                     ? "{\"Account\":\"123456789012\",\"Arn\":\"arn:aws:iam::123456789012:user/demo\"}"
                     : arguments.Contains("list-users")
-                        ? "{\"Users\":[{\"UserName\":\"demo-user\",\"UserId\":\"AIDEMO\",\"PasswordLastUsed\":\"2026-10-01T10:00:00Z\"}]}"
+                        ? "{\"Users\":[{\"UserName\":\"demo-user\",\"UserId\":\"AIDEMO\",\"Arn\":\"arn:aws:iam::123456789012:user/demo-user\",\"PasswordLastUsed\":\"2026-10-01T10:00:00Z\"}]}"
                         : arguments.Contains("list-groups")
                             ? "{\"Groups\":[{\"GroupName\":\"demo-group\",\"GroupId\":\"AGDEMO\"}]}"
                             : arguments.Contains("list-roles")

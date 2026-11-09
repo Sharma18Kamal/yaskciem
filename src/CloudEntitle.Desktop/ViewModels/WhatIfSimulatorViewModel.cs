@@ -26,10 +26,16 @@ public sealed class WhatIfSimulatorViewModel : WorkspaceViewModel
     private WhatIfInput? _input;
     private CloudAccount? _selectedAccount;
     private WhatIfTarget? _selectedTarget;
+    private CloudPrincipal? _selectedIdentity;
+    private WhatIfTargetKind _selectedTargetKind = WhatIfTargetKind.Role;
+    private WhatIfOperation _selectedOperation = WhatIfOperation.Remove;
     private string _action = "Microsoft.Storage/storageAccounts/listKeys/action";
+    private string _replacementAction = string.Empty;
+    private string _resourceScope = string.Empty;
     private string _status = "Load saved local inventory or import a schema 1.0 offline authorization bundle. No live credentials or cloud calls.";
     private IReadOnlyList<CloudAccount> _accounts = Array.Empty<CloudAccount>();
     private IReadOnlyList<WhatIfTarget> _targets = Array.Empty<WhatIfTarget>();
+    private IReadOnlyList<string> _availableActions = Array.Empty<string>();
     private WhatIfReport? _report;
     private int _version;
     private CancellationTokenSource? _pending;
@@ -51,7 +57,7 @@ public sealed class WhatIfSimulatorViewModel : WorkspaceViewModel
     }
 
     public override string Title => "What-if Simulator";
-    public override string Subtitle => "Preview one role/policy action removal across inventoried identities and resources. Offline predictions only.";
+    public override string Subtitle => "Simulate isolated permission additions, removals and replacements; no cloud configuration is changed.";
     public AsyncRelayCommand RefreshAccountsCommand { get; }
     public AsyncRelayCommand LoadSavedCommand { get; }
     public AsyncRelayCommand ImportCommand { get; }
@@ -59,20 +65,74 @@ public sealed class WhatIfSimulatorViewModel : WorkspaceViewModel
     public AsyncRelayCommand ExportCommand { get; }
     public IReadOnlyList<CloudAccount> Accounts { get => _accounts; private set => SetProperty(ref _accounts, value); }
     public IReadOnlyList<WhatIfTarget> Targets { get => _targets; private set => SetProperty(ref _targets, value); }
+    public IReadOnlyList<string> AvailableActions { get => _availableActions; private set => SetProperty(ref _availableActions, value); }
+    public IReadOnlyList<CloudPrincipal> Identities { get; private set; } = Array.Empty<CloudPrincipal>();
+    public IReadOnlyList<WhatIfTargetKind> TargetKinds { get; } = Enum.GetValues<WhatIfTargetKind>();
+    public IReadOnlyList<WhatIfOperation> Operations { get; } = Enum.GetValues<WhatIfOperation>();
+    public IReadOnlyList<string> ResourceScopes { get; private set; } = Array.Empty<string>();
+    public string ProviderLabel => SelectedAccount is null ? "Provider: select an account" : $"Provider: {SelectedAccount.CloudProvider}";
     public CloudAccount? SelectedAccount
     {
         get => _selectedAccount;
-        set { if (SetProperty(ref _selectedAccount, value)) InvalidateInput(); }
+        set
+        {
+            if (!SetProperty(ref _selectedAccount, value)) return;
+            OnPropertyChanged(nameof(ProviderLabel));
+            InvalidateInput();
+        }
     }
     public WhatIfTarget? SelectedTarget
     {
         get => _selectedTarget;
-        set { if (SetProperty(ref _selectedTarget, value)) ClearReport(); }
+        set
+        {
+            if (!SetProperty(ref _selectedTarget, value)) return;
+            RefreshAvailableActions();
+            ClearReport();
+        }
+    }
+    public CloudPrincipal? SelectedIdentity
+    {
+        get => _selectedIdentity;
+        set
+        {
+            if (!SetProperty(ref _selectedIdentity, value)) return;
+            RefreshAvailableActions();
+            ClearReport();
+        }
+    }
+    public WhatIfTargetKind SelectedTargetKind
+    {
+        get => _selectedTargetKind;
+        set
+        {
+            if (!SetProperty(ref _selectedTargetKind, value)) return;
+            if (value is (WhatIfTargetKind.Role or WhatIfTargetKind.Policy)
+                && _selectedTarget?.Kind != value)
+                SelectedTarget = Targets.FirstOrDefault(item => item.Kind == value);
+            RefreshAvailableActions();
+            ClearReport();
+        }
+    }
+    public WhatIfOperation SelectedOperation
+    {
+        get => _selectedOperation;
+        set { if (SetProperty(ref _selectedOperation, value)) ClearReport(); }
     }
     public string Action
     {
         get => _action;
         set { if (SetProperty(ref _action, value)) ClearReport(); }
+    }
+    public string ReplacementAction
+    {
+        get => _replacementAction;
+        set { if (SetProperty(ref _replacementAction, value)) ClearReport(); }
+    }
+    public string ResourceScope
+    {
+        get => _resourceScope;
+        set { if (SetProperty(ref _resourceScope, value)) ClearReport(); }
     }
     public WhatIfReport? Report
     {
@@ -81,11 +141,20 @@ public sealed class WhatIfSimulatorViewModel : WorkspaceViewModel
         {
             if (!SetProperty(ref _report, value)) return;
             OnPropertyChanged(nameof(AccessChanges)); OnPropertyChanged(nameof(Summary));
+            OnPropertyChanged(nameof(SecuritySummary)); OnPropertyChanged(nameof(OperationalImpact));
         }
     }
     public IReadOnlyList<WhatIfAccessChange> AccessChanges => Report?.AccessChanges ?? Array.Empty<WhatIfAccessChange>();
     public string Summary => Report is null ? "No simulation result."
-        : $"{Report.AccessChanges.Count} affected modeled pairs; {Report.ModeledLostPairs} modeled losses; {Report.PotentialLossPairs} uncertain pairs. Selected-action exposure reduction: {(Report.ModeledExposureReductionPercent.HasValue ? $"{Report.ModeledExposureReductionPercent}%" : "Unknown")}. Not a total risk score.";
+        : $"{Report.AccessChanges.Count} affected identity/resource/action pairs; {Report.ModeledLostPairs} modeled losses; {Report.AccessChanges.Count(item => item.Impact == WhatIfImpact.ModeledAccessAdded)} modeled gains; {Report.PotentialLossPairs} uncertain pairs.";
+    public string SecuritySummary => Report?.SecurityImpact is not { } impact
+        ? "Risk, toxic-combination and attack-path comparison unavailable."
+        : $"Max risk score: {DisplayScore(impact.RiskScoreBefore)} -> {DisplayScore(impact.RiskScoreAfter)}; " +
+          $"findings {impact.RiskFindingsBefore} -> {impact.RiskFindingsAfter}; " +
+          $"toxic combinations {impact.ToxicFindingsBefore} -> {impact.ToxicFindingsAfter}; " +
+          $"attack paths {impact.AttackPathsBefore} -> {impact.AttackPathsAfter}" +
+          (impact.IsComplete ? "." : " (incomplete; see limitations).");
+    public string OperationalImpact => Report?.OperationalImpactAssessment ?? "Operational impact has not been assessed.";
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
 
     public async Task RefreshAsync()
@@ -167,9 +236,18 @@ public sealed class WhatIfSimulatorViewModel : WorkspaceViewModel
 
     public async Task SimulateAsync()
     {
-        if (_input is null || SelectedTarget is null) { Status = "Load evidence and select a role or policy."; return; }
+        if (_input is null
+            || (SelectedTargetKind != WhatIfTargetKind.Identity && SelectedTarget is null)
+            || (SelectedTargetKind == WhatIfTargetKind.Identity && SelectedIdentity is null))
+        { Status = "Load evidence and select an identity, role or policy target."; return; }
         var input = _input;
-        var change = new WhatIfChange(_provider, _accountId, SelectedTarget.Kind, SelectedTarget.Id, Action.Trim());
+        var targetId = SelectedTargetKind == WhatIfTargetKind.Identity ? SelectedIdentity!.Id : SelectedTarget!.Id;
+        var change = new WhatIfChange(_provider, _accountId, SelectedTargetKind, targetId, Action.Trim())
+        {
+            Operation = SelectedOperation,
+            ReplacementAction = string.IsNullOrWhiteSpace(ReplacementAction) ? null : ReplacementAction.Trim(),
+            ResourceScope = string.IsNullOrWhiteSpace(ResourceScope) ? null : ResourceScope.Trim()
+        };
         var version = Begin();
         try
         {
@@ -214,10 +292,21 @@ public sealed class WhatIfSimulatorViewModel : WorkspaceViewModel
     {
         WhatIfPermissionSimulator.Validate(input, provider, accountId);
         _input = input; _provider = provider; _accountId = accountId;
+        ResourceScopes = input.Evaluation.Resources.Select(item => item.ResourceId ?? item.ResourceUri ?? item.Scope)
+            .Where(item => !string.IsNullOrWhiteSpace(item)).Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray();
+        OnPropertyChanged(nameof(ResourceScopes));
+        Identities = input.Evaluation.Normalized.Principals.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        OnPropertyChanged(nameof(Identities));
+        SelectedIdentity = Identities.FirstOrDefault();
         Targets = input.Evaluation.Normalized.Roles.Select(item => new WhatIfTarget(WhatIfTargetKind.Role, item.Id, item.Name))
             .Concat(input.Evaluation.Normalized.Policies.Select(item => new WhatIfTarget(WhatIfTargetKind.Policy, item.Id, item.Name))).ToArray();
+        SelectedTargetKind = Targets.Any(item => item.Kind == WhatIfTargetKind.Role)
+            ? WhatIfTargetKind.Role
+            : Targets.Any() ? Targets[0].Kind : WhatIfTargetKind.Identity;
         SelectedTarget = null;
-        Status = $"{input.SourceLabel}: {input.Evaluation.Normalized.Principals.Count} identities and {input.Evaluation.Resources.Count} resources loaded. Original policy evidence is local only.";
+        RefreshAvailableActions();
+        Status = $"{input.SourceLabel}: {input.Evaluation.Normalized.Principals.Count} identities and {input.Evaluation.Resources.Count} resources loaded for {provider}. Original policy evidence is local only.";
     }
     private bool IsAccountAllowed(CloudAccount account)
         => _context.OrganizationId is not { } organization || _context.Identity is not { } identity
@@ -246,6 +335,47 @@ public sealed class WhatIfSimulatorViewModel : WorkspaceViewModel
     }
     private int Begin() { _pending?.Cancel(); _pending?.Dispose(); _pending = new(); _version++; Report = null; return _version; }
     private void ClearReport() { _version++; _pending?.Cancel(); Report = null; }
-    private void InvalidateInput() { ClearReport(); _input = null; Targets = Array.Empty<WhatIfTarget>(); _selectedTarget = null; OnPropertyChanged(nameof(SelectedTarget)); }
-    private void Reset() { InvalidateInput(); Accounts = Array.Empty<CloudAccount>(); _selectedAccount = null; OnPropertyChanged(nameof(SelectedAccount)); Status = "Context changed; reload permitted offline evidence."; }
+    private static string DisplayScore(int? score) => score?.ToString() ?? "Unknown";
+    private void RefreshAvailableActions()
+    {
+        if (_input is null)
+        {
+            AvailableActions = Array.Empty<string>();
+            return;
+        }
+        var targetId = SelectedTargetKind == WhatIfTargetKind.Identity ? SelectedIdentity?.Id : SelectedTarget?.Id;
+        if (targetId is null)
+        {
+            AvailableActions = Array.Empty<string>();
+            return;
+        }
+        var evaluatedAt = _input.Evaluation.EvaluationTime ?? DateTime.UtcNow;
+        var actions = _input.Evaluation.Normalized.Entitlements.Where(item => item.Provider == _provider
+                && item.CloudAccountId == _accountId
+                && item.CreatedAt <= evaluatedAt && (!item.ExpiresAt.HasValue || item.ExpiresAt.Value > evaluatedAt)
+                && (SelectedTargetKind switch
+                {
+                    WhatIfTargetKind.Role => item.RoleId == targetId,
+                    WhatIfTargetKind.Policy => item.PolicyId == targetId,
+                    WhatIfTargetKind.Identity => item.PrincipalId == targetId && item.RoleId is null
+                        && item.PolicyId is null && item.AssignmentType == AssignmentType.Direct,
+                    _ => false
+                }))
+            .Select(item => _input.Evaluation.Normalized.Permissions.FirstOrDefault(permission => permission.Id == item.PermissionId))
+            .Where(item => item is not null)
+            .Select(item => item!.Action ?? item.Name)
+            .Distinct(_provider == CloudProvider.Gcp ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        AvailableActions = actions;
+    }
+    private void InvalidateInput()
+    {
+        ClearReport(); _input = null; Targets = Array.Empty<WhatIfTarget>(); Identities = Array.Empty<CloudPrincipal>();
+        AvailableActions = Array.Empty<string>(); ResourceScopes = Array.Empty<string>();
+        OnPropertyChanged(nameof(ResourceScopes));
+        _selectedTarget = null; _selectedIdentity = null;
+        OnPropertyChanged(nameof(SelectedTarget)); OnPropertyChanged(nameof(SelectedIdentity)); OnPropertyChanged(nameof(Identities));
+    }
+    private void Reset() { InvalidateInput(); Accounts = Array.Empty<CloudAccount>(); _selectedAccount = null; OnPropertyChanged(nameof(SelectedAccount)); OnPropertyChanged(nameof(ProviderLabel)); Status = "Context changed; reload permitted offline evidence."; }
 }

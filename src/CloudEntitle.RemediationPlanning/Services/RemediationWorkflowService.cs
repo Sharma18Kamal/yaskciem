@@ -153,8 +153,151 @@ public sealed class RemediationWorkflowService(
             CreatedByUserId = requestedByUserId,
             OrganizationId = plan.OrganizationId,
             IsRollbackDraft = true,
+            ProviderExecution = plan.ProviderExecution,
+            WhatIfReportJson = null,
+            WhatIfReportFingerprint = null,
+            WhatIfEvaluatedAtUtc = null,
+            WhatIfSourceSnapshotAtUtc = null,
+            RollbackPreparedAfterUtc = plan.LastExecution?.CompletedAt,
             RollbackChanges = plan.Changes.Select(change => change with { Id = Guid.NewGuid(), Executable = false }).ToArray(),
             AuditTrail = audit
+        };
+    }
+
+    public RemediationPlan RecordProviderExecution(
+        RemediationPlan plan,
+        RemediationExecution execution,
+        string requestedBy,
+        string providerPlanStatus,
+        string details,
+        DateTime? asOf = null,
+        Guid? requestedByUserId = null)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(execution);
+        if (plan.ProviderExecution is null || plan.ProviderExecution.ProviderPlanId == Guid.Empty)
+            throw new InvalidOperationException("A provider-prepared plan is required to record provider execution.");
+        if (execution.PlanId != plan.Id || execution.Provider != plan.Provider || execution.Mode != RemediationExecutionMode.Live)
+            throw new InvalidOperationException("Execution record does not match the selected remediation plan.");
+        if (string.IsNullOrWhiteSpace(requestedBy) || string.IsNullOrWhiteSpace(providerPlanStatus))
+            throw new ArgumentException("An execution actor and provider status are required.");
+
+        var now = asOf ?? DateTime.UtcNow;
+        var nextStatus = execution.Status switch
+        {
+            RemediationExecutionStatus.Verified => RemediationPlanStatus.Implemented,
+            RemediationExecutionStatus.RolledBack => RemediationPlanStatus.RolledBack,
+            RemediationExecutionStatus.OutcomeUnknown => RemediationPlanStatus.OutcomeUnknown,
+            RemediationExecutionStatus.Reconciled => RemediationPlanStatus.ExecutionFailed,
+            RemediationExecutionStatus.VerificationFailed => RemediationPlanStatus.VerificationFailed,
+            RemediationExecutionStatus.Failed or RemediationExecutionStatus.Blocked => RemediationPlanStatus.ExecutionFailed,
+            _ => throw new InvalidOperationException("Unsupported provider execution status.")
+        };
+        var link = plan.ProviderExecution with { Status = providerPlanStatus };
+        var verification = execution.Verification ?? plan.Verification;
+        return plan with
+        {
+            ProviderExecution = link,
+            Status = nextStatus,
+            LastExecution = execution,
+            ExecutionHistory = plan.ExecutionHistory.Append(execution).ToArray(),
+            Verification = verification,
+            UpdatedAt = now,
+            AuditTrail = plan.AuditTrail.Append(new RemediationAuditEntry(now, requestedBy.Trim(),
+                execution.Status.ToString(), details.Trim()) { ActorUserId = requestedByUserId }).ToArray()
+        };
+    }
+
+    public RemediationPlan AttachWhatIfEvidence(
+        RemediationPlan plan,
+        string reportJson,
+        string reportFingerprint,
+        DateTime evaluatedAt,
+        string requestedBy,
+        Guid? requestedByUserId = null,
+        DateTime? sourceSnapshotAtUtc = null)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.Status is not (RemediationPlanStatus.Draft or RemediationPlanStatus.RequiresReview))
+            throw new InvalidOperationException("What-if evidence can only be attached before approval.");
+        if (string.IsNullOrWhiteSpace(reportJson) || string.IsNullOrWhiteSpace(reportFingerprint)
+            || !sourceSnapshotAtUtc.HasValue
+            || string.IsNullOrWhiteSpace(requestedBy))
+            throw new ArgumentException("A simulation report, source snapshot timestamp, fingerprint and requesting actor are required.");
+        var now = DateTime.UtcNow;
+        return plan with
+        {
+            WhatIfReportJson = reportJson,
+            WhatIfReportFingerprint = reportFingerprint,
+            WhatIfEvaluatedAtUtc = evaluatedAt,
+            WhatIfSourceSnapshotAtUtc = sourceSnapshotAtUtc,
+            Simulation = null,
+            Status = plan.Recommendation.EvaluationState == RiskEvaluationState.Confirmed
+                ? RemediationPlanStatus.RequiresReview
+                : RemediationPlanStatus.Draft,
+            UpdatedAt = now,
+            AuditTrail = plan.AuditTrail.Append(new RemediationAuditEntry(now, requestedBy.Trim(),
+                "WhatIfEvidenceAttached", $"Attached What-if report SHA-256={reportFingerprint}.")
+            { ActorUserId = requestedByUserId }).ToArray()
+        };
+    }
+
+    public RemediationPlan AttachProviderPreview(
+        RemediationPlan plan,
+        RemediationProviderExecutionLink providerExecution,
+        string requestedBy,
+        Guid? requestedByUserId = null)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(providerExecution);
+        if (plan.Status is not (RemediationPlanStatus.Draft or RemediationPlanStatus.RequiresReview or RemediationPlanStatus.ExecutionFailed))
+            throw new InvalidOperationException("Provider previews can only be attached before approval.");
+        if (plan.Recommendation.EvaluationState != RiskEvaluationState.Confirmed
+            || string.IsNullOrWhiteSpace(plan.WhatIfReportFingerprint)
+            || !string.Equals(plan.Provider.ToString(), plan.Recommendation.Provider.ToString(), StringComparison.Ordinal)
+            || providerExecution.ProviderPlanId == Guid.Empty
+            || string.IsNullOrWhiteSpace(providerExecution.AccountId)
+            || string.IsNullOrWhiteSpace(providerExecution.RequestFingerprint)
+            || string.IsNullOrWhiteSpace(providerExecution.BeforeJson)
+            || string.IsNullOrWhiteSpace(providerExecution.AfterJson)
+            || string.IsNullOrWhiteSpace(requestedBy))
+            throw new InvalidOperationException("A confirmed recommendation, What-if report and complete provider preview are required.");
+
+        var change = new RemediationChange(Guid.NewGuid(), providerExecution.Operation,
+            $"{plan.Provider}:{providerExecution.AccountId}", providerExecution.BeforeJson,
+            providerExecution.AfterJson, true,
+            "Provider-generated before/after state from the guarded administration preview. Requires independent approvals and a fresh pre-write check.")
+        {
+            RollbackState = providerExecution.BeforeJson
+        };
+        var rollback = new RemediationChange(Guid.NewGuid(), $"Rollback{providerExecution.Operation}",
+            change.Target, providerExecution.AfterJson, providerExecution.BeforeJson, false,
+            "Compensating restoration from the captured provider state. Revalidate and independently approve before rollback.")
+        {
+            RollbackState = providerExecution.AfterJson
+        };
+        var now = DateTime.UtcNow;
+        return plan with
+        {
+            ProviderExecution = providerExecution,
+            Changes = new[] { change },
+            RollbackChanges = new[] { rollback },
+            Status = RemediationPlanStatus.RequiresReview,
+            ApprovedBy = null,
+            ApprovedByUserId = null,
+            ApprovedAt = null,
+            ApprovalComment = null,
+            ApprovedChangeSetFingerprint = null,
+            DryRunApprovedByUserId = null,
+            DryRunResultFingerprint = null,
+            ApprovedDryRunFingerprint = null,
+            Simulation = null,
+            LastExecution = null,
+            Verification = null,
+            UpdatedAt = now,
+            AuditTrail = plan.AuditTrail.Append(new RemediationAuditEntry(now, requestedBy.Trim(),
+                "ProviderPreviewAttached", $"Provider before/after preview attached; request SHA-256={providerExecution.RequestFingerprint}.")
+            { ActorUserId = requestedByUserId }).ToArray()
         };
     }
 

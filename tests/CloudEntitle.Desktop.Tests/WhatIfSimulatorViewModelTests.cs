@@ -37,7 +37,8 @@ public sealed class WhatIfSimulatorViewModelTests
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.EnsureCreatedAsync();
-            db.Add(new CloudAccount { Id = accountId, CloudProvider = CloudProviderType.Azure, Name = "Saved real account" });
+            db.Add(new CloudAccount { Id = accountId, CloudProvider = CloudProviderType.Azure, Name = "Saved real account",
+                LastScannedAt = DateTime.UtcNow.AddMinutes(-3) });
             db.Add(new CloudAccount { Id = Guid.NewGuid(), CloudProvider = CloudProviderType.Aws, Name = "Other account" });
             db.AddRange(normalized.Principals);
             db.AddRange(normalized.Roles);
@@ -49,6 +50,7 @@ public sealed class WhatIfSimulatorViewModelTests
         var saved = new WhatIfSavedData(factory);
         Assert.Equal(2, (await saved.GetAccountsAsync(default)).Count);
         var input = await saved.LoadAsync(accountId, default);
+        Assert.NotNull(input.SourceSnapshotAtUtc);
         Assert.Equal("Analyst", Assert.Single(input.Evaluation.Normalized.Principals).Name);
         Assert.Equal(NormalizationStatus.Unknown, Assert.Single(input.Evaluation.Normalized.Entitlements).Status);
         Assert.NotEmpty(input.Limitations);
@@ -106,11 +108,69 @@ public sealed class WhatIfSimulatorViewModelTests
         await vm.SimulateAsync();
         Assert.NotNull(vm.Report);
         Assert.Equal(WhatIfImpact.ModeledAccessLost, Assert.Single(vm.AccessChanges).Impact);
-        Assert.Contains("100", vm.Summary);
+        Assert.Contains("1 modeled losses", vm.Summary);
         vm.Action = "Microsoft.Storage/storageAccounts/read";
         Assert.Null(vm.Report);
         Assert.Empty(vm.AccessChanges);
         Assert.Equal(0, saved.Reads);
+    }
+
+    [Fact]
+    public async Task WhatIf_RecalculatesToxicFindingsFromTheIsolatedAfterSnapshot()
+    {
+        var input = await WhatIfPermissionSimulator.ImportAsync(Bundle());
+        var normalized = input.Evaluation.Normalized;
+        var accountId = normalized.Principals[0].AccountId;
+        var resource = input.Evaluation.Resources[0];
+        var sensitiveResource = new CloudResource
+        {
+            Id = resource.Id,
+            AccountId = resource.AccountId,
+            Name = resource.Name,
+            Type = resource.Type,
+            ResourceId = resource.ResourceId,
+            Tags = new(StringComparer.OrdinalIgnoreCase) { ["data-classification"] = "sensitive" }
+        };
+        var readPermission = new CloudPermission
+        {
+            Id = Guid.NewGuid(), AccountId = accountId,
+            Action = "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read"
+        };
+        var readGrant = normalized.Entitlements[0] with
+        {
+            Id = Guid.NewGuid(),
+            PermissionId = readPermission.Id,
+            ResourcePattern = "*",
+            Evidence = normalized.Entitlements[0].Evidence with { SourceId = "sensitive-storage-read" }
+        };
+        input = input with
+        {
+            Evaluation = input.Evaluation with
+            {
+                Normalized = normalized with
+                {
+                    Permissions = normalized.Permissions.Append(readPermission).ToArray(),
+                    Entitlements = normalized.Entitlements.Append(readGrant).ToArray()
+                },
+                Resources = new[] { sensitiveResource }
+            }
+        };
+
+        var engine = new EffectiveAccessEngine();
+        var analyzer = new WhatIfScenarioAnalyzer(new CloudEntitle.RiskEngine.Services.RiskEngine());
+        var simulator = new WhatIfPermissionSimulator(engine, analyzer);
+        var report = await simulator.SimulateAsync(input, new(CloudProvider.Azure, accountId,
+            WhatIfTargetKind.Role, normalized.Roles[0].Id, "Microsoft.Storage/storageAccounts/write")
+        {
+            Operation = WhatIfOperation.Add
+        });
+
+        Assert.NotNull(report.SecurityImpact);
+        Assert.True(report.SecurityImpact!.ToxicFindingsAfter > report.SecurityImpact.ToxicFindingsBefore);
+        Assert.Contains(report.SecurityImpact.AddedFindings,
+            finding => finding.Title.Contains("Sensitive storage", StringComparison.OrdinalIgnoreCase));
+        Assert.False(report.MutatesCloud);
+        Assert.False(report.IsProviderVerified);
     }
 
     [Fact]

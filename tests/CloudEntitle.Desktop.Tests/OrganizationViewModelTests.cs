@@ -625,6 +625,11 @@ public sealed partial class OrganizationViewModelTests
             Writes++;
             return Task.FromResult(_plan = _plan with { Status = "Applied" });
         }
+        public Task<CloudAdministrationPlan> VerifyAsync(Guid planId, CancellationToken token = default)
+        {
+            Assert.Equal(_plan!.Id, planId);
+            return Task.FromResult(_plan = _plan with { Status = "Verified" });
+        }
         public Task<CloudAdministrationPlan> RollbackAsync(Guid planId, bool dependenciesReviewed, CancellationToken token = default)
         {
             Assert.True(dependenciesReviewed);

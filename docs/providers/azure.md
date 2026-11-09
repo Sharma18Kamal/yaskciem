@@ -8,7 +8,7 @@ The connector uses the authenticated Azure CLI session (`az account show`) for A
 
 ## Required Permissions
 
-Use the least-privileged read-only access needed for the selected scope. ARM discovery requires permission to read subscriptions, resources, role definitions, and role assignments. Azure Activity Log timestamps require `Microsoft.Insights/eventtypes/values/read` at subscription scope. Entra discovery uses Microsoft Graph delegated read permissions `User.ReadBasic.All`, `Group.Read.All`, and `Application.Read.All`. PIM active and eligible assignments use `RoleAssignmentSchedule.Read.Directory` and `RoleEligibilitySchedule.Read.Directory`. Microsoft Graph documents supported read roles including Global Reader, Security Reader, Security Operator, Security Administrator, and Privileged Role Administrator. A tenant administrator may need to grant consent to these delegated permissions for the Azure CLI application used by `az rest`. Do not grant Owner, Contributor, or User Access Administrator for scanning.
+Use the least-privileged read-only access needed for the selected scope. ARM discovery requires permission to read subscriptions, resources, role definitions, and role assignments. Azure Activity Log timestamps require `Microsoft.Insights/eventtypes/values/read` at subscription scope. Entra discovery uses Microsoft Graph delegated read permissions `User.ReadBasic.All`, `Group.Read.All`, and `Application.Read.All`. PIM active and eligible assignments use `RoleAssignmentSchedule.Read.Directory` and `RoleEligibilitySchedule.Read.Directory`. Federated-credential discovery for user-assigned managed identities additionally requires read access to the selected subscription's managed identity resources and their federated identity credential child resources. Microsoft Graph documents supported read roles including Global Reader, Security Reader, Security Operator, Security Administrator, and Privileged Role Administrator. A tenant administrator may need to grant consent to these delegated permissions for the Azure CLI application used by `az rest`. Do not grant Owner, Contributor, or User Access Administrator for scanning.
 
 ## Onboarding and Coverage Validation
 
@@ -24,6 +24,8 @@ The adapter normalizes:
 - RBAC role definitions into `CloudRole` and `CloudPermission`.
 - Role assignments into `RoleAssignment` and `Entitlement`.
 - Microsoft Entra users, groups, and service principals into `CloudPrincipal`.
+- Application federated identity credentials through Microsoft Graph, retaining issuer, subject, audience, and claims-matching expressions.
+- User-assigned managed identity federated credentials through `az identity list` and `az identity federated-credential list`, joined to Entra service principals by object/principal ID.
 - Active and eligible Entra PIM role schedules into Effective Access, labeled with assignment state and source.
 - Azure scope strings into `CloudScope`, preserving the original value.
 - Successful role-assignment writes from the last 90 days can populate `Last changed` when the Activity Log principal, role-definition ID, and scope match the current assignment.
@@ -38,7 +40,7 @@ The current scan result is returned to the Application layer for persistence; th
 
 ## Limitations
 
-The current implementation uses Azure CLI discovery for ARM, Graph, and subscription Activity Logs. The change timestamp covers matching role-assignment writes in the returned 90-day window; it does not infer last use or attribute unrelated subscription events to an assignment. PIM rows are provider-reported schedules, not a full simulation of nested group membership, conditional access, or authorization evaluation.
+The current implementation uses Azure CLI discovery for ARM, Graph, managed identity federated credentials, and subscription Activity Logs. Federated credential issuer, subject, audience, and claims-matching expressions are retained in the attack graph; runtime token claims are not available to the scanner, so these edges remain unverified. Only user-assigned managed identity credentials in the selected subscription are discovered by the ARM path. The change timestamp covers matching role-assignment writes in the returned 90-day window; it does not infer last use or attribute unrelated subscription events to an assignment. PIM rows are provider-reported schedules, not a full simulation of nested group membership, conditional access, or authorization evaluation.
 
 ## Troubleshooting
 

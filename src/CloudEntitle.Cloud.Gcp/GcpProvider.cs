@@ -105,6 +105,9 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
         {
             Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Gcp,
             Name = group.Key, PrincipalId = group.Key,
+            Email = group.Key.StartsWith("serviceAccount:", StringComparison.OrdinalIgnoreCase)
+                ? group.Key["serviceAccount:".Length..]
+                : null,
             IdentityType = group.Key.StartsWith("serviceAccount:", StringComparison.OrdinalIgnoreCase) ? IdentityType.ServiceAccount : IdentityType.User,
             IsPrivileged = group.Any(binding => binding.Role.Contains("owner", StringComparison.OrdinalIgnoreCase)), IsActive = true
         }).ToArray();
@@ -193,6 +196,76 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
             };
             if (!string.IsNullOrWhiteSpace(email))
             {
+                var resourceName = $"projects/{GetProject(accountId)}/serviceAccounts/{email}";
+                try
+                {
+                    using var trustPolicy = JsonDocument.Parse(await GetGcloudOutputAsync(
+                        new[] { "iam", "service-accounts", "get-iam-policy", email, $"--project={GetProject(accountId)}", "--format=json" },
+                        cancellationToken));
+                    var trustBindings = GcpIamPolicyMapper.MapBindings(trustPolicy.RootElement, resourceName);
+                    principal.FederationInventoryComplete = true;
+                    var impersonationRoles = new HashSet<string>(StringComparer.Ordinal)
+                    {
+                        "roles/iam.serviceAccountTokenCreator",
+                        "roles/iam.workloadIdentityUser",
+                        "roles/iam.serviceAccountOpenIdTokenCreator"
+                    };
+                    foreach (var customRole in trustBindings.Select(binding => binding.Role)
+                        .Where(IsCustomRole).Distinct(StringComparer.Ordinal))
+                    {
+                        try
+                        {
+                            if (await CustomRoleCanImpersonateServiceAccountAsync(customRole, cancellationToken))
+                                impersonationRoles.Add(customRole);
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception exception)
+                        {
+                            principal.FederationInventoryComplete = false;
+                            _providerMessages.Add($"GCP custom IAM role {customRole} could not be evaluated for service-account impersonation on {email}: {exception.Message}");
+                        }
+                    }
+
+                    foreach (var binding in trustBindings.Where(binding => impersonationRoles.Contains(binding.Role)))
+                    {
+                        var conditionResult = GcpIamTrustConditionEvaluator.Evaluate(
+                            binding.ConditionExpression, resourceName, DateTime.UtcNow);
+                        var conditionState = conditionResult switch
+                        {
+                            true => "Satisfied",
+                            false => "NotSatisfied",
+                            null when string.IsNullOrWhiteSpace(binding.ConditionExpression) => "Satisfied",
+                            _ => "Unknown"
+                        };
+                        var externalPrincipal = binding.Member.StartsWith("principal://", StringComparison.OrdinalIgnoreCase)
+                            || binding.Member.StartsWith("principalSet://", StringComparison.OrdinalIgnoreCase);
+                        principal.IdentityTrusts.Add(new CloudIdentityTrust(
+                            binding.Member,
+                            "GCP service account impersonation",
+                            "GCP service-account IAM policy",
+                            "Potential",
+                            conditionState,
+                            binding.ConditionExpression,
+                            conditionResult.HasValue || string.IsNullOrWhiteSpace(binding.ConditionExpression)
+                                ? $"Role={binding.Role}; evaluated against {resourceName}; IAM deny policies and principal access boundary constraints are not included, so reachability remains potential."
+                                : $"Role={binding.Role}; GCP CEL expression is unsupported or lacks context and remains unknown: {binding.ConditionExpression}",
+                            externalPrincipal,
+                            externalPrincipal));
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception exception)
+                {
+                    principal.FederationInventoryComplete = false;
+                    _providerMessages.Add($"GCP service-account trust policy unavailable for {email}: {exception.Message}");
+                }
+            }
+            else
+            {
+                principal.FederationInventoryComplete = false;
+            }
+            if (!string.IsNullOrWhiteSpace(email))
+            {
                 try
                 {
                     var keyOutput = await GetGcloudOutputAsync(new[] { "iam", "service-accounts", "keys", "list", $"--iam-account={email}", "--managed-by=user", $"--project={GetProject(accountId)}", "--format=json" }, cancellationToken);
@@ -220,6 +293,57 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
             principals.Add(principal);
         }
         return principals;
+    }
+
+    private static bool IsCustomRole(string role)
+        => role.StartsWith("projects/", StringComparison.Ordinal)
+            || role.StartsWith("organizations/", StringComparison.Ordinal);
+
+    private static void MergeServiceAccountEvidence(CloudPrincipal inventoryIdentity, CloudPrincipal serviceAccount)
+    {
+        inventoryIdentity.Name = serviceAccount.Name;
+        inventoryIdentity.IdentityType = IdentityType.ServiceAccount;
+        inventoryIdentity.IsActive = serviceAccount.IsActive;
+        inventoryIdentity.IsPrivileged |= serviceAccount.IsPrivileged;
+        inventoryIdentity.Email = serviceAccount.Email;
+        inventoryIdentity.CredentialLastRotatedAtUtc = serviceAccount.CredentialLastRotatedAtUtc;
+        inventoryIdentity.CredentialExpiresAtUtc = serviceAccount.CredentialExpiresAtUtc;
+        inventoryIdentity.CredentialInventoryComplete = serviceAccount.CredentialInventoryComplete;
+        inventoryIdentity.CredentialEvidenceSource = serviceAccount.CredentialEvidenceSource;
+        inventoryIdentity.FederationInventoryComplete = serviceAccount.FederationInventoryComplete;
+        inventoryIdentity.IdentityTrusts = serviceAccount.IdentityTrusts;
+        if (serviceAccount.FederationTrusts.Count > 0)
+        {
+            inventoryIdentity.FederationTrusts = serviceAccount.FederationTrusts;
+            inventoryIdentity.FederationIssuer = serviceAccount.FederationIssuer;
+            inventoryIdentity.FederationSubject = serviceAccount.FederationSubject;
+            inventoryIdentity.FederationAudience = serviceAccount.FederationAudience;
+        }
+    }
+
+    private async Task<bool> CustomRoleCanImpersonateServiceAccountAsync(string role, CancellationToken cancellationToken)
+    {
+        var segments = role.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length != 4 || segments[2] != "roles")
+            throw new InvalidOperationException("Custom role name does not use a supported projects/{id}/roles/{name} or organizations/{id}/roles/{name} form.");
+
+        var arguments = new List<string> { "iam", "roles", "describe", segments[3] };
+        arguments.Add(segments[0] == "projects" ? $"--project={segments[1]}" : $"--organization={segments[1]}");
+        arguments.Add("--format=json");
+        using var roleDocument = JsonDocument.Parse(await GetGcloudOutputAsync(arguments, cancellationToken));
+        if (!roleDocument.RootElement.TryGetProperty("includedPermissions", out var permissions)
+            || permissions.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("Custom role response did not contain includedPermissions.");
+
+        var relevant = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "iam.serviceAccounts.getAccessToken",
+            "iam.serviceAccounts.getOpenIdToken",
+            "iam.serviceAccounts.signBlob",
+            "iam.serviceAccounts.signJwt"
+        };
+        return permissions.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString()).Any(permission => permission is not null && relevant.Contains(permission));
     }
 
     private static DateTime? ReadGcpDate(JsonElement element, string property)
@@ -425,7 +549,19 @@ public class GcpProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
                 {
                     resources.AddRange(await GetResourcesAsync(account.Id, cancellationToken));
                     principals.AddRange(await DiscoverIdentitiesAsync(account.Id, cancellationToken));
-                    principals.AddRange(await DiscoverServiceAccountsAsync(account.Id, cancellationToken));
+                    foreach (var serviceAccount in await DiscoverServiceAccountsAsync(account.Id, cancellationToken))
+                    {
+                        var existing = principals.FirstOrDefault(principal => principal.AccountId == account.Id
+                            && principal.CloudProvider == CloudProviderType.Gcp
+                            && !string.IsNullOrWhiteSpace(serviceAccount.Email)
+                            && string.Equals(principal.Email, serviceAccount.Email, StringComparison.OrdinalIgnoreCase));
+                        if (existing is null)
+                        {
+                            principals.Add(serviceAccount);
+                            continue;
+                        }
+                        MergeServiceAccountEvidence(existing, serviceAccount);
+                    }
                     groups.AddRange(await DiscoverGroupsAsync(account.Id, cancellationToken));
                     roles.AddRange(await DiscoverRolesAsync(account.Id, cancellationToken));
                     var accountBindings = await GetEffectiveBindingsAsync(account.Id, cancellationToken);

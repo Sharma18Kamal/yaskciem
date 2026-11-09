@@ -1,18 +1,24 @@
-# What-if permission removal
+# What-if permission simulation
 
 Open **What-if Simulator** in Desktop. This is separate from the existing
 single-tuple Demo Mode permission check and structural remediation dry-run.
-It reuses the AWS/Azure/GCP authorization evaluators, but never approves
-remediation or calls a cloud API.
+It reuses the AWS/Azure/GCP authorization evaluators and existing risk,
+toxic-combination and attack-path engines, but never approves remediation or
+calls a cloud API.
 
 1. Refresh and select a saved local account, then **Load saved inventory**; or
    **Import offline JSON** with the schema below.
-2. Select one role or policy and enter one exact permission action.
-3. Choose **Simulate removal**. All modeled assignments of that target are
-   considered, including known group membership and descendant scopes.
-4. Select a result row for source statements, evidence digests, inheritance paths,
-   deny/condition diagnostics and alternative grants of the same action.
-5. Export a JSON simulation report for review. It is not an executable policy.
+2. Select an operation, target type, identity and/or role/policy, and an exact
+   provider permission. For replacement, supply the replacement action too.
+   A direct identity addition requires one exact inventoried resource scope.
+3. Run the isolated simulation. Role/policy changes include all inventoried
+   assignments of that target; identity-target changes apply only to direct
+   grants. Additions to roles/policies reuse only explicitly inventoried
+   assignment scopes and retain their conditions.
+4. Review changed identity/resource/action tuples, source evidence, inheritance,
+   deny/condition diagnostics, risk findings, toxic combinations and attack paths.
+5. Export a JSON report. It contains hypothetical evidence and is not an
+   executable policy or provider change request.
 
 For `Microsoft.Storage/storageAccounts/listKeys/action`, results include only
 inventoried storage-account resources, not VMs or arbitrary descendants. The
@@ -24,16 +30,30 @@ equivalent or operationally safe replacements.
 
 ## Prediction boundaries
 
-- `ModeledAccessLost` means the offline model went from Allow to no applicable
-  modeled grant. It is **not** provider-confirmed denial.
+-   `ModeledAccessLost` / `ModeledAccessAdded` mean the offline model changed its
+  decision for the selected action. They are **not** provider-confirmed denial or
+  grant.
 - `RetainedByAlternative` requires a remaining grant for the identical action,
   principal and resource with fully evaluated model decisions.
 - Missing source coverage, normalization problems and unresolved conditions
   produce potential/inconclusive impacts. Saved local inventory does not retain
   complete native policy/condition semantics and therefore remains partial.
-- The reduction percentage is lost modeled pairs divided by previously allowed
-  **affected target** pairs, not a global risk score, exploit probability or
-  count of all cloud resources. It is Unknown for uncertain results.
+- The removal-only reduction percentage is lost modeled pairs divided by
+  previously allowed **affected target** pairs, not a global risk score,
+  exploit probability or count of all cloud resources. It is Unknown for
+  uncertain results.
+- The risk comparison reruns existing risk rules on the before/after snapshots.
+  The displayed score is the maximum finding priority score, not a sum or
+  calibrated probability. Toxic-combination rules and attack paths are rerun
+  using the same normalized snapshot and trust evidence.
+- Full risk/toxic/path recalculation is bounded. If the scenario exceeds the
+  analysis work budget, no before/after security score is reported. Azure
+  action removal from wildcard statements is limited to the queried action;
+  full risk/toxic/path comparison is withheld because the current evaluator
+  cannot preserve unrelated wildcard actions during exclusion.
+- Operational dependencies are Unknown unless activity/usage evidence is
+  supplied. Affected access pairs are shown, but the simulator does not infer
+  workload dependency or certify that a permission is safe to remove.
 - Only inventoried identities, memberships and resources are considered. Resource
   scope matching outside the explicit Azure listKeys profile is a model candidate,
   not proof that a provider supports that action on that resource type.
@@ -137,6 +157,6 @@ provider/account bindings are required. Imported internal account IDs must match
 the bound inventory IDs. Identity/organization/account/action changes discard
 late results. Standalone mode analyzes the local user's selected files only.
 
-The remaining proposed differentiators (cross-cloud equivalence, comprehensive
-policy generation, full blast-radius graphs and provider-complete condition
-evaluation) are not claimed complete by this simulator.
+The simulation does not generate provider policy documents, approve or apply
+changes, guarantee operational safety, or implement provider-complete condition
+evaluation. No simulated data is persisted as authorization state.

@@ -370,6 +370,8 @@ public class CloudPrincipal
     public string? FederationSubject { get; set; }
     public string? FederationAudience { get; set; }
     public List<WorkloadFederationTrust> FederationTrusts { get; set; } = new();
+    [NotMapped]
+    public List<CloudIdentityTrust> IdentityTrusts { get; set; } = new();
     public bool? FederationTrustVerified { get; set; }
     public bool? FederationInventoryComplete { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -397,7 +399,23 @@ public class CloudPrincipal
     }
 }
 
-public sealed record WorkloadFederationTrust(string Issuer, string Subject, IReadOnlyList<string> Audiences, string Source);
+public sealed record WorkloadFederationTrust(
+    string Issuer,
+    string Subject,
+    IReadOnlyList<string> Audiences,
+    string Source,
+    string? ConditionExpression = null);
+
+public sealed record CloudIdentityTrust(
+    string TrustedPrincipal,
+    string RelationshipType,
+    string Source,
+    string Status,
+    string ConditionState,
+    string? ConditionExpression = null,
+    string? ConditionEvidence = null,
+    bool IsExternalSource = false,
+    bool IsInitialAccessPoint = false);
 
 public class CloudGroup
 {

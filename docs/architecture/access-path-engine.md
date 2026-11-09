@@ -23,7 +23,7 @@ flowchart TD
     J --> M[WPF Visualization]
     K --> M
     L --> N[Explanation]
-    I --> O[Future Risk Engine]
+    I --> O[Risk Engine]
     I --> P[Future Recommendation Engine]
 ```
 
@@ -43,8 +43,12 @@ Azure paths can include group membership, role assignment, role definition, acti
 
 Kubernetes workload traces add Pod/Deployment → ServiceAccount → Kubernetes RBAC → cloud identity edges. EKS, GKE, and AKS federation checks retain their evidence and status on the cloud-identity edge. Trust verification does not claim that a runtime token was exchanged or that downstream cloud permissions allow an action.
 
-## Persistence and Performance
+## Attack-Path Trust and Reachability
 
-`AccessPath`, `AccessPathNode`, and `AccessPathEdge` are relationally persisted with provider, principal, resource, permission, effective-access, status, and path-type indexes. Evidence and diagnostics are retained as JSON/text metadata. The engine builds adjacency lookups in memory and does not access cloud APIs. Provider trust metadata is retained, but a complete cross-account and cross-cloud chain that stitches a source identity, federation/role assumption, and downstream target-resource access is not yet resolved end-to-end. Such links must not be inferred solely from matching names or incomplete trust evidence.
+The attack-path graph reuses the normalized identity inventory, effective-access result, provider trust evidence, and resource-risk signals. It does not infer a relationship from similar identity names. AWS role trust is matched against exact principal ARNs or account-root ARNs; source-side `sts:AssumeRole` access is checked separately. AWS OIDC and Azure Entra federated credentials retain issuer, subject, audience, and claims/condition evidence. If the external workload or its runtime token claims are not inventoried, the graph adds an explicitly labelled external identity and keeps the edge unverified.
 
-The graph is modeled from effective-access evidence, not observed attacker activity. Provider scan adapters do not yet populate the optional resource-security signal/coverage inputs. Advanced WPF rendering, full AssumeRole resolution where trust evidence is incomplete, and feeding live provider signals into the risk engine remain deferred.
+GCP service-account IAM policies are read per service account. The mapper recognizes the built-in `serviceAccountTokenCreator`, `workloadIdentityUser`, and `serviceAccountOpenIdTokenCreator` roles. It evaluates a bounded CEL subset for `resource.name`, `resource.type`, `request.time`, boolean composition, comparisons, and membership; unsupported expressions remain unknown. A failed condition is represented as denied. GCP trust edges remain potential because organization-level IAM deny policies and principal access boundary constraints are not evaluated by this provider path.
+
+Verified reachability requires every edge to be supported by complete provider evidence and fully evaluated authorization. Unknown trust or runtime claims remain theoretical; partially evaluated or conditional authorization remains potential. An external trust source is an explicitly configured authentication boundary, not evidence that an attacker has compromised that source. Evidence is retained on each edge, and traversal limits and cycle detection prevent unbounded graph growth.
+
+The graph is a static authorization/trust model, not proof of token exchange, compromise, or exploitation. Provider APIs do not expose the live token assertion or all request context, so conditional federation cannot be asserted satisfied without that context. GCP custom roles are inspected when readable, but deny policies, principal access boundaries, and other provider-specific policy overlays remain outside this graph evaluation and must not be interpreted as verified access.

@@ -1,5 +1,6 @@
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.AccessPath.Models;
 using CloudEntitle.Normalization.Models;
 using System.Text.Json;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
@@ -26,7 +27,8 @@ public sealed record RiskEvaluationRequest(
     IReadOnlyList<ResourceSecurityEvidenceCoverage>? ResourceSecurityCoverage = null,
     IReadOnlyList<ToxicCombinationRule>? ToxicCombinationRules = null,
     IReadOnlyList<ToxicTrustRelationshipEvidence>? ToxicTrustRelationships = null,
-    IReadOnlyList<PermissionConditionEvidence>? PermissionConditions = null);
+    IReadOnlyList<PermissionConditionEvidence>? PermissionConditions = null,
+    AttackGraph? AttackGraph = null);
 
 public enum TrustRelationshipStatus { Confirmed, Potential, Unknown, Rejected }
 public enum AuthorizationConditionState { Satisfied, NotSatisfied, Unknown }
@@ -282,6 +284,34 @@ public static class ToxicTrustRelationshipMapper
         foreach (var target in principals.Where(item => item.FederationTrusts.Count > 0))
         foreach (var trust in target.FederationTrusts)
         {
+            if (ToProvider(target.CloudProvider) == CloudProvider.Aws
+                && trust.Issuer.StartsWith("aws-principal:", StringComparison.Ordinal))
+            {
+                var trustedPrincipal = trust.Issuer["aws-principal:".Length..];
+                foreach (var source in principals.Where(source => source.Id != target.Id
+                    && source.CloudProvider == CloudProviderType.Aws
+                    && AwsPrincipalMatches(trustedPrincipal, source.PrincipalId)))
+                {
+                    var hasCondition = string.Equals(trust.Subject, "condition-present", StringComparison.Ordinal);
+                    var trustIsInventoried = target.FederationInventoryComplete == true;
+                    result.Add(new ToxicTrustRelationshipEvidence(
+                        source.Id, source.AccountId, CloudProvider.Aws,
+                        target.Id, target.AccountId, CloudProvider.Aws,
+                        "AWS AssumeRole", trustIsInventoried ? TrustRelationshipStatus.Confirmed : TrustRelationshipStatus.Potential,
+                        trust.Source, $"{target.PrincipalId ?? target.Name}|{trustedPrincipal}",
+                        new[] { source.UpdatedAt ?? source.CreatedAt, target.UpdatedAt ?? target.CreatedAt }.Max(),
+                        RequiresSourcePermission: true,
+                        RequiredSourcePermissionPattern: "sts:AssumeRole",
+                        ConditionState: hasCondition ? AuthorizationConditionState.Unknown
+                            : trustIsInventoried ? AuthorizationConditionState.Satisfied : AuthorizationConditionState.Unknown,
+                        ConditionEvidence: hasCondition
+                            ? "AWS trust policy has a condition; applicable request context was not evaluated."
+                            : trustIsInventoried ? "AWS AssumeRole trust policy was inventoried; source permission is evaluated separately."
+                            : "AWS trust policy coverage is incomplete."));
+                }
+                continue;
+            }
+
             var issuer = NormalizeIssuer(trust.Issuer);
             var matchingSources = principals.Where(source => source.Id != target.Id
                 && !string.IsNullOrWhiteSpace(source.FederationIssuer)
@@ -311,6 +341,23 @@ public static class ToxicTrustRelationshipMapper
 
     private static string NormalizeIssuer(string? issuer)
         => issuer?.Trim().TrimEnd('/') ?? string.Empty;
+
+    private static bool AwsPrincipalMatches(string trustedPrincipal, string? sourcePrincipal)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePrincipal)) return false;
+        if (string.Equals(trustedPrincipal, sourcePrincipal, StringComparison.Ordinal)) return true;
+        const string rootSuffix = ":root";
+        if (!trustedPrincipal.StartsWith("arn:aws:iam::", StringComparison.Ordinal)
+            || !trustedPrincipal.EndsWith(rootSuffix, StringComparison.Ordinal))
+            return false;
+        var trustedAccount = trustedPrincipal["arn:aws:iam::".Length..^rootSuffix.Length];
+        var sourceAccountStart = sourcePrincipal.StartsWith("arn:aws:iam::", StringComparison.Ordinal)
+            ? "arn:aws:iam::".Length : -1;
+        if (sourceAccountStart < 0) return false;
+        var separator = sourcePrincipal.IndexOf(':', sourceAccountStart);
+        return separator > sourceAccountStart
+            && string.Equals(sourcePrincipal[sourceAccountStart..separator], trustedAccount, StringComparison.Ordinal);
+    }
 
     private static CloudProvider ToProvider(CloudProviderType provider) => provider switch
     {

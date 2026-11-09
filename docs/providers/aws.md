@@ -31,7 +31,7 @@ Use read-only IAM permissions appropriate to each configured account/profile. Di
 - Groups map to `CloudGroup`; direct memberships map to `GroupMembership` when persisted by the application layer.
 - Roles and policies map to `CloudRole` and `CloudPolicy`.
 - Policy statements map to `CloudPermission`, preserving Effect, Action, NotAction, Resource, NotResource, service prefixes, and wildcard values such as `s3:*`.
-- Trust-policy principals are returned as `AwsTrustRelationship` records for future access-path analysis.
+- IAM role trust policies are retained as provider evidence. Exact AWS principal ARNs/account-root trusts are mapped to inventoried principals when possible; source `sts:AssumeRole` permission is checked separately. OIDC web-identity trusts retain issuer, subject, audience, and condition evidence, and remain unverified when runtime token claims are unavailable.
 - Active findings from existing IAM Access Analyzer instances are added to Risk Findings.
 - Each profile/account appears separately in the Cloud Accounts inventory, with its CLI profile and inferred permission set.
 - Organization members without a configured working profile appear as roster-only rows and are not represented as scanned.

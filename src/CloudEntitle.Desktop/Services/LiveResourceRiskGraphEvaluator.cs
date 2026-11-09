@@ -20,11 +20,15 @@ public sealed record LiveResourceAccessAssignment(CloudProviderType Provider, Gu
 public sealed record LiveResourceRiskGraphResult(
     IReadOnlyList<DomainAccessPath> AccessPaths,
     IReadOnlyList<RiskFindingModel> Findings,
-    IReadOnlyList<string> Diagnostics);
+    IReadOnlyList<string> Diagnostics)
+{
+    public AttackGraph? AttackGraph { get; init; }
+}
 
 public sealed class LiveResourceRiskGraphEvaluator
 {
     private readonly AccessPathEngine _accessPathEngine = new();
+    private readonly AttackPathEngine _attackPathEngine = new();
     private readonly GraphRiskEngine _riskEngine = new();
     private readonly IToxicCombinationWorkspaceService? _toxicCombinationWorkspace;
 
@@ -89,22 +93,30 @@ public sealed class LiveResourceRiskGraphEvaluator
             ["Observed documents are partial candidates, not effective authorization."], new(entitlements.Count, 0, entitlements.Count, 0, 0));
         var paths = await _accessPathEngine.BuildAsync(new(access, normalized, scopedResources, [], ResourceSecuritySignals: signals,
             ResourceSecurityCoverage: coverage, EvaluatedAt: documents.CollectedAtUtc.UtcDateTime), token);
+        var attackGraph = await _attackPathEngine.BuildAsync(new AttackGraphBuildRequest(
+            scopedPrincipals, [], [], permissions, scopedResources, access,
+            AttackTrustRelationshipMapper.FromProviderEvidence(scopedPrincipals), signals,
+            EvaluatedAtUtc: documents.CollectedAtUtc.UtcDateTime), token);
         var toxicRules = _toxicCombinationWorkspace is null
             ? null
             : await _toxicCombinationWorkspace.GetEnabledRulesAsync(token);
         var riskRequest = new RiskEvaluationRequest([account], scopedPrincipals, scopedResources, [], [], permissions,
             entitlements, access, paths.Paths, [], EvaluatedAt: documents.CollectedAtUtc.UtcDateTime,
-            Options: new(EnabledRules: new HashSet<string> { "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-021" }),
+            Options: new(EnabledRules: new HashSet<string> { "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-021", "CIEM-023" }),
             ResourceSecuritySignals: signals, ResourceSecurityCoverage: coverage, ToxicCombinationRules: toxicRules,
-            ToxicTrustRelationships: Array.Empty<ToxicTrustRelationshipEvidence>());
+            ToxicTrustRelationships: Array.Empty<ToxicTrustRelationshipEvidence>(), AttackGraph: attackGraph);
         var risk = await _riskEngine.EvaluateAsync(riskRequest, token);
         if (_toxicCombinationWorkspace is not null)
             await _toxicCombinationWorkspace.RecordEvaluationAsync(riskRequest, risk.Findings, token);
         foreach (var finding in risk.Findings)
             finding.EvaluationState = RiskEvaluationState.Potential;
-        return new(paths.Paths, risk.Findings,
+        return new LiveResourceRiskGraphResult(paths.Paths, risk.Findings,
             documents.Limitations.Concat(paths.Diagnostics.Select(item => item.Message)).Concat(risk.Diagnostics.Select(item => item.Message))
-                .Append("Document-based review candidates only. Uncollected denies, runtime conditions and resource controls may block these paths; no confirmed exploitation or remediation approval is asserted.").ToArray());
+                .Concat(attackGraph.Diagnostics)
+                .Append("Document-based review candidates only. Uncollected denies, runtime conditions and resource controls may block these paths; no confirmed exploitation or remediation approval is asserted.").ToArray())
+        {
+            AttackGraph = attackGraph
+        };
     }
 
     private static bool PrincipalMatches(CloudProvider provider, string external, CloudPrincipal principal)
@@ -277,7 +289,7 @@ public sealed class LiveResourceRiskGraphEvaluator
             : await _toxicCombinationWorkspace.GetEnabledRulesAsync(cancellationToken);
         var options = new RiskRuleOptions(EnabledRules: new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-021", "CIEM-022"
+            "CIEM-017", "CIEM-018", "CIEM-019", "CIEM-020", "CIEM-021", "CIEM-022", "CIEM-023"
         });
         var riskRequest = new RiskEvaluationRequest(
             accounts, principals.Values.ToArray(), resources, roles.Values.ToArray(), Array.Empty<CloudPolicy>(),
@@ -285,12 +297,32 @@ public sealed class LiveResourceRiskGraphEvaluator
             Array.Empty<ActivityRecord>(), EvaluatedAt: evaluatedAtUtc, Options: options,
             ResourceSecuritySignals: signals, ResourceSecurityCoverage: coverage, ToxicCombinationRules: toxicRules,
             ToxicTrustRelationships: ToxicTrustRelationshipMapper.FromFederationEvidence(principals.Values.ToArray()));
+        var trustEvidence = riskRequest.ToxicTrustRelationships ?? Array.Empty<ToxicTrustRelationshipEvidence>();
+        var attackGraph = await _attackPathEngine.BuildAsync(new AttackGraphBuildRequest(
+            principals.Values.ToArray(), roles.Values.ToArray(), Array.Empty<CloudPolicy>(),
+            sourcePermissions.Concat(graphPermissions).ToArray(), resources, effectiveAccess,
+            trustEvidence.Select(MapAttackTrust)
+                .Concat(AttackTrustRelationshipMapper.FromProviderEvidence(principals.Values.ToArray()))
+                .Distinct()
+                .ToArray(), signals, EvaluatedAtUtc: evaluatedAtUtc), cancellationToken);
+        riskRequest = riskRequest with { AttackGraph = attackGraph };
         var riskResult = await _riskEngine.EvaluateAsync(riskRequest, cancellationToken);
         if (_toxicCombinationWorkspace is not null)
             await _toxicCombinationWorkspace.RecordEvaluationAsync(riskRequest, riskResult.Findings, cancellationToken);
         diagnostics.AddRange(riskResult.Diagnostics.Select(diagnostic => diagnostic.Message));
-        return new LiveResourceRiskGraphResult(accessPathResult.Paths, riskResult.Findings, diagnostics);
+        diagnostics.AddRange(attackGraph.Diagnostics);
+        return new LiveResourceRiskGraphResult(accessPathResult.Paths, riskResult.Findings, diagnostics)
+        {
+            AttackGraph = attackGraph
+        };
     }
+
+    private static AttackTrustRelationship MapAttackTrust(ToxicTrustRelationshipEvidence evidence)
+        => new(evidence.SourcePrincipalId, evidence.SourceCloudAccountId, evidence.SourceProvider,
+            evidence.TargetPrincipalId, evidence.TargetCloudAccountId, evidence.TargetProvider,
+            evidence.RelationshipType, evidence.Status.ToString(), evidence.EvidenceSource,
+            evidence.EvidenceReference, evidence.ObservedAtUtc, evidence.RequiresSourcePermission,
+            evidence.RequiredSourcePermissionPattern, evidence.ConditionState.ToString(), evidence.ConditionEvidence);
 
     private static CloudPrincipal? FindPrincipal(IEnumerable<CloudPrincipal> principals, string identity)
         => principals.FirstOrDefault(principal => principal.Name.Equals(identity, StringComparison.OrdinalIgnoreCase)

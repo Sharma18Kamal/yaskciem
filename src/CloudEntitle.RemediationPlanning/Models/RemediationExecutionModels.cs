@@ -3,13 +3,13 @@ using CloudEntitle.Domain;
 namespace CloudEntitle.RemediationPlanning.Models;
 
 public enum RemediationExecutionMode { DryRun, Live }
-public enum RemediationExecutionStatus { NotStarted, Blocked, DryRunCompleted, Approved, Executed, Verified, VerificationFailed, Failed }
+public enum RemediationExecutionStatus { NotStarted, Blocked, DryRunCompleted, Approved, Executed, Verified, VerificationFailed, Failed, OutcomeUnknown, RolledBack, Reconciled }
 
 public sealed record RemediationExecutionRequest(
     RemediationPlan Plan,
-    RemediationExecutionMode Mode,
-    string RequestedBy,
-    bool ExplicitApproval,
+    RemediationExecutionMode Mode = RemediationExecutionMode.DryRun,
+    string RequestedBy = "",
+    bool ExplicitApproval = false,
     bool RequireVerification = true);
 
 public sealed record RemediationExecution(
@@ -24,6 +24,7 @@ public sealed record RemediationExecution(
     DateTime CompletedAt)
 {
     public RemediationVerification? Verification { get; init; }
+    public bool MutationOutcomeKnown { get; init; } = true;
 }
 
 public sealed record ProviderChangeValidation(bool IsValid, IReadOnlyList<string> Diagnostics);

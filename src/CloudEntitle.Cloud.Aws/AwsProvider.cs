@@ -125,7 +125,7 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
         {
             Id = Guid.NewGuid(), AccountId = accountId, CloudProvider = CloudProviderType.Aws,
             Name = user.GetProperty("UserName").GetString() ?? "unknown-user",
-            PrincipalId = user.TryGetProperty("UserId", out var userId) ? userId.GetString() : null,
+            PrincipalId = ReadString(user, "Arn") ?? (user.TryGetProperty("UserId", out var userId) ? userId.GetString() : null),
             LastActivity = user.TryGetProperty("PasswordLastUsed", out var passwordLastUsed) && passwordLastUsed.ValueKind == JsonValueKind.String
                 ? $"Console password used {passwordLastUsed.GetString()}"
                 : null,
@@ -160,7 +160,10 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
                     CloudProvider = CloudProviderType.Aws,
                     Name = roleName,
                     PrincipalId = roleArn ?? roleName,
-                    IdentityType = IdentityType.ServiceAccount,
+                    IdentityType = federationTrusts.Count > 0
+                        && federationTrusts.All(trust => trust.Issuer.StartsWith("aws-principal:", StringComparison.Ordinal))
+                        ? IdentityType.Role
+                        : IdentityType.ServiceAccount,
                     IsActive = true,
                     OwnerIds = ownerIds,
                     OwnerInventoryComplete = tagsAvailable,
@@ -219,12 +222,26 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
         var trusts = new List<WorkloadFederationTrust>();
         foreach (var statement in statements)
         {
+            if (!string.Equals(ReadString(statement, "Effect"), "Allow", StringComparison.OrdinalIgnoreCase))
+                continue;
             if (!statement.TryGetProperty("Principal", out var principal) || principal.ValueKind != JsonValueKind.Object) continue;
             var action = statement.TryGetProperty("Action", out var actionElement)
                 ? (actionElement.ValueKind == JsonValueKind.Array ? actionElement.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Select(value => value.GetString()).ToArray() : new[] { actionElement.GetString() })
                 : Array.Empty<string?>();
             var services = ReadPrincipalValues(principal, "Service");
             if (services.Count > 0 && action.Any(value => value?.StartsWith("sts:AssumeRole", StringComparison.OrdinalIgnoreCase) == true)) isWorkload = true;
+
+            var awsPrincipals = ReadPrincipalValues(principal, "AWS");
+            if (awsPrincipals.Count > 0 && action.Any(value => string.Equals(value, "sts:AssumeRole", StringComparison.OrdinalIgnoreCase)))
+            {
+                var hasCondition = statement.TryGetProperty("Condition", out var assumeRoleCondition)
+                    && assumeRoleCondition.ValueKind == JsonValueKind.Object
+                    && assumeRoleCondition.EnumerateObject().Any();
+                trusts.AddRange(awsPrincipals.Select(awsPrincipal => new WorkloadFederationTrust(
+                    $"aws-principal:{awsPrincipal}", hasCondition ? "condition-present" : string.Empty,
+                    Array.Empty<string>(), "AWS IAM AssumeRole trust policy",
+                    hasCondition ? assumeRoleCondition.GetRawText() : null)));
+            }
 
             var federated = ReadPrincipalValues(principal, "Federated");
             if (federated.Count == 0 || !action.Any(value => string.Equals(value, "sts:AssumeRoleWithWebIdentity", StringComparison.OrdinalIgnoreCase))) continue;
@@ -233,9 +250,11 @@ public class AwsProvider : ICloudProvider, IIdentityProvider, IResourceProvider,
             var conditionValues = EnumerateConditionValues(condition).ToArray();
             var subject = conditionValues.FirstOrDefault(item => item.Key.EndsWith(":sub", StringComparison.OrdinalIgnoreCase)).Value;
             var audience = conditionValues.Where(item => item.Key.EndsWith(":aud", StringComparison.OrdinalIgnoreCase)).Select(item => item.Value).Distinct(StringComparer.Ordinal).ToArray();
-            trusts.Add(new WorkloadFederationTrust(federated[0], subject ?? string.Empty, audience, "AWS IAM AssumeRoleWithWebIdentity trust policy"));
+            trusts.Add(new WorkloadFederationTrust(federated[0], subject ?? string.Empty, audience,
+                "AWS IAM AssumeRoleWithWebIdentity trust policy",
+                condition.ValueKind == JsonValueKind.Object ? condition.GetRawText() : null));
         }
-        return isWorkload ? trusts : null;
+        return isWorkload || trusts.Count > 0 ? trusts : null;
     }
 
     private static IReadOnlyList<string> ReadPrincipalValues(JsonElement principal, string property)

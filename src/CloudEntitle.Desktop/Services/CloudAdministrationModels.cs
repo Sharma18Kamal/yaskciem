@@ -36,6 +36,7 @@ public interface ICloudAdministrationService
 {
     Task<CloudAdministrationPlan> PreviewAsync(CloudAdministrationRequest request, CancellationToken token = default);
     Task<CloudAdministrationPlan> ApplyAsync(Guid planId, bool dependenciesReviewed, CancellationToken token = default);
+    Task<CloudAdministrationPlan> VerifyAsync(Guid planId, CancellationToken token = default);
     Task<CloudAdministrationPlan> RollbackAsync(Guid planId, bool dependenciesReviewed, CancellationToken token = default);
     Task<CloudAdministrationPlan> ReconcileAsync(Guid planId, CancellationToken token = default);
 }

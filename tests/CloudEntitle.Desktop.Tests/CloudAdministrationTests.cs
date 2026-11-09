@@ -35,10 +35,13 @@ public sealed class CloudAdministrationTests
         var applied = await fixture.Service.ApplyAsync(plan.Id, true);
         Assert.Equal("Applied", applied.Status);
         Assert.Equal(1, fixture.Runner.Writes);
-        Assert.Equal(new[] { "Prepared", "Approved", "Applied" }, fixture.Journal.Actions);
+        var verified = await fixture.Service.VerifyAsync(plan.Id);
+        Assert.Equal("Verified", verified.Status);
+        Assert.Equal(1, fixture.Runner.Writes);
         var rolledBack = await fixture.Service.RollbackAsync(plan.Id, true);
         Assert.Equal("RolledBack", rolledBack.Status);
         Assert.Equal(2, fixture.Runner.Writes);
+        Assert.Equal(new[] { "Prepared", "Approved", "Applied", "Verified", "RollbackApproved", "RolledBack" }, fixture.Journal.Actions);
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ApplyAsync(plan.Id, true));
         Assert.All(fixture.Runner.InputFiles, file => Assert.False(File.Exists(file)));
     }
@@ -53,6 +56,19 @@ public sealed class CloudAdministrationTests
         Assert.Contains(fixture.Runner.WriteCalls, args => args.Contains("create"));
         Assert.Equal("RolledBack", (await fixture.Service.RollbackAsync(plan.Id, true)).Status);
         Assert.Contains(fixture.Runner.WriteCalls, args => args.Contains("delete") && args.Contains("--etag"));
+    }
+
+    [Fact]
+    public async Task GcpAllowPolicy_RejectsNewRoleMembersBeforeAProviderWrite()
+    {
+        using var fixture = new Fixture(CloudAdministrationOperation.GcpSetAllowPolicy);
+        var request = fixture.Request with
+        {
+            PolicyJson = "{\"bindings\":[{\"role\":\"roles/viewer\",\"members\":[\"user:new@example.invalid\"]}]}"
+        };
+        await Assert.ThrowsAsync<ArgumentException>(() => fixture.Service.PreviewAsync(request));
+        Assert.Equal(0, fixture.Runner.Writes);
+        Assert.Empty(fixture.Journal.Actions);
     }
 
     [Theory]
@@ -183,9 +199,10 @@ public sealed class CloudAdministrationTests
     {
         using var fixture = new Fixture(CloudAdministrationOperation.GcpSetAllowPolicy);
         fixture.Runner.State["auditConfigs"] = JsonNode.Parse("[{\"service\":\"allServices\",\"auditLogConfigs\":[{\"logType\":\"DATA_READ\"}]}]");
-        var document = JsonNode.Parse(fixture.Request.PolicyJson)!.AsObject();
+        fixture.Runner.State["bindings"]![0]!["condition"] = JsonNode.Parse("{\"title\":\"temporary\",\"expression\":\"request.time < timestamp('2030-01-01T00:00:00Z')\"}");
+        var document = (JsonObject)fixture.Runner.State.DeepClone();
         document["auditConfigs"] = fixture.Runner.State["auditConfigs"]!.DeepClone();
-        document["bindings"]![0]!["condition"] = JsonNode.Parse("{\"title\":\"temporary\",\"expression\":\"request.time < timestamp('2030-01-01T00:00:00Z')\"}");
+        document["bindings"]![0]!["members"] = new JsonArray();
         var plan = await fixture.Service.PreviewAsync(fixture.Request with { PolicyJson = document.ToJsonString() });
         Assert.Equal(3, JsonNode.Parse(plan.AfterJson)!["version"]!.GetValue<int>());
         await fixture.Service.ApplyAsync(plan.Id, true);
@@ -271,7 +288,7 @@ public sealed class CloudAdministrationTests
             var policy = provider == CloudProvider.Azure
                 ? $"{{\"roleName\":\"Custom\",\"permissions\":[{{\"actions\":[\"Microsoft.Compute/*/read\"],\"notActions\":[],\"dataActions\":[],\"notDataActions\":[]}}],\"assignableScopes\":[\"/subscriptions/{account}\"]}}"
                 : provider == CloudProvider.Aws ? "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Action\":\"s3:GetObject\",\"Resource\":\"*\"}]}"
-                : operation == CloudAdministrationOperation.GcpSetAllowPolicy ? "{\"bindings\":[{\"role\":\"roles/viewer\",\"members\":[\"serviceAccount:service@client-project.iam.gserviceaccount.com\"]}]}"
+                : operation == CloudAdministrationOperation.GcpSetAllowPolicy ? "{\"bindings\":[]}"
                 : "{\"displayName\":\"Test deny\",\"rules\":[{\"denyRule\":{\"deniedPrincipals\":[\"principalSet://goog/public:all\"],\"deniedPermissions\":[\"storage.googleapis.com/objects.get\"]}}]}";
             Request = new(provider, account, "", operation, $"/subscriptions/{account}",
                 provider == CloudProvider.Azure ? Guid.NewGuid().ToString() : "role", Guid.NewGuid().ToString(), role, policy, "Reviewed test change");

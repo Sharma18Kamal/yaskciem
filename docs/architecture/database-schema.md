@@ -27,9 +27,16 @@ erDiagram
     RiskFindingModel ||--o{ RecommendationModel : produces
     CloudAccount ||--o{ Scan : records
     CloudPrincipal ||--o{ ActivityRecord : generates
+    RemediationPlanRecord ||--o{ RemediationActionRecord : proposes
+    RemediationPlanRecord ||--o| RemediationApprovalRecord : reviewed
+    RemediationPlanRecord ||--o{ RemediationExecutionRecord : executes
+    RemediationPlanRecord ||--o{ RemediationRollbackRecord : recovers
+    RemediationPlanRecord ||--o{ RemediationAuditRecord : records
 ```
 
 The schema also stores policies, assignments, group memberships, audit events, risk rules, and scan history. Security and audit relationships use restrictive delete behavior to avoid accidental historical data loss.
+
+Remediation records are organization-scoped and cascade only with their parent plan. Execution and audit history have independent rows; approval data, action diffs, and provider snapshots are retained in payload columns so historical decisions remain reviewable.
 
 ## Indexes
 
@@ -39,8 +46,8 @@ Policy documents are preserved as text so provider-specific policy semantics are
 
 ## Migrations and Initialization
 
-`InitialCiEMSchema` is the EF Core source of truth. `DbInitializer` creates the app-data directory and applies pending migrations. Database errors are logged with Serilog and surfaced as a useful initialization exception without exposing credentials.
+EF Core migrations are the source of truth. `DbInitializer` creates the app-data directory and applies pending migrations, including the additive remediation-persistence migration. The remediation store expects startup migration to have completed; it does not create tables ad hoc. Database errors are logged with Serilog and surfaced as a useful initialization exception without exposing credentials.
 
 ## Security
 
-The database stores authorization metadata, not credentials. Passwords, access tokens, refresh tokens, client secrets, private keys, API keys, and license secrets are intentionally outside this persistence model.
+The database stores authorization metadata and remediation evidence, not credentials. The remediation store rejects common credential/token patterns before saving provider snapshots; this is defense-in-depth and cannot recognize every secret embedded in arbitrary text. Passwords, access tokens, refresh tokens, client secrets, private keys, API keys, and license secrets are intentionally outside this persistence model.

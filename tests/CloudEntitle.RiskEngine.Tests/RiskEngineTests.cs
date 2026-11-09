@@ -4,6 +4,7 @@ using CloudEntitle.Normalization.Models;
 using CloudEntitle.RiskEngine.Services;
 using CloudEntitle.RiskEngine.Models;
 using CloudEntitle.RiskEngine.Rules;
+using CloudEntitle.AccessPath.Models;
 using Xunit;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
@@ -735,6 +736,76 @@ public sealed class RiskEngineTests
         var finding = Assert.Single(result.Findings, item => item.RuleId == Stable("CIEM-021"));
         Assert.Equal("Low", finding.Evidence.Details["Confidence"]);
         Assert.Equal("Unknown", finding.Evidence.Details["SecondConditionState"]);
+    }
+
+    [Fact]
+    public async Task CrossCloudAttackPathRule_UsesGraphEvidenceAndKeepsFindingPotential()
+    {
+        var fixture = FixtureData.Create("s3:GetObject", "sensitive-bucket", external: true);
+        var principal = fixture.Request.Principals.Single();
+        var resource = fixture.Request.Resources.Single();
+        var entryKey = "entry";
+        var targetKey = "target";
+        var edge = new AttackGraphEdge("edge", entryKey, targetKey, "AuthorizedAccess",
+            CloudProvider.Aws, fixture.Effective.CloudAccountId, AttackEdgeFeasibility.Verified,
+            "AWS effective access", "aws-evidence-7", fixture.Effective.Id);
+        var path = new AttackPath("path", entryKey, targetKey, AttackPathCategory.SensitiveResourceExposure,
+            AttackPathReachability.VerifiedReachable, 90, [entryKey, targetKey], ["edge"],
+            "External identity reaches sensitive storage using provider evidence.");
+        var graph = new AttackGraph("graph", DateTime.UtcNow,
+            [
+                new AttackGraphNode(entryKey, AttackGraphNodeType.Identity, principal.Id, CloudProvider.Aws,
+                    fixture.Effective.CloudAccountId, principal.Name, principal.PrincipalId, true),
+                new AttackGraphNode(targetKey, AttackGraphNodeType.Resource, resource.Id, CloudProvider.Aws,
+                    fixture.Effective.CloudAccountId, resource.Name, resource.ResourceId, IsSensitive: true)
+            ],
+            [edge], [path],
+            [new AttackPathFinding("finding", path.Id, path.Category, path.Reachability,
+                RiskSeverity.Critical, 90, "Sensitive resource path", "Verified authorization path; not proof of exploitation.",
+                path.EvidenceSummary, ["aws-evidence-7"])],
+            [], true);
+        var request = fixture.Request with
+        {
+            AttackGraph = graph,
+            Options = new(EnabledRules: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "CIEM-023" })
+        };
+
+        var result = await new CloudEntitle.RiskEngine.Services.RiskEngine().EvaluateAsync(request);
+
+        var risk = Assert.Single(result.Findings, finding => finding.RuleId == Stable("CIEM-023"));
+        Assert.Equal(RiskEvaluationState.Potential, risk.EvaluationState);
+        Assert.Equal(90, risk.PriorityScore);
+        Assert.Equal("VerifiedReachable", risk.Evidence.Details["Reachability"]);
+        Assert.Contains("aws-evidence-7", risk.Evidence.Details["EvidenceReferences"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AwsAssumeRoleTrustMapper_UsesExactArnOrAccountRootAndKeepsConditionsUnknown()
+    {
+        var source = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(), AccountId = Guid.NewGuid(), CloudProvider = CloudProviderType.Aws,
+            Name = "source-role", PrincipalId = "arn:aws:iam::123456789012:role/source"
+        };
+        var target = new CloudPrincipal
+        {
+            Id = Guid.NewGuid(), AccountId = Guid.NewGuid(), CloudProvider = CloudProviderType.Aws,
+            Name = "target-role", PrincipalId = "arn:aws:iam::987654321098:role/target",
+            FederationInventoryComplete = true,
+            FederationTrusts =
+            [
+                new WorkloadFederationTrust("aws-principal:arn:aws:iam::123456789012:root",
+                    "condition-present", [], "AWS IAM AssumeRole trust policy")
+            ]
+        };
+
+        var relationships = ToxicTrustRelationshipMapper.FromFederationEvidence([source, target]);
+
+        var trust = Assert.Single(relationships);
+        Assert.Equal(TrustRelationshipStatus.Confirmed, trust.Status);
+        Assert.Equal(AuthorizationConditionState.Unknown, trust.ConditionState);
+        Assert.True(trust.RequiresSourcePermission);
+        Assert.Equal("sts:AssumeRole", trust.RequiredSourcePermissionPattern);
     }
 
     [Theory]

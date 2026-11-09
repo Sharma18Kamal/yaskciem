@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain.Entities;
+using CloudEntitle.AccessPath.Models;
 using CloudEntitle.RiskEngine.Models;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
 
@@ -88,6 +89,7 @@ public sealed record LiveScanHistoryEntry(
     public IReadOnlyList<ResourceSecuritySignal> ResourceSecuritySignals { get; init; } = Array.Empty<ResourceSecuritySignal>();
     public IReadOnlyList<ResourceSecurityEvidenceCoverage> ResourceSecurityCoverage { get; init; } = Array.Empty<ResourceSecurityEvidenceCoverage>();
     public IReadOnlyList<DomainAccessPath> ModeledAccessPaths { get; init; } = Array.Empty<DomainAccessPath>();
+    public AttackGraph? AttackGraph { get; init; }
     public IReadOnlyList<RiskFindingModel> ResourceRiskFindings { get; init; } = Array.Empty<RiskFindingModel>();
     public IReadOnlyList<PostureChangeRecord> PostureChanges { get; init; } = Array.Empty<PostureChangeRecord>();
     public IReadOnlyList<PostureChangeRecord> PendingNotifications { get; init; } = Array.Empty<PostureChangeRecord>();

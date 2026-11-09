@@ -77,6 +77,7 @@ public sealed class RemediationPlanStoreTests
         try
         {
             Directory.CreateDirectory(directory);
+            await using (var setup = contextFactory.CreateDbContext()) await setup.Database.EnsureCreatedAsync();
             var store = new LocalRemediationPlanStore(planPath, contextFactory);
             await store.SaveAsync(plan);
             var updated = plan with

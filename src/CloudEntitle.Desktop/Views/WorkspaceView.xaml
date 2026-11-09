@@ -289,6 +289,43 @@
             <StackPanel>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search access paths"/>
                 <TextBlock Text="{Binding CoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                <Border Style="{StaticResource SectionCard}" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="CROSS-CLOUD ATTACK PATH OVERVIEW" Style="{StaticResource CardLabel}"/>
+                        <TextBlock Text="{Binding AttackGraphStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,10" TextWrapping="Wrap"/>
+                        <UniformGrid Columns="4" Margin="0,0,0,10">
+                            <StackPanel><TextBlock Text="INITIAL ACCESS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding InitialAccessPointCount}" Foreground="{StaticResource PrimaryBrush}" FontSize="20" FontWeight="SemiBold"/></StackPanel>
+                            <StackPanel><TextBlock Text="GRAPH NODES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding AttackGraphNodeCount}" Foreground="{StaticResource PrimaryBrush}" FontSize="20" FontWeight="SemiBold"/></StackPanel>
+                            <StackPanel><TextBlock Text="GRAPH EDGES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding AttackGraphEdgeCount}" Foreground="{StaticResource PrimaryBrush}" FontSize="20" FontWeight="SemiBold"/></StackPanel>
+                            <StackPanel><TextBlock Text="VERIFIED PATHS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding VerifiedAttackPathCount}" Foreground="{StaticResource PrimaryBrush}" FontSize="20" FontWeight="SemiBold"/></StackPanel>
+                        </UniformGrid>
+                        <DataGrid ItemsSource="{Binding AttackPathRows}" SelectedItem="{Binding SelectedAttackPath, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="130" MaxHeight="300" CanUserSortColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Path category" Binding="{Binding Category}" Width="170"/>
+                                <DataGridTextColumn Header="Reachability" Binding="{Binding Reachability}" Width="150"/>
+                                <DataGridTextColumn Header="Risk" Binding="{Binding RiskScore}" Width="70"/>
+                                <DataGridTextColumn Header="Entry point" Binding="{Binding EntryPoint}" Width="180"/>
+                                <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="180"/>
+                                <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="PATH EDGE EVIDENCE" Style="{StaticResource CardLabel}" Margin="0,10,0,6"/>
+                        <DataGrid ItemsSource="{Binding SelectedAttackPathEvidence}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="80" MaxHeight="220" CanUserSortColumns="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Relationship" Binding="{Binding Relationship}" Width="130"/>
+                                <DataGridTextColumn Header="From" Binding="{Binding From}" Width="150"/>
+                                <DataGridTextColumn Header="To" Binding="{Binding To}" Width="150"/>
+                                <DataGridTextColumn Header="Feasibility" Binding="{Binding Feasibility}" Width="110"/>
+                                <DataGridTextColumn Header="Source" Binding="{Binding EvidenceSource}" Width="140"/>
+                                <DataGridTextColumn Header="Provider evidence" Binding="{Binding EvidenceReference}" Width="*"/>
+                                <DataGridTextColumn Header="Scope / condition" Binding="{Binding Scope}" Width="150"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <ItemsControl ItemsSource="{Binding AttackGraphDiagnostics}" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{StaticResource CriticalBrush}" TextWrapping="Wrap" Margin="0,2"/></DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="1.1*"/><ColumnDefinition Width="0.9*"/></Grid.ColumnDefinitions>
                     <DataGrid Grid.Column="0" ItemsSource="{Binding Paths}" SelectedItem="{Binding SelectedPath, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="220" MaxHeight="520" CanUserSortColumns="True" Margin="0,0,10,0">
@@ -682,9 +719,41 @@
                             <Button Content="{Binding ApprovalButtonText}" Command="{Binding ApprovePlanCommand}" IsEnabled="{Binding CanApprovePlan}" Style="{StaticResource PrimaryButton}" ToolTip="Approve the selected plan after reviewing its evidence and proposed changes. This does not apply cloud changes."/>
                             <Button Content="Reject" Command="{Binding RejectPlanCommand}" IsEnabled="{Binding CanRejectPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Reject the selected remediation plan and record the review decision."/>
                             <Button Content="Run dry run" Command="{Binding RunDryRunCommand}" IsEnabled="{Binding CanRunDryRun}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Simulate the proposed change against stored evidence; provider policies are not changed."/>
-                            <Button Content="Verify" Command="{Binding VerifyPlanCommand}" IsEnabled="{Binding CanVerifyPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Check verification status. Live verification is unavailable until a provider confirms a change."/>
+                            <Button Content="Verify provider state" Command="{Binding VerifyPlanCommand}" IsEnabled="{Binding CanVerifyPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Read provider state again and compare it with the approved after-state; this does not write."/>
                             <Button Content="Prepare rollback" Command="{Binding PrepareRollbackCommand}" IsEnabled="{Binding CanPrepareRollback}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Create a separate non-executable rollback draft for review; no rollback is applied."/>
                         </StackPanel>
+                        <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="PROVIDER PREVIEW AND GUARDED EXECUTION" Style="{StaticResource CardLabel}"/>
+                                <TextBlock Text="Live writes are available only for confirmed RemoveUnusedPermission recommendations. Review the provider-generated diff and operational dependencies. Dry Run is the default; each real write requires independent approvals and a separate confirmation." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding ProviderProfile, UpdateSourceTrigger=PropertyChanged}" ToolTip="Local cloud CLI profile; leave empty to use the provider's default credentials" Margin="0,0,6,6"/>
+                                    <ComboBox Grid.Column="1" ItemsSource="{Binding ProviderOperations}" SelectedItem="{Binding ProviderOperation, Mode=TwoWay}" Margin="6,0,0,6" ToolTip="Choose an explicitly supported provider operation"/>
+                                    <TextBox Grid.Column="0" Grid.Row="1" Text="{Binding ProviderScope, UpdateSourceTrigger=PropertyChanged}" ToolTip="Exact subscription/resource, AWS target, or GCP project scope" Margin="0,0,6,6"/>
+                                    <TextBox Grid.Column="1" Grid.Row="1" Text="{Binding ProviderSubjectKind, UpdateSourceTrigger=PropertyChanged}" ToolTip="Provider-specific principal/assignment type" Margin="6,0,0,6"/>
+                                    <TextBox Grid.Column="0" Grid.Row="2" Text="{Binding ProviderSubject, UpdateSourceTrigger=PropertyChanged}" ToolTip="Exact provider principal or assignment identifier" Margin="0,0,6,6"/>
+                                    <TextBox Grid.Column="1" Grid.Row="2" Text="{Binding ProviderRoleOrPolicy, UpdateSourceTrigger=PropertyChanged}" ToolTip="Exact role or policy identifier" Margin="6,0,0,6"/>
+                                </Grid>
+                                <TextBox Text="{Binding ProviderPolicyJson, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Height="90" ToolTip="Provider policy JSON where the selected operation requires it; inspect carefully for unrelated changes."/>
+                                <TextBox Text="{Binding ProviderReason, UpdateSourceTrigger=PropertyChanged}" ToolTip="Required operational reason for the provider preview" Margin="0,6,0,0"/>
+                                <Button Content="Prepare provider before/after preview" Command="{Binding PrepareProviderPreviewCommand}" IsEnabled="{Binding CanPrepareProviderPreview}" Style="{StaticResource QuietButton}" HorizontalAlignment="Left" Margin="0,8,0,0" ToolTip="Read current provider state and prepare an exact diff; does not write."/>
+                                <TextBlock Text="{Binding ProviderExecutionSummary}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <TextBlock Text="WHAT-IF SNAPSHOT" Style="{StaticResource CardLabel}" Margin="0,10,0,4"/>
+                                <TextBlock Text="{Binding WhatIfSummary}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                <TextBlock Text="BEFORE STATE" Style="{StaticResource CardLabel}" Margin="0,10,0,4"/>
+                                <TextBox Text="{Binding SelectedPlan.ProviderExecution.BeforeJson}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxHeight="110" ToolTip="Read-only provider state captured before the proposed change."/>
+                                <TextBlock Text="AFTER STATE" Style="{StaticResource CardLabel}" Margin="0,8,0,4"/>
+                                <TextBox Text="{Binding SelectedPlan.ProviderExecution.AfterJson}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxHeight="110" ToolTip="Read-only provider state that the approved operation will apply."/>
+                                <CheckBox Content="I reviewed workloads, operational dependencies, and break-glass access" IsChecked="{Binding DependenciesReviewed, Mode=TwoWay}" Margin="0,8,0,0" ToolTip="Required operator attestation; YASK-CIEM does not infer that operational dependencies are safe."/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Content="Apply approved change" Command="{Binding ApplyApprovedProviderPlanCommand}" IsEnabled="{Binding CanApplyApprovedProviderPlan}" Style="{StaticResource PrimaryButton}" ToolTip="Perform a real provider write after all approval, freshness, identity, and dependency checks."/>
+                                    <Button Content="Apply approved rollback" Command="{Binding RollbackApprovedProviderPlanCommand}" IsEnabled="{Binding CanRollbackApprovedProviderPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Restore the captured before-state through the guarded provider service after separate approval."/>
+                                    <Button Content="Reconcile unknown result" Command="{Binding ReconcileProviderPlanCommand}" IsEnabled="{Binding CanReconcileProviderPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Read provider state only; do not retry an operation with unknown outcome."/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
                         <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SuccessBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding SimulationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding VerificationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>

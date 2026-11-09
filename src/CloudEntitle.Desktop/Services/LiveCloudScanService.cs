@@ -1,5 +1,6 @@
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Application.Services;
+using CloudEntitle.AccessPath.Models;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.Desktop.ViewModels;
@@ -81,6 +82,7 @@ public sealed record LiveCloudScanResult(
     public IReadOnlyList<ResourceSecuritySignal> ResourceSecuritySignals { get; init; } = Array.Empty<ResourceSecuritySignal>();
     public IReadOnlyList<ResourceSecurityEvidenceCoverage> ResourceSecurityCoverage { get; init; } = Array.Empty<ResourceSecurityEvidenceCoverage>();
     public IReadOnlyList<DomainAccessPath> ModeledAccessPaths { get; init; } = Array.Empty<DomainAccessPath>();
+    public AttackGraph? AttackGraph { get; init; }
     public IReadOnlyList<RiskFindingModel> ResourceRiskFindings { get; init; } = Array.Empty<RiskFindingModel>();
     public IReadOnlyList<string> RiskGraphDiagnostics { get; init; } = Array.Empty<string>();
     public PostureTrendRecord? PostureTrend { get; init; }
@@ -696,7 +698,8 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             ResourceSecuritySignals = resourceSecuritySignals,
             ResourceSecurityCoverage = resourceSecurityCoverage,
             ModeledAccessPaths = graphResult.AccessPaths,
-            ResourceRiskFindings = graphResult.Findings
+            ResourceRiskFindings = graphResult.Findings,
+            AttackGraph = graphResult.AttackGraph
         };
         var postureAnalysis = _postureHistoryService.Analyze(previous, historyEntry);
         var notifications = (previous?.PendingNotifications ?? Array.Empty<PostureChangeRecord>())
@@ -739,6 +742,7 @@ public sealed class LiveCloudScanService : ILiveCloudScanService
             ResourceSecurityCoverage = resourceSecurityCoverage,
             ModeledAccessPaths = graphResult.AccessPaths,
             ResourceRiskFindings = graphResult.Findings,
+            AttackGraph = graphResult.AttackGraph,
             RiskGraphDiagnostics = graphResult.Diagnostics,
             PostureChanges = postureAnalysis.Changes,
             PostureTrend = postureAnalysis.Trend,

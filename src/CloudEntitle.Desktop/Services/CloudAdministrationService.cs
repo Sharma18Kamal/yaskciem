@@ -48,6 +48,33 @@ public sealed class CloudAdministrationService(
     public Task<CloudAdministrationPlan> RollbackAsync(Guid planId, bool dependenciesReviewed, CancellationToken token = default)
         => ExecuteAsync(planId, dependenciesReviewed, true, token);
 
+    public async Task<CloudAdministrationPlan> VerifyAsync(Guid planId, CancellationToken token = default)
+    {
+        await _gate.WaitAsync(token);
+        try
+        {
+            var plan = GetPlan(planId);
+            if (plan.Status is not ("Applied" or "Verified" or "VerificationFailed"))
+                throw new InvalidOperationException("Only a previously applied plan can be verified.");
+            await AuthorizeSameAsync(plan.Request, plan.ActorId, plan.OrganizationId, token);
+            var identity = await VerifyAsync(plan.Request, token);
+            CloudAccountVerifier.RequireSameIdentity(plan.CloudIdentity, identity);
+            var observed = await ReadAsync(plan.Request, identity, token);
+            var verified = Equivalent(observed, Parse(plan.AfterJson));
+            plan = plan with
+            {
+                Status = verified ? "Verified" : "VerificationFailed",
+                Notice = verified
+                    ? "A fresh provider read confirms the proposed state."
+                    : "A fresh provider read does not match the proposed state. Reconcile and investigate; do not retry automatically."
+            };
+            await journal.AppendAsync(plan, plan.Status, token);
+            _plans[planId] = plan;
+            return plan;
+        }
+        finally { _gate.Release(); }
+    }
+
     private async Task<CloudAdministrationPlan> ExecuteAsync(Guid id, bool reviewed, bool rollback, CancellationToken token)
     {
         if (!reviewed) throw new InvalidOperationException("Explicit approval and operational dependency/break-glass review are required.");
@@ -55,7 +82,7 @@ public sealed class CloudAdministrationService(
         try
         {
             var plan = GetPlan(id);
-            if (plan.Status != (rollback ? "Applied" : "Prepared"))
+            if (rollback ? plan.Status is not ("Applied" or "Verified") : plan.Status != "Prepared")
                 throw new InvalidOperationException("The plan is not eligible. Unknown outcomes require read-only reconciliation; do not replay.");
             if (!rollback && _clock.GetUtcNow() - plan.PreparedAtUtc > TimeSpan.FromMinutes(15))
                 throw new InvalidOperationException("Preview expired. Prepare a fresh plan before applying.");
@@ -314,6 +341,7 @@ public sealed class CloudAdministrationService(
                 allow["etag"] = before["etag"]!.DeepClone();
                 allow["version"] = ((JsonArray)allow["bindings"]!).Any(binding => binding?["condition"] is not null)
                     ? 3 : before["version"]?.DeepClone() ?? JsonValue.Create(1);
+                ValidateGcpAllowPolicyReduction(before, allow);
                 return allow;
             case CloudAdministrationOperation.GcpPutDenyPolicy:
                 var deny = Parse(r.PolicyJson);
@@ -326,6 +354,73 @@ public sealed class CloudAdministrationService(
                 return new JsonObject { ["attachmentPoint"] = before["attachmentPoint"]!.DeepClone() };
             default: throw new NotSupportedException();
         }
+    }
+
+    private static void ValidateGcpAllowPolicyReduction(JsonObject before, JsonObject proposed)
+    {
+        var existingBindings = before["bindings"] as JsonArray
+            ?? throw new InvalidOperationException("Current GCP IAM policy has no valid bindings array.");
+        var proposedBindings = proposed["bindings"] as JsonArray
+            ?? throw new ArgumentException("Proposed GCP IAM policy needs a bindings array.");
+
+        if (proposedBindings.Any(binding => binding is not JsonObject))
+            throw new ArgumentException("Every proposed GCP binding must be a JSON object.");
+
+        var proposedKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var binding in proposedBindings.Cast<JsonObject>())
+        {
+            var role = binding["role"]?.GetValue<string>();
+            var members = binding["members"] as JsonArray;
+            if (string.IsNullOrWhiteSpace(role) || members is null)
+                throw new ArgumentException("Every proposed GCP binding needs a role and member list.");
+            var bindingKey = $"{role}\n{binding["condition"]?.ToJsonString() ?? "(unconditional)"}";
+            if (!proposedKeys.Add(bindingKey))
+                throw new ArgumentException("Proposed GCP policy cannot contain duplicate role/condition bindings.");
+
+            var matchingBindings = existingBindings.OfType<JsonObject>().Where(existing =>
+                string.Equals(existing["role"]?.GetValue<string>(), role, StringComparison.Ordinal)
+                && JsonNode.DeepEquals(existing["condition"], binding["condition"])).ToArray();
+            if (matchingBindings.Length == 0)
+                throw new ArgumentException("GCP allow-policy changes may only remove existing role bindings or members; new roles and conditions are blocked.");
+            var existingMembers = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var existing in matchingBindings)
+            {
+                if (existing["members"] is not JsonArray existingMemberList)
+                    throw new InvalidOperationException("Current GCP IAM binding has no valid member list.");
+                foreach (var existingMember in existingMemberList)
+                {
+                    if (existingMember?.GetValue<string>() is not { } value)
+                        throw new InvalidOperationException("Current GCP IAM binding contains an invalid member.");
+                    existingMembers.Add(value);
+                }
+            }
+            if (members.Any(member => member?.GetValue<string>() is not { } value || !existingMembers.Contains(value)))
+                throw new ArgumentException("GCP allow-policy changes may not add members to existing roles.");
+        }
+
+        var beforeMetadata = (JsonObject)before.DeepClone();
+        beforeMetadata.Remove("bindings");
+        beforeMetadata.Remove("etag");
+        beforeMetadata.Remove("version");
+        var proposedMetadata = (JsonObject)proposed.DeepClone();
+        proposedMetadata.Remove("bindings");
+        proposedMetadata.Remove("etag");
+        proposedMetadata.Remove("version");
+        if (!JsonNode.DeepEquals(beforeMetadata, proposedMetadata))
+            throw new ArgumentException("GCP allow-policy updates may not modify fields other than bindings, etag, and version.");
+
+        var removed = existingBindings.Count != proposedBindings.Count
+            || existingBindings.OfType<JsonObject>().Any(existing =>
+            {
+                var matching = proposedBindings.OfType<JsonObject>().FirstOrDefault(candidate =>
+                    string.Equals(candidate["role"]?.GetValue<string>(), existing["role"]?.GetValue<string>(), StringComparison.Ordinal)
+                    && JsonNode.DeepEquals(candidate["condition"], existing["condition"]));
+                var oldMembers = existing["members"] as JsonArray ?? new JsonArray();
+                var newMembers = matching?["members"] as JsonArray ?? new JsonArray();
+                return oldMembers.Any(member => !newMembers.Any(candidate => JsonNode.DeepEquals(member, candidate)));
+            });
+        if (!removed)
+            throw new ArgumentException("GCP allow-policy updates in this workflow must remove at least one existing binding or member.");
     }
 
     private static JsonObject AzureRole(JsonObject properties, CloudAdministrationRequest r)

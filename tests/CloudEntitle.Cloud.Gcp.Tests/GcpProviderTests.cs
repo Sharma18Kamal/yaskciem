@@ -1,6 +1,7 @@
 using CloudEntitle.Cloud.Gcp;
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain;
+using CloudEntitle.Cloud.Gcp.Services;
 using Xunit;
 
 namespace CloudEntitle.Cloud.Gcp.Tests;
@@ -47,6 +48,10 @@ public class GcpProviderTests
         Assert.Contains(result.Bindings, binding => binding.ConditionExpression != null);
         Assert.Contains(result.Bindings, binding => binding.IsInherited && binding.Scope == "folders/456");
         Assert.Contains(result.Entitlements, entitlement => entitlement.AssignmentType == AssignmentType.Inherited && entitlement.Scope == "folders/456");
+        var serviceAccount = Assert.Single(result.Principals,
+            principal => principal.Email == "demo-sa@demo-production.iam.gserviceaccount.com");
+        Assert.Equal("Demo Service Account", serviceAccount.Name);
+        Assert.NotEmpty(serviceAccount.IdentityTrusts);
     }
 
     [Fact]
@@ -75,6 +80,42 @@ public class GcpProviderTests
         Assert.Equal(DateTime.Parse("2026-01-15T00:00:00Z").ToUniversalTime(), serviceAccount.CredentialLastRotatedAtUtc);
         Assert.Equal(DateTime.Parse("2027-01-15T00:00:00Z").ToUniversalTime(), serviceAccount.CredentialExpiresAtUtc);
         Assert.Contains("user-managed", serviceAccount.CredentialEvidenceSource, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GcpProvider_ShouldDiscoverServiceAccountImpersonationTrustAndConditions()
+    {
+        var provider = new GcpProvider(new FakeGcloudRunner(), useLiveDiscovery: true);
+        var account = Assert.Single(await provider.DiscoverAccountsAsync());
+
+        var serviceAccount = Assert.Single(await provider.DiscoverServiceAccountsAsync(account.Id));
+
+        Assert.True(serviceAccount.FederationInventoryComplete);
+        var internalTrust = Assert.Single(serviceAccount.IdentityTrusts, trust => trust.TrustedPrincipal == "user:demo@example.invalid");
+        Assert.Equal("GCP service account impersonation", internalTrust.RelationshipType);
+        Assert.Equal("Potential", internalTrust.Status);
+        var externalTrust = Assert.Single(serviceAccount.IdentityTrusts, trust => trust.TrustedPrincipal.StartsWith("principalSet://", StringComparison.Ordinal));
+        Assert.Equal("Satisfied", externalTrust.ConditionState);
+        Assert.True(externalTrust.IsExternalSource);
+        Assert.True(externalTrust.IsInitialAccessPoint);
+        Assert.Contains(serviceAccount.IdentityTrusts, trust => trust.TrustedPrincipal == "user:custom@example.invalid"
+            && trust.Source.Contains("GCP service-account IAM policy", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GcpIamTrustConditionEvaluator_HandlesResourceAndRequestTimeAndRejectsUnsupportedExpressions()
+    {
+        var time = DateTime.Parse("2026-11-09T00:00:00Z").ToUniversalTime();
+        var resource = "projects/demo/serviceAccounts/worker@example.invalid";
+
+        Assert.True(GcpIamTrustConditionEvaluator.Evaluate(
+            """resource.name == "projects/demo/serviceAccounts/worker@example.invalid" && request.time > timestamp("2026-01-01T00:00:00Z")""",
+            resource, time));
+        Assert.False(GcpIamTrustConditionEvaluator.Evaluate(
+            """resource.name == "projects/other/serviceAccounts/worker@example.invalid" """,
+            resource, time));
+        Assert.Null(GcpIamTrustConditionEvaluator.Evaluate(
+            """resource.name.startsWith("projects/demo")""", resource, time));
     }
 
     [Fact]
@@ -157,6 +198,32 @@ public class GcpProviderTests
 
         public Task<CloudCommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
+            if (arguments.Contains("roles") && arguments.Contains("describe"))
+                return Task.FromResult(new CloudCommandResult(0,
+                    "{\"includedPermissions\":[\"iam.serviceAccounts.getAccessToken\"]}", string.Empty));
+            if (arguments.Contains("get-iam-policy") && arguments.Contains("service-accounts"))
+            {
+                var resourceName = "projects/demo-production/serviceAccounts/demo-sa@demo-production.iam.gserviceaccount.com";
+                var policy = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    bindings = new object[]
+                    {
+                        new { role = "roles/iam.serviceAccountTokenCreator", members = new[] { "user:demo@example.invalid" } },
+                        new
+                        {
+                            role = "roles/iam.workloadIdentityUser",
+                            members = new[] { "principalSet://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/ci/attribute.repository/org/repo" },
+                            condition = new
+                            {
+                                title = "WorkerResourceAndTime",
+                                expression = $"resource.name == \"{resourceName}\" && request.time > timestamp(\"2026-01-01T00:00:00Z\")"
+                            }
+                        },
+                        new { role = "projects/demo-production/roles/customTokenCreator", members = new[] { "user:custom@example.invalid" } }
+                    }
+                });
+                return Task.FromResult(new CloudCommandResult(0, policy, string.Empty));
+            }
             if (arguments.Contains("search-all-iam-policies"))
             {
                 AncestorPolicySearchCalls++;

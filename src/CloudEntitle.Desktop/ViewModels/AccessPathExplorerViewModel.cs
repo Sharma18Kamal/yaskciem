@@ -2,6 +2,7 @@ using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.Desktop.Services;
+using CloudEntitle.AccessPath.Models;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
 
 namespace CloudEntitle.Desktop.ViewModels;
@@ -10,6 +11,8 @@ public sealed record AccessPathNodeRow(int Sequence, string Type, string Name, s
 public sealed record AccessPathEdgeRow(string From, string Relationship, string To, string Confidence);
 public sealed record AccessPathVisualNodeRow(int Sequence, string Type, string Name, string Evidence, string Relationship, string Confidence);
 public sealed record AccessBlastRadiusSummary(int RelatedAssignments, int RelatedRoles, int ObservedResources, string Scope, string Assessment, string Caveat);
+public sealed record AttackPathRow(string Category, string Reachability, int RiskScore, string EntryPoint, string Target, string Evidence);
+public sealed record AttackPathEdgeEvidenceRow(string Relationship, string From, string To, string Feasibility, string EvidenceSource, string EvidenceReference, string Scope, string Condition, string Details);
 
 public sealed record AccessPathExplorerRow(
     string Provider,
@@ -32,8 +35,10 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
     private IReadOnlyList<KubernetesWorkloadTrace> _workloadTraces = Array.Empty<KubernetesWorkloadTrace>();
     private IReadOnlyList<DomainAccessPath> _modeledPaths = Array.Empty<DomainAccessPath>();
     private IReadOnlyList<ResourceSecuritySignal> _resourceSignals = Array.Empty<ResourceSecuritySignal>();
+    private AttackGraph? _attackGraph;
     private string _searchText = string.Empty;
     private AccessPathExplorerRow? _selectedPath;
+    private AttackPath? _selectedAttackPath;
 
     public AccessPathExplorerViewModel(
         IDemoDataService demoData,
@@ -58,6 +63,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
         {
             if (!SetProperty(ref _searchText, value)) return;
             OnPropertyChanged(nameof(Paths));
+            OnPropertyChanged(nameof(AttackPathRows));
             OnPropertyChanged(nameof(HasResults));
         }
     }
@@ -72,6 +78,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
             OnPropertyChanged(nameof(SelectedEdges));
             OnPropertyChanged(nameof(SelectedVisualNodes));
             OnPropertyChanged(nameof(BlastRadius));
+            OnPropertyChanged(nameof(AttackPathRows));
         }
     }
 
@@ -84,6 +91,52 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
             || new[] { path.Provider, path.Principal, path.Role, path.Scope, path.PathType, path.Evidence }
                 .Any(value => value.Contains(SearchText, StringComparison.OrdinalIgnoreCase)))
         .ToArray();
+
+    public AttackGraph? AttackGraph => _attackGraph;
+    public IReadOnlyList<AttackPathRow> AttackPathRows => (_attackGraph?.Paths ?? Array.Empty<AttackPath>())
+        .Select(path => new AttackPathRow(path.Category.ToString(), path.Reachability.ToString(), path.RiskScore,
+            _attackGraph!.Nodes.FirstOrDefault(node => node.Key == path.EntryPointNodeKey)?.Name ?? path.EntryPointNodeKey,
+            _attackGraph.Nodes.FirstOrDefault(node => node.Key == path.TargetNodeKey)?.Name ?? path.TargetNodeKey,
+            path.EvidenceSummary))
+        .Where(path => string.IsNullOrWhiteSpace(SearchText)
+            || $"{path.Category} {path.Reachability} {path.EntryPoint} {path.Target} {path.Evidence}"
+                .Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+    public IReadOnlyList<AttackPathEdgeEvidenceRow> SelectedAttackPathEvidence
+    {
+        get
+        {
+            if (_attackGraph is null || _selectedAttackPath is null) return Array.Empty<AttackPathEdgeEvidenceRow>();
+            var nodes = _attackGraph.Nodes.ToDictionary(item => item.Key);
+            return _selectedAttackPath.EdgeKeys.Select(key => _attackGraph.Edges.FirstOrDefault(edge => edge.Key == key))
+                .Where(edge => edge is not null)
+                .Select(edge => new AttackPathEdgeEvidenceRow(edge!.RelationshipType,
+                    nodes.GetValueOrDefault(edge.FromNodeKey)?.Name ?? edge.FromNodeKey,
+                    nodes.GetValueOrDefault(edge.ToNodeKey)?.Name ?? edge.ToNodeKey,
+                    edge.Feasibility.ToString(), edge.EvidenceSource, edge.EvidenceReference,
+                    edge.Scope ?? "Not reported", edge.ConditionEvidence ?? "No condition evidence",
+                    edge.Details ?? string.Empty))
+                .ToArray();
+        }
+    }
+    public AttackPath? SelectedAttackPath
+    {
+        get => _selectedAttackPath;
+        set
+        {
+            if (!SetProperty(ref _selectedAttackPath, value)) return;
+            OnPropertyChanged(nameof(SelectedAttackPathEvidence));
+        }
+    }
+    public int AttackGraphNodeCount => _attackGraph?.Nodes.Count ?? 0;
+    public int AttackGraphEdgeCount => _attackGraph?.Edges.Count ?? 0;
+    public int AttackPathCount => _attackGraph?.Paths.Count ?? 0;
+    public int InitialAccessPointCount => _attackGraph?.Nodes.Count(node => node.IsInitialAccessPoint) ?? 0;
+    public int VerifiedAttackPathCount => _attackGraph?.Paths.Count(path => path.Reachability == AttackPathReachability.VerifiedReachable) ?? 0;
+    public string AttackGraphStatus => _attackGraph is null
+        ? "No attack graph is available. Run a live scan or load a scan containing identity and effective-access evidence."
+        : $"Graph evaluated {_attackGraph.EvaluatedAtUtc.ToLocalTime():g}: {AttackGraphNodeCount} nodes, {AttackGraphEdgeCount} evidence-linked edges, {AttackPathCount} paths, {VerifiedAttackPathCount} verified. {(_attackGraph.IsComplete ? "Coverage complete for the supplied inventory." : "Coverage is partial; review graph diagnostics.")}";
+    public IReadOnlyList<string> AttackGraphDiagnostics => _attackGraph?.Diagnostics ?? Array.Empty<string>();
 
     public IReadOnlyList<AccessPathNodeRow> SelectedNodes => SelectedPath?.Nodes ?? Array.Empty<AccessPathNodeRow>();
     public IReadOnlyList<AccessPathEdgeRow> SelectedEdges => SelectedPath?.Edges ?? Array.Empty<AccessPathEdgeRow>();
@@ -112,6 +165,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
                 _workloadTraces = FilterConnectedWorkloads(current.WorkloadTraces).ToArray();
                 _modeledPaths = FilterConnectedModeledPaths(current.ModeledAccessPaths).ToArray();
                 _resourceSignals = current.ResourceSecuritySignals;
+                _attackGraph = current.AttackGraph;
             }
             else if (_liveScanHistoryStore is not null)
             {
@@ -125,6 +179,7 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
                 _workloadTraces = latest is null ? Array.Empty<KubernetesWorkloadTrace>() : FilterConnectedWorkloads(latest.WorkloadTraces).ToArray();
                 _modeledPaths = latest is null ? Array.Empty<DomainAccessPath>() : FilterConnectedModeledPaths(latest.ModeledAccessPaths).ToArray();
                 _resourceSignals = latest?.ResourceSecuritySignals ?? Array.Empty<ResourceSecuritySignal>();
+                _attackGraph = latest?.AttackGraph;
             }
             else
             {
@@ -132,10 +187,21 @@ public sealed class AccessPathExplorerViewModel : WorkspaceViewModel
                 _workloadTraces = Array.Empty<KubernetesWorkloadTrace>();
                 _modeledPaths = Array.Empty<DomainAccessPath>();
                 _resourceSignals = Array.Empty<ResourceSecuritySignal>();
+                _attackGraph = null;
             }
 
             SelectedPath = Paths.FirstOrDefault();
+            SelectedAttackPath = _attackGraph?.Paths.FirstOrDefault();
             OnPropertyChanged(nameof(Paths));
+            OnPropertyChanged(nameof(AttackPathRows));
+            OnPropertyChanged(nameof(AttackGraph));
+            OnPropertyChanged(nameof(AttackGraphNodeCount));
+            OnPropertyChanged(nameof(AttackGraphEdgeCount));
+            OnPropertyChanged(nameof(AttackPathCount));
+            OnPropertyChanged(nameof(InitialAccessPointCount));
+            OnPropertyChanged(nameof(VerifiedAttackPathCount));
+            OnPropertyChanged(nameof(AttackGraphStatus));
+            OnPropertyChanged(nameof(AttackGraphDiagnostics));
             OnPropertyChanged(nameof(HasResults));
             OnPropertyChanged(nameof(ResourceSignalCount));
             OnPropertyChanged(nameof(ModeledResourcePathCount));

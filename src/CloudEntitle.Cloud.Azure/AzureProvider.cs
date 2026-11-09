@@ -254,6 +254,23 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
     private static string AzureAuditKey(string principalId, string roleId, string scope)
         => $"{principalId}|{roleId}|{scope.TrimEnd('/')}";
 
+    private static List<WorkloadFederationTrust> ParseFederatedCredentialArray(JsonElement root, string source)
+        => root.ValueKind == JsonValueKind.Array
+            ? root.EnumerateArray().Select(item => new WorkloadFederationTrust(
+                ReadString(item, "issuer") ?? string.Empty,
+                ReadString(item, "subject") ?? string.Empty,
+                item.TryGetProperty("audiences", out var audiences) && audiences.ValueKind == JsonValueKind.Array
+                    ? audiences.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String)
+                        .Select(value => value.GetString()!).ToArray()
+                    : Array.Empty<string>(),
+                source,
+                item.TryGetProperty("claimsMatchingExpression", out var expression)
+                    && expression.ValueKind == JsonValueKind.Object
+                    ? ReadString(expression, "value")
+                    : null))
+                .ToList()
+            : new List<WorkloadFederationTrust>();
+
     private static string? ReadNestedString(JsonElement element, params string[] path)
     {
         for (var index = 0; index < path.Length; index++)
@@ -312,6 +329,7 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
             });
         });
         await LoadServicePrincipalsAsync();
+        await LoadManagedIdentityFederatedCredentialsAsync();
 
         await LoadPimAssignmentsAsync(
             "active PIM assignments",
@@ -449,7 +467,9 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
 
                         if (string.IsNullOrWhiteSpace(batch[index].AppId)) continue;
                         if (responses.TryGetValue($"f{index}", out var federation) && federation.Status is >= 200 and < 300
-                            && federation.Body.ValueKind == JsonValueKind.Object && federation.Body.TryGetProperty("value", out var federationValues))
+                            && federation.Body.ValueKind == JsonValueKind.Object
+                            && !federation.Body.TryGetProperty("@odata.nextLink", out _)
+                            && federation.Body.TryGetProperty("value", out var federationValues))
                         {
                             principal.FederationTrusts = ParseFederationTrusts(federationValues);
                             principal.FederationInventoryComplete = true;
@@ -476,6 +496,124 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
 
             if (ownersFailed > 0) lock (messages) messages.Add($"Azure Entra owners unavailable for {ownersFailed} service principal(s).");
             if (federationFailed > 0) lock (messages) messages.Add($"Azure Entra federated credentials unavailable for {federationFailed} application(s).");
+        }
+
+        async Task LoadManagedIdentityFederatedCredentialsAsync()
+        {
+            var managedIdentities = principals.Where(principal => principal.IdentityType == IdentityType.ManagedIdentity).ToArray();
+            if (!_accounts.TryGetValue(accountId, out var account) || string.IsNullOrWhiteSpace(account.SubscriptionId))
+            {
+                foreach (var principal in managedIdentities) principal.FederationInventoryComplete = false;
+                messages.Add("Azure managed identity federated-credential inventory unavailable: subscription context is missing.");
+                return;
+            }
+
+            var identityResult = await RunAzAsync(new[]
+            {
+                "identity", "list", "--subscription", account.SubscriptionId, "--output", "json"
+            }, cancellationToken);
+            if (!identityResult.IsSuccess)
+            {
+                foreach (var principal in managedIdentities) principal.FederationInventoryComplete = false;
+                messages.Add($"Azure managed identity inventory unavailable: {ExtractCliErrorDetail(identityResult.StandardError)}");
+                return;
+            }
+
+            JsonDocument identityDocument;
+            try
+            {
+                identityDocument = JsonDocument.Parse(identityResult.StandardOutput);
+            }
+            catch (JsonException exception)
+            {
+                foreach (var principal in managedIdentities) principal.FederationInventoryComplete = false;
+                messages.Add($"Azure managed identity inventory returned invalid JSON: {exception.Message}");
+                return;
+            }
+
+            using (identityDocument)
+            {
+                if (identityDocument.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    foreach (var principal in managedIdentities) principal.FederationInventoryComplete = false;
+                    messages.Add("Azure managed identity inventory returned an unexpected response shape.");
+                    return;
+                }
+
+                var failed = 0;
+                foreach (var identity in identityDocument.RootElement.EnumerateArray())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var name = ReadString(identity, "name");
+                    var resourceGroup = ReadString(identity, "resourceGroup");
+                    var principalId = ReadString(identity, "principalId");
+                    if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(resourceGroup)
+                        || string.IsNullOrWhiteSpace(principalId))
+                    {
+                        failed++;
+                        continue;
+                    }
+
+                    var principal = managedIdentities.FirstOrDefault(item =>
+                        string.Equals(item.PrincipalId, principalId, StringComparison.OrdinalIgnoreCase));
+                    if (principal is null)
+                    {
+                        principal = new CloudPrincipal
+                        {
+                            Id = Guid.NewGuid(),
+                            AccountId = accountId,
+                            CloudProvider = CloudProviderType.Azure,
+                            Name = ReadString(identity, "name") ?? "Azure managed identity",
+                            PrincipalId = principalId,
+                            IdentityType = IdentityType.ManagedIdentity,
+                            IsActive = true
+                        };
+                        principals.Add(principal);
+                        managedIdentities = managedIdentities.Append(principal).ToArray();
+                    }
+
+                    var credentialResult = await RunAzAsync(new[]
+                    {
+                        "identity", "federated-credential", "list",
+                        "--identity-name", name,
+                        "--resource-group", resourceGroup,
+                        "--subscription", account.SubscriptionId,
+                        "--output", "json"
+                    }, cancellationToken);
+                    if (!credentialResult.IsSuccess)
+                    {
+                        principal.FederationInventoryComplete = false;
+                        failed++;
+                        continue;
+                    }
+
+                    try
+                    {
+                        using var credentials = JsonDocument.Parse(credentialResult.StandardOutput);
+                        if (credentials.RootElement.ValueKind != JsonValueKind.Array)
+                            throw new JsonException("Expected a JSON array.");
+                        principal.FederationTrusts = ParseFederatedCredentialArray(credentials.RootElement,
+                            "Azure managed identity federated credential");
+                        principal.FederationInventoryComplete = true;
+                        if (principal.FederationTrusts.Count > 0)
+                        {
+                            var firstTrust = principal.FederationTrusts[0];
+                            principal.FederationIssuer = firstTrust.Issuer;
+                            principal.FederationSubject = firstTrust.Subject;
+                            principal.FederationAudience = string.Join(",", firstTrust.Audiences);
+                        }
+                    }
+                    catch (JsonException exception)
+                    {
+                        principal.FederationInventoryComplete = false;
+                        failed++;
+                        messages.Add($"Azure managed identity federated credentials for {name} returned invalid JSON: {exception.Message}");
+                    }
+                }
+
+                if (failed > 0)
+                    messages.Add($"Azure managed identity federated-credential inventory is incomplete for {failed} identity or credential record(s).");
+            }
         }
 
         async Task<Dictionary<string, (int Status, JsonElement Body)>> GraphBatchAsync(IReadOnlyList<(string Id, string Url)> requests, CancellationToken token)
@@ -526,15 +664,7 @@ public class AzureProvider : ICloudProvider, IIdentityProvider, IResourceProvide
                 : null;
 
         static List<WorkloadFederationTrust> ParseFederationTrusts(JsonElement root)
-            => (root.ValueKind == JsonValueKind.Array ? root.EnumerateArray() : Enumerable.Empty<JsonElement>())
-                .Select(item => new WorkloadFederationTrust(
-                    ReadString(item, "issuer") ?? string.Empty,
-                    ReadString(item, "subject") ?? string.Empty,
-                    item.TryGetProperty("audiences", out var audiences) && audiences.ValueKind == JsonValueKind.Array
-                        ? audiences.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Select(value => value.GetString()!).ToArray()
-                        : Array.Empty<string>(),
-                    "Azure CLI federated credential"))
-                .ToList();
+            => ParseFederatedCredentialArray(root, "Azure Entra federated identity credential");
 
 
         async Task LoadDirectoryCollectionAsync(string label, string url, Action<JsonElement> map)

@@ -133,6 +133,7 @@ public sealed class RemediationPlanningTests
 
         Assert.True(RemediationPlanIntegrity.HasAuditedApproval(approved));
         Assert.False(RemediationPlanIntegrity.HasAuditedApproval(changed));
+        Assert.False(RemediationPlanIntegrity.HasAuditedApproval(approved with { WhatIfSourceSnapshotAtUtc = DateTime.UtcNow }));
     }
 
     [Fact]

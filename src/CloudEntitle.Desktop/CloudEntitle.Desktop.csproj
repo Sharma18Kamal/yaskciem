@@ -17,7 +17,9 @@
     <ProjectReference Include="..\CloudEntitle.Cloud.Aws\CloudEntitle.Cloud.Aws.csproj" />
     <ProjectReference Include="..\CloudEntitle.Cloud.Gcp\CloudEntitle.Cloud.Gcp.csproj" />
     <ProjectReference Include="..\CloudEntitle.Analytics\CloudEntitle.Analytics.csproj" />
+    <ProjectReference Include="..\CloudEntitle.AccessPath\CloudEntitle.AccessPath.csproj" />
     <ProjectReference Include="..\CloudEntitle.EffectiveAccess\CloudEntitle.EffectiveAccess.csproj" />
+    <ProjectReference Include="..\CloudEntitle.RiskEngine\CloudEntitle.RiskEngine.csproj" />
     <ProjectReference Include="..\CloudEntitle.Normalization\CloudEntitle.Normalization.csproj" />
     <ProjectReference Include="..\CloudEntitle.IdentityGovernance\CloudEntitle.IdentityGovernance.csproj" />
     <ProjectReference Include="..\CloudEntitle.Compliance\CloudEntitle.Compliance.csproj" />

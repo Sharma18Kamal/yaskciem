@@ -2366,6 +2366,138 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.ToTable("RoleAssignments");
                 });
 
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationActionRecord", b =>
+                {
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("PlanId", "Id");
+
+                    b.HasIndex("PlanId", "Position");
+
+                    b.ToTable("RemediationActions");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationApprovalRecord", b =>
+                {
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("PlanId");
+
+                    b.ToTable("RemediationApprovals");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationAuditRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlanId", "Timestamp");
+
+                    b.ToTable("RemediationAuditRecords");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationExecutionRecord", b =>
+                {
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("PlanId", "Id");
+
+                    b.ToTable("RemediationExecutions");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationPlanRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("OrganizationId", "Status");
+
+                    b.ToTable("RemediationPlans");
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationRollbackRecord", b =>
+                {
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("PlanId", "Id");
+
+                    b.HasIndex("PlanId", "Position");
+
+                    b.ToTable("RemediationRollbacks");
+                });
+
             modelBuilder.Entity("CloudEntitle.Domain.Entities.AccessPathEdge", b =>
                 {
                     b.HasOne("CloudEntitle.Domain.Entities.AccessPath", null)
@@ -2543,6 +2675,51 @@ namespace CloudEntitle.Infrastructure.Persistence.Migrations
                     b.HasOne("CloudEntitle.Domain.Entities.ToxicCombinationFinding", null)
                         .WithMany()
                         .HasForeignKey("FindingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationActionRecord", b =>
+                {
+                    b.HasOne("CloudEntitle.Infrastructure.Persistence.RemediationPlanRecord", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationApprovalRecord", b =>
+                {
+                    b.HasOne("CloudEntitle.Infrastructure.Persistence.RemediationPlanRecord", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationAuditRecord", b =>
+                {
+                    b.HasOne("CloudEntitle.Infrastructure.Persistence.RemediationPlanRecord", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationExecutionRecord", b =>
+                {
+                    b.HasOne("CloudEntitle.Infrastructure.Persistence.RemediationPlanRecord", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CloudEntitle.Infrastructure.Persistence.RemediationRollbackRecord", b =>
+                {
+                    b.HasOne("CloudEntitle.Infrastructure.Persistence.RemediationPlanRecord", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

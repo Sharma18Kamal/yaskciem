@@ -1,6 +1,7 @@
 using CloudEntitle.Application.Interfaces;
 using CloudEntitle.Desktop.Services;
 using CloudEntitle.Desktop.ViewModels;
+using CloudEntitle.AccessPath.Models;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using Xunit;
@@ -79,6 +80,45 @@ public sealed class AccessPathExplorerTests
         Assert.Equal(1, viewModel.BlastRadius.ObservedResources);
         Assert.Contains("lower bound", viewModel.BlastRadius.Caveat, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Owner", path.Role);
+    }
+
+    [Fact]
+    public async Task Explorer_ShouldLoadAttackGraphAndDisplayPathEdgeEvidenceFromHistory()
+    {
+        var sourceId = Guid.NewGuid();
+        var resourceId = Guid.NewGuid();
+        var sourceKey = "aws:source";
+        var resourceKey = "aws:resource";
+        var edge = new AttackGraphEdge("edge-1", sourceKey, resourceKey, "AuthorizedAccess",
+            CloudProvider.Aws, Guid.NewGuid(), AttackEdgeFeasibility.Potential,
+            "AWS effective access", "aws-policy-evidence-7", ConditionEvidence: "Condition unresolved");
+        var path = new AttackPath("path-1", sourceKey, resourceKey,
+            AttackPathCategory.SensitiveResourceExposure, AttackPathReachability.Potential,
+            70, [sourceKey, resourceKey], [edge.Key], "External role may access a sensitive resource.");
+        var graph = new AttackGraph("graph-1", DateTime.UtcNow,
+            [
+                new AttackGraphNode(sourceKey, AttackGraphNodeType.Identity, sourceId, CloudProvider.Aws,
+                    edge.CloudAccountId, "external-role", "arn:aws:iam::123:role/external", true),
+                new AttackGraphNode(resourceKey, AttackGraphNodeType.Resource, resourceId, CloudProvider.Aws,
+                    edge.CloudAccountId, "sensitive-store", "arn:aws:s3:::sensitive-store", IsSensitive: true)
+            ],
+            [edge], [path],
+            [new AttackPathFinding("finding-1", path.Id, path.Category, path.Reachability,
+                RiskSeverity.High, 70, "Potential sensitive resource path", "Trust remains unverified.",
+                path.EvidenceSummary, ["aws-policy-evidence-7"])],
+            [], false);
+        var entry = CreateEntry(DateTime.UtcNow, "AWS", "external-role") with { AttackGraph = graph };
+        var viewModel = new AccessPathExplorerViewModel(new EmptyDemoDataService(),
+            liveScanHistoryStore: new FixedScanHistoryStore([entry]));
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(1, viewModel.AttackPathCount);
+        Assert.Equal(0, viewModel.VerifiedAttackPathCount);
+        var evidence = Assert.Single(viewModel.SelectedAttackPathEvidence);
+        Assert.Equal("aws-policy-evidence-7", evidence.EvidenceReference);
+        Assert.Equal("Condition unresolved", evidence.Condition);
+        Assert.Contains("partial", viewModel.AttackGraphStatus, StringComparison.OrdinalIgnoreCase);
     }
 
     private static LiveScanHistoryEntry CreateEntry(DateTime completedAt, string provider, string principal)

@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace CloudEntitle.RemediationPlanning.Models;
 
-public enum RemediationPlanStatus { Draft, RequiresReview, Approved, Rejected, Simulated, DryRunCompleted, Implemented, VerificationPending, VerificationFailed, RollbackPrepared }
+public enum RemediationPlanStatus { Draft, RequiresReview, Approved, Rejected, Simulated, DryRunCompleted, Implemented, VerificationPending, VerificationFailed, RollbackPrepared, ExecutionFailed, OutcomeUnknown, RolledBack }
 public enum SimulationStatus { NotRun, Simulated, RequiresReview, Unsupported, Invalid }
 public enum AccessImpactStatus { Unknown, Preserved, PotentialAccessLoss, NoKnownImpact }
 public enum RemediationVerificationStatus { NotRun, Verified, Failed, Unavailable }
@@ -40,10 +40,17 @@ public sealed record RemediationPlan(
     public string? DryRunResultFingerprint { get; init; }
     public string? ApprovedDryRunFingerprint { get; init; }
     public RemediationSimulation? Simulation { get; init; }
+    public RemediationProviderExecutionLink? ProviderExecution { get; init; }
+    public string? WhatIfReportJson { get; init; }
+    public string? WhatIfReportFingerprint { get; init; }
+    public DateTime? WhatIfEvaluatedAtUtc { get; init; }
+    public DateTime? WhatIfSourceSnapshotAtUtc { get; init; }
+    public DateTime? RollbackPreparedAfterUtc { get; init; }
     public IReadOnlyList<RemediationChange> RollbackChanges { get; init; } = Array.Empty<RemediationChange>();
     public bool IsRollbackDraft { get; init; }
     public RemediationVerification? Verification { get; init; }
     public RemediationExecution? LastExecution { get; init; }
+    public IReadOnlyList<RemediationExecution> ExecutionHistory { get; init; } = Array.Empty<RemediationExecution>();
     public IReadOnlyList<RemediationAuditEntry> AuditTrail { get; init; } = Array.Empty<RemediationAuditEntry>();
 }
 
@@ -58,6 +65,11 @@ public static class RemediationPlanIntegrity
             plan.IsRollbackDraft,
             plan.CreatedByUserId,
             plan.OrganizationId,
+            ProviderExecution = plan.ProviderExecution,
+            plan.WhatIfReportFingerprint,
+            plan.WhatIfEvaluatedAtUtc,
+            plan.WhatIfSourceSnapshotAtUtc,
+            plan.RollbackPreparedAfterUtc,
             Recommendation = new
             {
                 plan.Recommendation.Id,
@@ -158,3 +170,15 @@ public sealed record RemediationSimulation(
     IReadOnlyList<Guid> PotentiallyLostEffectiveAccess,
     IReadOnlyList<string> Diagnostics,
     DateTime SimulatedAt);
+
+public sealed record RemediationProviderExecutionLink(
+    Guid ProviderPlanId,
+    string AccountId,
+    string Operation,
+    string CloudIdentity,
+    DateTimeOffset PreparedAtUtc,
+    string BeforeJson,
+    string AfterJson,
+    string RequestFingerprint,
+    string Status,
+    Guid PreparedByUserId);

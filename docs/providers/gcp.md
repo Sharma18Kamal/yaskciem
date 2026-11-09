@@ -8,7 +8,7 @@ The connector supports the authenticated `gcloud` path and includes a `GcpCreden
 
 ## Required Read-Only Permissions
 
-At project scope, use read-only permissions for project metadata and IAM policy inspection. Ancestor discovery requires Resource Manager permissions at the relevant project, folder, and organization scopes. Cloud Asset Inventory resource discovery requires the API to be enabled and `cloudasset.assets.searchAllResources` on each project scope. Inherited IAM discovery also requires `cloudasset.assets.searchAllIamPolicies` on each ancestor folder and organization. Project IAM change timestamps require `logging.logEntries.list` for Cloud Audit Logs. Service-account discovery requires service-account read permissions. Role permission details and audit activity require additional read-only permissions and are optional.
+At project scope, use read-only permissions for project metadata and IAM policy inspection. Service-account trust analysis also reads each service account's IAM policy and the relevant predefined/custom role definitions. Ancestor discovery requires Resource Manager permissions at the relevant project, folder, and organization scopes. Cloud Asset Inventory resource discovery requires the API to be enabled and `cloudasset.assets.searchAllResources` on each project scope. Inherited IAM discovery also requires `cloudasset.assets.searchAllIamPolicies` on each ancestor folder and organization. Project IAM change timestamps require `logging.logEntries.list` for Cloud Audit Logs. Service-account discovery requires service-account read permissions. Role permission details and audit activity require additional read-only permissions and are optional.
 
 ## Onboarding and Coverage Validation
 
@@ -26,6 +26,9 @@ Authenticate with `gcloud auth login` using a dedicated read-only identity, and 
 - IAM bindings map to `CloudPolicy`, `CloudPermission`, and `Entitlement`.
 - Permission identifiers such as `storage.objects.get` are preserved as the normalized Action.
 - IAM conditions are preserved in the policy document and permission source marker; they are not discarded.
+- Each discovered service account's IAM policy is read separately to find `roles/iam.serviceAccountTokenCreator`, `roles/iam.workloadIdentityUser`, and `roles/iam.serviceAccountOpenIdTokenCreator` grants, including explicitly named external Workload Identity Federation principals.
+- Project and organization custom roles attached to a service-account policy are inspected for service-account token permissions. If a custom-role definition cannot be read, trust coverage is marked incomplete.
+- A bounded IAM CEL evaluator handles resource name/type, request time, boolean composition, comparisons, and membership. Unsupported expressions remain unknown; conditions that evaluate false are retained as denied trust evidence.
 - Direct project bindings and organization/folder policies returned by Cloud Asset Inventory are normalized into effective access. Inherited rows preserve the exact policy attachment scope and are labeled `Inherited`; hierarchy membership alone is not treated as proof of a grant.
 - If an ancestor policy query is denied or unavailable, direct and any successfully discovered ancestor bindings are retained and the incomplete inherited-policy lookup is reported.
 
@@ -39,7 +42,7 @@ Cloud Audit Logs are optional. Project `SetIamPolicy` events from the last 90 da
 
 ## Read-Only Guarantee
 
-The connector only invokes authentication, project and ancestor listing, IAM policy, service-account listing, Cloud Asset Inventory search, and Cloud Logging read commands. It does not create or modify projects, folders, organizations, service accounts, roles, credentials, policies, or bindings.
+The connector only invokes authentication, project and ancestor listing, project/service-account IAM policy reads, role-definition reads, service-account listing, Cloud Asset Inventory search, and Cloud Logging read commands. It does not create or modify projects, folders, organizations, service accounts, roles, credentials, policies, or bindings. Organization-level IAM deny policies and principal access boundary constraints are not evaluated by the service-account trust graph, so those paths remain unverified.
 
 ## Troubleshooting
 

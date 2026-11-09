@@ -28,10 +28,79 @@ public sealed class WhatIfPermissionSimulatorTests
         Assert.Equal(100m, report.ModeledExposureReductionPercent);
         Assert.Equal(1, report.ModeledLostPairs);
         Assert.Equal(64, report.InputSha256.Length);
+        Assert.Equal(fixture.Input.SourceSnapshotAtUtc, report.SourceSnapshotAtUtc);
         Assert.Equal(64, Assert.Single(row.RemovedOrigins).EvidenceSha256.Length);
         Assert.False(report.MutatesCloud);
         Assert.False(report.IsProviderVerified);
         Assert.Equal(original, JsonSerializer.Serialize(fixture.Input));
+    }
+
+    [Theory]
+    [InlineData(CloudProvider.Azure, "Microsoft.Storage/storageAccounts/read")]
+    [InlineData(CloudProvider.Aws, "s3:GetBucketLocation")]
+    [InlineData(CloudProvider.Gcp, "storage.buckets.get")]
+    public async Task AddExactPermission_IsIsolatedAndReportsHypotheticalGrant(CloudProvider provider, string action)
+    {
+        var fixture = Create(provider, Action(provider));
+        var original = JsonSerializer.Serialize(fixture.Input);
+        var report = await Simulator().SimulateAsync(fixture.Input, fixture.Change with
+        {
+            Operation = WhatIfOperation.Add,
+            Action = action
+        });
+        var row = Assert.Single(report.AccessChanges);
+        Assert.Equal(AccessDecision.NotApplicable, row.Before);
+        Assert.Equal(AccessDecision.Allow, row.After);
+        Assert.Equal(WhatIfImpact.ModeledAccessAdded, row.Impact);
+        Assert.Single(row.AddedOrigins);
+        Assert.Empty(row.RemovedOrigins);
+        Assert.False(report.MutatesCloud);
+        Assert.False(report.IsProviderVerified);
+        Assert.Contains("No activity/usage evidence", report.OperationalImpactAssessment);
+        Assert.Equal(original, JsonSerializer.Serialize(fixture.Input));
+    }
+
+    [Theory]
+    [InlineData(CloudProvider.Azure, "Microsoft.Storage/storageAccounts/read")]
+    [InlineData(CloudProvider.Aws, "s3:GetBucketLocation")]
+    [InlineData(CloudProvider.Gcp, "storage.buckets.get")]
+    public async Task ReplaceExactPermission_ReportsOldAndNewActionsWithoutMutatingInput(CloudProvider provider, string replacement)
+    {
+        var fixture = Create(provider, Action(provider));
+        var original = JsonSerializer.Serialize(fixture.Input);
+        var report = await Simulator().SimulateAsync(fixture.Input, fixture.Change with
+        {
+            Operation = WhatIfOperation.Replace,
+            ReplacementAction = replacement
+        });
+        Assert.Equal(2, report.AccessChanges.Count);
+        var removed = Assert.Single(report.AccessChanges, item => item.Action == Action(provider));
+        var added = Assert.Single(report.AccessChanges, item => item.Action == replacement);
+        Assert.Equal(WhatIfImpact.ModeledAccessLost, removed.Impact);
+        Assert.Equal(WhatIfImpact.ModeledAccessAdded, added.Impact);
+        Assert.Single(removed.RemovedOrigins);
+        Assert.Single(added.AddedOrigins);
+        Assert.False(report.MutatesCloud);
+        Assert.Equal(original, JsonSerializer.Serialize(fixture.Input));
+    }
+
+    [Fact]
+    public async Task DirectIdentityAdditionRequiresOneInventoriedResourceAndStaysScoped()
+    {
+        var fixture = Create(CloudProvider.Aws, Action(CloudProvider.Aws));
+        var resource = Assert.Single(fixture.Input.Evaluation.Resources);
+        var report = await Simulator().SimulateAsync(fixture.Input, fixture.Change with
+        {
+            TargetKind = WhatIfTargetKind.Identity,
+            TargetId = fixture.PrincipalId,
+            Operation = WhatIfOperation.Add,
+            Action = "s3:GetBucketLocation",
+            ResourceScope = resource.ResourceId
+        });
+        var row = Assert.Single(report.AccessChanges);
+        Assert.Equal(resource.Id, row.ResourceId);
+        Assert.Equal(WhatIfImpact.ModeledAccessAdded, row.Impact);
+        Assert.Equal(resource.ResourceId, Assert.Single(row.AddedOrigins).Scope);
     }
 
     [Theory]
@@ -359,7 +428,8 @@ public sealed class WhatIfPermissionSimulatorTests
         var normalized = new NormalizationResult(new[] { principal }, new[] { role }, Array.Empty<CloudPolicy>(),
             new[] { permission }, new[] { grant }, Array.Empty<NormalizationWarning>(), Array.Empty<string>(), new(1, 1, 0, 0, 0));
         return new(new(new(normalized, new[] { resource }, Array.Empty<GroupMembership>(), EvaluationTime: now),
-            "Offline test", Array.Empty<string>()), new(provider, account, WhatIfTargetKind.Role, role.Id, action), principal.Id);
+            "Offline test", Array.Empty<string>()) { SourceSnapshotAtUtc = now.AddMinutes(-2) },
+            new(provider, account, WhatIfTargetKind.Role, role.Id, action), principal.Id);
     }
     private sealed record Fixture(WhatIfInput Input, WhatIfChange Change, Guid PrincipalId);
 }

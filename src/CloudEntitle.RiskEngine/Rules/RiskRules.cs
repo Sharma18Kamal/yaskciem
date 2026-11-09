@@ -4,6 +4,7 @@ using CloudEntitle.Domain.ValueObjects;
 using CloudEntitle.RiskEngine.Abstractions;
 using CloudEntitle.RiskEngine.Models;
 using CloudEntitle.Normalization.Models;
+using CloudEntitle.AccessPath.Models;
 using DomainEffectiveAccess = CloudEntitle.Domain.Entities.EffectiveAccess;
 using DomainAccessPath = CloudEntitle.Domain.Entities.AccessPath;
 

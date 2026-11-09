@@ -51,10 +51,51 @@ public class CloudEntitleDbContext : DbContext
     public DbSet<RecommendationModel> NormalizedRecommendations => Set<RecommendationModel>();
     public DbSet<Scan> Scans => Set<Scan>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<RemediationPlanRecord> RemediationPlans => Set<RemediationPlanRecord>();
+    public DbSet<RemediationActionRecord> RemediationActions => Set<RemediationActionRecord>();
+    public DbSet<RemediationApprovalRecord> RemediationApprovals => Set<RemediationApprovalRecord>();
+    public DbSet<RemediationExecutionRecord> RemediationExecutions => Set<RemediationExecutionRecord>();
+    public DbSet<RemediationRollbackRecord> RemediationRollbacks => Set<RemediationRollbackRecord>();
+    public DbSet<RemediationAuditRecord> RemediationAuditRecords => Set<RemediationAuditRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<RemediationPlanRecord>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.OrganizationId, x.Status });
+            entity.HasIndex(x => x.CreatedAt);
+        });
+        modelBuilder.Entity<RemediationActionRecord>(entity =>
+        {
+            entity.HasKey(x => new { x.PlanId, x.Id });
+            entity.HasIndex(x => new { x.PlanId, x.Position });
+            entity.HasOne<RemediationPlanRecord>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<RemediationApprovalRecord>(entity =>
+        {
+            entity.HasKey(x => x.PlanId);
+            entity.HasOne<RemediationPlanRecord>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<RemediationExecutionRecord>(entity =>
+        {
+            entity.HasKey(x => new { x.PlanId, x.Id });
+            entity.HasOne<RemediationPlanRecord>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<RemediationRollbackRecord>(entity =>
+        {
+            entity.HasKey(x => new { x.PlanId, x.Id });
+            entity.HasIndex(x => new { x.PlanId, x.Position });
+            entity.HasOne<RemediationPlanRecord>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<RemediationAuditRecord>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.PlanId, x.Timestamp });
+            entity.HasOne<RemediationPlanRecord>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         modelBuilder.Entity<CloudAccount>(entity =>
         {

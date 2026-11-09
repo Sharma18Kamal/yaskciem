@@ -7,28 +7,47 @@
             <ComboBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}" DisplayMemberPath="Name" MinWidth="180" Margin="0,0,8,8" ToolTip="Local inventory only; no live refresh"/>
             <Button Content="Load saved inventory" Command="{Binding LoadSavedCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8"/>
             <Button Content="Import offline JSON" Command="{Binding ImportCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Schema 1.0 authorization bundle; native export projections with explicit resource and identity mapping"/>
+            <TextBlock Text="{Binding ProviderLabel}" VerticalAlignment="Center" Margin="8,0,0,8"/>
         </WrapPanel>
-        <TextBlock Text="Remove one exact permission from one role or policy" Style="{StaticResource CardLabel}"/>
-        <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding SelectedTarget}" DisplayMemberPath="DisplayName" Margin="0,8,0,8" ToolTip="All modeled assignments of this role/policy are included"/>
-        <TextBox Text="{Binding Action, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" ToolTip="Exact Azure action, AWS action or GCP permission. Wildcard target actions are not accepted."/>
+        <TextBlock Text="Policy change scenario" Style="{StaticResource CardLabel}"/>
         <WrapPanel>
-            <Button Content="Simulate removal" Command="{Binding SimulateCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"/>
+            <ComboBox ItemsSource="{Binding Operations}" SelectedItem="{Binding SelectedOperation}" MinWidth="120" Margin="0,8,8,8"/>
+            <ComboBox ItemsSource="{Binding TargetKinds}" SelectedItem="{Binding SelectedTargetKind}" MinWidth="120" Margin="0,8,8,8"/>
+            <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding SelectedTarget}" DisplayMemberPath="DisplayName" MinWidth="200" Margin="0,8,8,8" ToolTip="Role/policy edits affect every inventoried assignment of that target"/>
+            <ComboBox ItemsSource="{Binding Identities}" SelectedItem="{Binding SelectedIdentity}" DisplayMemberPath="Name" MinWidth="180" Margin="0,8,8,8" ToolTip="Used for direct identity changes; role/policy changes include every affected identity"/>
+        </WrapPanel>
+        <ComboBox ItemsSource="{Binding AvailableActions}" Text="{Binding Action, UpdateSourceTrigger=PropertyChanged}" IsEditable="True" StaysOpenOnEdit="True" Margin="0,0,0,8" ToolTip="Select an inventoried action or enter an exact Azure action, AWS action or GCP permission. For replacement, this is the current action."/>
+        <TextBox Text="{Binding ReplacementAction, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" ToolTip="Exact new action; required only for Replace."/>
+        <ComboBox ItemsSource="{Binding ResourceScopes}" Text="{Binding ResourceScope, UpdateSourceTrigger=PropertyChanged}" IsEditable="True" StaysOpenOnEdit="True" Margin="0,0,0,8" ToolTip="Optional exact role/policy assignment scope filter; required for a direct identity grant and must identify one inventoried resource."/>
+        <WrapPanel>
+            <Button Content="Run isolated simulation" Command="{Binding SimulateCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"/>
             <Button Content="Export simulation report" Command="{Binding ExportCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8"/>
         </WrapPanel>
         <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,8"/>
         <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Margin="0,0,0,8"/>
         <TextBlock Text="{Binding Report.RiskExplanation}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+        <TextBlock Text="{Binding SecuritySummary}" TextWrapping="Wrap" Margin="0,0,0,8" FontWeight="SemiBold"/>
+        <TextBlock Text="{Binding OperationalImpact}" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{StaticResource MutedBrush}"/>
+        <TextBlock Text="Added attack paths" Style="{StaticResource CardLabel}" Margin="0,8,0,4"/>
+        <ItemsControl ItemsSource="{Binding Report.SecurityImpact.AddedAttackPaths}">
+            <ItemsControl.ItemTemplate><DataTemplate><TextBlock TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Category}"/><Run Text=" — "/><Run Text="{Binding Reachability}"/><Run Text=" — "/><Run Text="{Binding Evidence}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Text="Removed attack paths" Style="{StaticResource CardLabel}" Margin="0,8,0,4"/>
+        <ItemsControl ItemsSource="{Binding Report.SecurityImpact.RemovedAttackPaths}">
+            <ItemsControl.ItemTemplate><DataTemplate><TextBlock TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Category}"/><Run Text=" — "/><Run Text="{Binding Reachability}"/><Run Text=" — "/><Run Text="{Binding Evidence}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+        </ItemsControl>
         <DataGrid ItemsSource="{Binding AccessChanges}" AutoGenerateColumns="False" IsReadOnly="True"
                   MaxHeight="420" RowDetailsVisibilityMode="VisibleWhenSelected" ToolTip="Select a row for origin and alternative evidence. NotApplicable is no modeled grant, not provider denial.">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Identity" Binding="{Binding Principal}" Width="150"/>
                 <DataGridTextColumn Header="Resource" Binding="{Binding Resource}" Width="*"/>
+                <DataGridTextColumn Header="Action" Binding="{Binding Action}" Width="190"/>
                 <DataGridCheckBoxColumn Header="Inherited" Binding="{Binding IsInherited}" Width="80"/>
                 <DataGridTextColumn Header="Before" Binding="{Binding Before}" Width="90"/>
                 <DataGridTextColumn Header="Before status" Binding="{Binding BeforeStatus}" Width="125"/>
                 <DataGridTextColumn Header="After" Binding="{Binding After}" Width="100"/>
                 <DataGridTextColumn Header="After status" Binding="{Binding AfterStatus}" Width="125"/>
-                <DataGridTextColumn Header="Impact" Binding="{Binding Impact}" Width="160"/>
+                <DataGridTextColumn Header="Impact" Binding="{Binding Impact}" Width="180"/>
             </DataGrid.Columns>
             <DataGrid.RowDetailsTemplate>
                 <DataTemplate>
@@ -44,6 +63,12 @@
                                         <TextBlock Text="{Binding OriginalStatement}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="Added hypothetical contribution (not a provider policy)" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <ItemsControl ItemsSource="{Binding AddedOrigins}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate><StackPanel Margin="0,4"><TextBlock Text="{Binding SourceId}"/><TextBlock Text="{Binding Scope}"/><TextBlock Text="{Binding EvidenceSha256}"/></StackPanel></DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <TextBlock Text="Alternative grants of the SAME action (distinct action equivalence is not assumed)" FontWeight="Bold" Margin="0,8,0,0"/>
@@ -74,7 +99,7 @@
                 </DataTemplate>
             </DataGrid.RowDetailsTemplate>
         </DataGrid>
-        <ItemsControl ItemsSource="{Binding Report.Limitations}" Margin="0,12,0,0">
+        <ItemsControl ItemsSource="{Binding Path=Report.Limitations}" Margin="0,12,0,0">
             <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/></DataTemplate></ItemsControl.ItemTemplate>
         </ItemsControl>
     </StackPanel>
