@@ -2,7 +2,9 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-if (-not $IsWindows) { throw 'The local server uses Windows Credential Manager and must run as the setup user.' }
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    throw 'The local server requires Windows. Run it under the Windows user who configured its Credential Manager secrets.'
+}
 $settings = Join-Path $env:LOCALAPPDATA 'YASK-CIEM\LocalLicenseServer\appsettings.Local.json'
 if (-not (Test-Path -LiteralPath $settings -PathType Leaf)) {
     throw 'Run configure-local-license-server.ps1 first under this Windows user.'

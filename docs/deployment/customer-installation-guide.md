@@ -128,6 +128,11 @@ sign-in errors.
    .\scripts\start-local-license-server.ps1
    ```
 
+   The startup launcher supports Windows PowerShell 5.1 and PowerShell 7.
+   Initial laptop configuration still requires PowerShell 7. Start the server
+   under the same Windows user who performed setup so its protected credentials
+   are available. Do not start a second instance if port 7443 is already in use.
+
 The test URL is `https://localhost:7443/`. Other PCs cannot reach this through
 their own `localhost`. This path is not a production hosting configuration.
 Missing archive configuration may leave readiness at 503 even if licensing
