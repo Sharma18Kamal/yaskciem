@@ -7,6 +7,27 @@ namespace CloudEntitle.Normalization.Tests;
 
 public sealed class NormalizationTests
 {
+    [Theory]
+    [InlineData(CloudProvider.Azure)]
+    [InlineData(CloudProvider.Aws)]
+    [InlineData(CloudProvider.Gcp)]
+    public async Task ConditionalAllowAndDeny_ShouldNotDeduplicateEachOther(CloudProvider provider)
+    {
+        var source = CreateSource(provider, AccessType.Allow, AssignmentType.Policy, "read", "*",
+            "SnapshotExplicitDeny", "allow", "Policy", "environment == production");
+        var allow = source.AuthorizationRecords[0];
+        var deny = allow with { AccessType = AccessType.Deny, SourceId = "deny" };
+        var service = new EntitlementNormalizationService();
+
+        var result = await service.NormalizeAsync(source with { AuthorizationRecords = new[] { allow, deny, allow, deny } });
+        var reversed = await service.NormalizeAsync(source with { AuthorizationRecords = new[] { deny, allow } });
+
+        Assert.Equal(2, result.Entitlements.Count);
+        Assert.Contains(result.Entitlements, item => item.ConditionalEffect == AccessType.Allow && item.Evidence.SourceId == "allow");
+        Assert.Contains(result.Entitlements, item => item.ConditionalEffect == AccessType.Deny && item.Evidence.SourceId == "deny");
+        Assert.Equal(result.Entitlements.Select(item => item.Id).OrderBy(id => id), reversed.Entitlements.Select(item => item.Id).OrderBy(id => id));
+    }
+
     [Fact]
     public async Task AzureNotActions_ShouldRemainRoleScopedExclusionAndTraceable()
     {

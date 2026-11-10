@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CloudEntitle.Domain;
 using CloudEntitle.Domain.Entities;
 using CloudEntitle.EffectiveAccess.Abstractions;
@@ -135,10 +136,32 @@ public sealed class EffectiveAccessEngine : IEffectiveAccessEngine
             if (entitlement.PolicyId is Guid policyId) steps.Add(new("Policy", request.Normalized.Policies.FirstOrDefault(policy => policy.Id == policyId)?.Name ?? policyId.ToString(), entitlement.Evidence.SourceId, entitlement.Evidence.SourceType));
             var permission = request.Normalized.Permissions.FirstOrDefault(item => item.Id == entitlement.PermissionId);
             steps.Add(new("Permission", permission?.Action ?? permission?.Name ?? entitlement.PermissionId.ToString(), entitlement.Evidence.SourceId, entitlement.IsExclusion ? "Azure role exclusion" : entitlement.AccessType.ToString()));
-            if (entitlement.Condition is not null) steps.Add(new("Condition", entitlement.Condition.Expression ?? entitlement.Condition.Title ?? "Condition", entitlement.Evidence.SourceId, "Requires provider runtime context"));
+            string? conditionDetails = null;
+            bool? conditionMatched = null;
+            if (ProviderAccessPolicy.HasCondition(entitlement))
+            {
+                if (ProviderAccessPolicy.TryEvaluateCondition(context.Provider, entitlement.Condition, context.RuntimeConditionContext, out var matched))
+                {
+                    conditionMatched = matched;
+                    conditionDetails = matched ? "Condition matched supplied model context" : "Condition did not match supplied model context";
+                }
+                else conditionDetails = "Unresolved: missing context or unsupported expression";
+                steps.Add(new("Condition", entitlement.Condition?.Expression ?? entitlement.Condition?.Title ?? "Condition", entitlement.Evidence.SourceId, conditionDetails));
+            }
             steps.Add(new("Scope", entitlement.Scope.OriginalScope, entitlement.Evidence.SourceId, entitlement.IsInherited ? "Inherited" : "Assigned scope"));
             steps.Add(new("Resource", context.Resource?.Name ?? context.ResourceId.ToString(), context.Resource?.ResourceId, permission?.Action));
             var decision = entitlement.IsExclusion ? "Excluded" : entitlement.AccessType.ToString();
+            if (conditionDetails is not null)
+            {
+                if (conditionMatched is null) decision = "Conditional";
+                else if (!conditionMatched.Value) decision = "NotApplicable";
+                else if (!entitlement.IsExclusion)
+                {
+                    decision = ProviderAccessPolicy.ConditionalEffect(entitlement) == AccessType.Deny
+                        ? ProviderAccessPolicy.IsExplicitDeny(context.Provider, entitlement) ? "Deny" : "Unknown"
+                        : "Allow";
+                }
+            }
             return new AccessExplanationPath(entitlement.Evidence.SourceId, decision, steps);
         }).ToArray();
     }
@@ -262,15 +285,15 @@ internal static class ProviderAccessPolicy
         var applicable = context.ApplicableEntitlements;
         var diagnostics = new List<AccessEvaluationDiagnostic>();
         if (context.HasIncompleteNormalization) diagnostics.Add(new("NORMALIZATION_INCOMPLETE", "Some provider records failed normalization; allow results are partial.", null));
-        var exclusions = provider == CloudProvider.Azure ? applicable.Where(item => item.IsExclusion).ToArray() : Array.Empty<NormalizedEntitlement>();
-        var unrecognizedDenies = applicable.Where(item => item.AccessType == NormalizedAccessType.Deny && !item.IsExclusion && !IsExplicitDeny(provider, item)).ToArray();
+        var exclusions = provider == CloudProvider.Azure ? applicable.Where(item => item.IsExclusion && !HasCondition(item)).ToArray() : Array.Empty<NormalizedEntitlement>();
+        var unrecognizedDenies = applicable.Where(item => item.AccessType == NormalizedAccessType.Deny && !HasCondition(item) && !item.IsExclusion && !IsExplicitDeny(provider, item)).ToArray();
         if (unrecognizedDenies.Length > 0)
         {
             diagnostics.Add(new("DENY_SEMANTICS_UNSUPPORTED", $"One or more {provider} deny records do not identify a provider-native deny policy and were not treated as a global deny.", unrecognizedDenies[0].Evidence.SourceId));
         }
 
-        var denies = applicable.Where(item => item.AccessType == NormalizedAccessType.Deny && !item.IsExclusion && IsExplicitDeny(provider, item)).ToArray();
-        var conditional = applicable.Where(item => item.IsConditional || item.AccessType == NormalizedAccessType.Conditional).ToArray();
+        var denies = applicable.Where(item => item.AccessType == NormalizedAccessType.Deny && !HasCondition(item) && !item.IsExclusion && IsExplicitDeny(provider, item)).ToArray();
+        var conditional = applicable.Where(HasCondition).ToArray();
         var resolvedConditionalAllows = new List<NormalizedEntitlement>();
         var resolvedConditionalDenies = new List<NormalizedEntitlement>();
         var unresolvedConditional = new List<NormalizedEntitlement>();
@@ -281,8 +304,16 @@ internal static class ProviderAccessPolicy
                 unresolvedConditional.Add(entitlement);
                 continue;
             }
+            diagnostics.Add(new(conditionMatches ? "CONDITION_MATCHED" : "CONDITION_NOT_MATCHED",
+                conditionMatches ? "The condition matched the supplied model context." : "The condition did not match the supplied model context; this entitlement does not apply.",
+                entitlement.Evidence.SourceId));
             if (!conditionMatches) continue;
-            var effect = entitlement.ConditionalEffect ?? AccessType.Allow;
+            if (entitlement.IsExclusion)
+            {
+                exclusions = exclusions.Append(entitlement).ToArray();
+                continue;
+            }
+            var effect = ConditionalEffect(entitlement);
             if (effect == AccessType.Deny) resolvedConditionalDenies.Add(entitlement);
             else resolvedConditionalAllows.Add(entitlement);
         }
@@ -300,12 +331,13 @@ internal static class ProviderAccessPolicy
         }
         if (unresolvedConditional.Count > 0)
         {
-            diagnostics.Add(new("CONDITION_REQUIRED", "The provider condition is preserved in the access path but cannot be resolved from the supplied runtime context.", unresolvedConditional[0].Evidence.SourceId));
+            diagnostics.AddRange(unresolvedConditional.Select(item => new AccessEvaluationDiagnostic("CONDITION_REQUIRED",
+                "The condition is unresolved because runtime context is missing or the expression is unsupported; no provider-side decision is confirmed.", item.Evidence.SourceId)));
         }
 
         var unknown = applicable.Where(item => item.AccessType == NormalizedAccessType.Unknown || item.Status is NormalizationStatus.Unsupported or NormalizationStatus.Invalid or NormalizationStatus.Unknown).ToArray();
         unknown = unknown.Concat(unrecognizedDenies).Concat(conditionalDeniesWithoutProviderSemantics).ToArray();
-        var allows = applicable.Where(item => item.AccessType == NormalizedAccessType.Allow && !item.IsExclusion)
+        var allows = applicable.Where(item => item.AccessType == NormalizedAccessType.Allow && !HasCondition(item) && !item.IsExclusion)
             .Concat(resolvedConditionalAllows)
             .Where(item => !IsExcluded(provider, item, exclusions, context.Permission)).ToArray();
         if (provider == CloudProvider.Azure && exclusions.Any(item => !item.RoleId.HasValue))
@@ -329,40 +361,40 @@ internal static class ProviderAccessPolicy
             => new(decision, status, evidence.Any(item => item.PrincipalId == context.PrincipalId && item.IsDirect), evidence.Any(item => item.IsInherited), isConditional, source, evidence, evidence.Select(item => item.Evidence).ToArray(), currentDiagnostics);
     }
 
-    private static bool TryEvaluateCondition(CloudProvider provider, NormalizedCondition? condition, IReadOnlyDictionary<string, string> runtimeContext, out bool result)
+    internal static bool HasCondition(NormalizedEntitlement entitlement)
+        => entitlement.IsConditional || entitlement.AccessType == NormalizedAccessType.Conditional || entitlement.Condition is not null;
+
+    internal static AccessType ConditionalEffect(NormalizedEntitlement entitlement)
+        => entitlement.ConditionalEffect ?? (entitlement.AccessType == NormalizedAccessType.Deny ? AccessType.Deny : AccessType.Allow);
+
+    internal static bool TryEvaluateCondition(CloudProvider provider, NormalizedCondition? condition, IReadOnlyDictionary<string, string> runtimeContext, out bool result)
     {
         result = false;
         if (condition?.Expression is not string expression || string.IsNullOrWhiteSpace(expression)) return false;
         if (provider == CloudProvider.Gcp)
         {
-            const string startsWithOperator = ".startsWith(";
-            var startsWithIndex = expression.IndexOf(startsWithOperator, StringComparison.Ordinal);
-            if (startsWithIndex > 0 && expression.EndsWith(')'))
+            var startsWith = Regex.Match(expression,
+                """\A\s*resource\.name\.startsWith\(\s*(?:'(?<prefix>[^'\\]*)'|"(?<prefix>[^"\\]*)")\s*\)\s*\z""",
+                RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+            if (startsWith.Success)
             {
-                var key = expression[..startsWithIndex].Trim();
-                var prefix = expression[(startsWithIndex + startsWithOperator.Length)..^1].Trim().Trim('\'', '"');
-                if (TryGetRuntimeValue(runtimeContext, key, out var value))
+                if (TryGetRuntimeValue(runtimeContext, "resource.name", out var value))
                 {
-                    result = value.StartsWith(prefix, StringComparison.Ordinal);
+                    result = value.StartsWith(startsWith.Groups["prefix"].Value, StringComparison.Ordinal);
                     return true;
                 }
             }
         }
 
-        var operatorIndex = expression.IndexOf("==", StringComparison.Ordinal);
-        var operationLength = 2;
-        var isNotEqual = false;
-        if (operatorIndex < 0)
-        {
-            operatorIndex = expression.IndexOf("!=", StringComparison.Ordinal);
-            isNotEqual = operatorIndex >= 0;
-        }
-        if (operatorIndex <= 0) return false;
-        var claim = expression[..operatorIndex].Trim().TrimStart('@', '$');
-        var expected = expression[(operatorIndex + operationLength)..].Trim().TrimEnd(';').Trim().Trim('\'', '"');
+        var comparison = Regex.Match(expression,
+            """\A\s*[@$]?(?<claim>[A-Za-z_][A-Za-z0-9_:./-]*)\s*(?<operator>==|!=)\s*(?:'(?<expected>[^'\\]*)'|"(?<expected>[^"\\]*)"|(?<expected>[A-Za-z0-9_:./@-]+))\s*;?\s*\z""",
+            RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+        if (!comparison.Success) return false;
+        var claim = comparison.Groups["claim"].Value;
+        var expected = comparison.Groups["expected"].Value;
         if (!TryGetRuntimeValue(runtimeContext, claim, out var actual)) return false;
         var matches = string.Equals(actual, expected, provider == CloudProvider.Gcp ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
-        result = isNotEqual ? !matches : matches;
+        result = comparison.Groups["operator"].Value == "!=" ? !matches : matches;
         return true;
     }
 
@@ -374,7 +406,7 @@ internal static class ProviderAccessPolicy
         return item.Key is not null;
     }
 
-    private static bool IsExplicitDeny(CloudProvider provider, NormalizedEntitlement entitlement)
+    internal static bool IsExplicitDeny(CloudProvider provider, NormalizedEntitlement entitlement)
     {
         var sourceType = entitlement.Evidence.SourceType;
         return provider switch

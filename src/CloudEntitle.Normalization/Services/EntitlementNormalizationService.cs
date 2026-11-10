@@ -74,6 +74,7 @@ public abstract class ProviderEntitlementNormalizer : IEntitlementNormalizer
             var normalizedAccess = conditional ? NormalizedAccessType.Conditional : isExclusion ? NormalizedAccessType.Allow : record.AccessType switch { AccessType.Allow => NormalizedAccessType.Allow, AccessType.Deny => NormalizedAccessType.Deny, _ => NormalizedAccessType.Unknown };
             var condition = conditional ? new NormalizedCondition(record.ConditionTitle, record.ConditionExpression, "Unknown", record.ConditionExpression) : null;
             var key = string.Join('|', Provider, record.CloudAccountId, record.PrincipalId, record.RoleId, record.PolicyId, record.PermissionId, record.Scope, record.ResourcePattern, normalizedAccess, record.AssignmentType, record.ConditionExpression);
+            if (conditional) key = string.Join('|', key, record.AccessType);
             if (entitlements.ContainsKey(key)) continue;
             entitlements[key] = new NormalizedEntitlement(GuidUtility.Create(GuidUtility.Namespace, key), Provider, record.CloudAccountId, record.PrincipalId, null, record.RoleId, record.PolicyId, record.PermissionId, scope, record.AssignmentType, normalizedAccess, !record.IsInherited && record.AssignmentType is AssignmentType.Direct or AssignmentType.Role or AssignmentType.Policy, record.IsInherited, conditional, condition, status, evidence, source.CollectedAt, null, record.ResourcePattern, isExclusion, conditional ? record.AccessType : null);
         }

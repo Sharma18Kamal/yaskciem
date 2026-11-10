@@ -410,6 +410,25 @@ or unredacted sensitive exports.
 
 ## 13. Acceptance and ongoing operation
 
+Start with the [offline permission-analysis acceptance cases](../effective-access/effective-access.md#conditional-decision-acceptance).
+They verify normalized condition handling and explanations; they do not prove
+complete live-cloud authorization coverage. Progress through these gates:
+
+1. Run normalization and effective-access/what-if regression suites on the exact
+   candidate source. Preserve actual results, including failures and skips.
+2. Verify provider-native evidence survives collection, normalization and saved
+   inventory. Use known identities, grants, exclusions/denies, groups and
+   conditions; treat unsupported native semantics as incomplete coverage.
+3. With explicit owner approval, compare the modeled results against
+   provider-native evidence and approved read-only probes in isolated Azure,
+   AWS and GCP accounts. Record expected and actual decisions by action/resource.
+   Do not perform destructive actions just to validate a permission.
+4. Build the candidate packages containing the fixes and test clean-device
+   installation, API sign-in, trial validation, selected-scope scanning, reports,
+   upgrades and recovery. Source tests do not update an installed package.
+5. Sign off only the providers/features supported by recorded evidence. Keep
+   blocked live checks and unverified archive/recovery work visibly pending.
+
 - [ ] Trusted, current Desktop and server builds installed.
 - [ ] Correct Entra registrations, consent and API scope verified.
 - [ ] Unauthenticated API requests rejected; signed-in authorized access works.
