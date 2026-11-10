@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$PackageVersion = '1.0.0.67',
+    [string]$PackageVersion = '1.0.0.68',
     [string]$OutputPath,
     [string]$WixExePath,
     [string]$CertificateThumbprint = '537C64CF83CF2C6C1EBC89553B7B4EDD13E7F104'

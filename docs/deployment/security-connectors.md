@@ -5,7 +5,7 @@
 This milestone exports organization-scoped operational events to client-owned receivers:
 
 | Client solution | Connector kind | Implemented transport |
-|---|---|---|
+| --- | --- | --- |
 | Splunk | `SplunkHec` | HTTPS HTTP Event Collector (HEC) |
 | IBM QRadar | `QRadarTls` | TLS syslog with LEEF 2.0, mandatory client certificate |
 | Microsoft Sentinel | `SentinelLogs` | Azure Monitor Logs Ingestion API into a custom table |
@@ -37,7 +37,7 @@ The shared server worker, not Desktop, sends events. A client administrator prov
 The client enables HEC, provisions a dedicated token limited to the approved destination index, and supplies an HTTPS event endpoint. This adapter does not poll indexer acknowledgements; use a token without indexer-acknowledgement requirements for this initial transport.
 
 | Setting | Example or requirement |
-|---|---|
+| --- | --- |
 | `Kind` | `SplunkHec` |
 | `Url` | `https://splunk.example.internal:8088/services/collector/event` |
 | `Token` | Dedicated HEC token supplied by the secret provider |
@@ -60,7 +60,7 @@ Provision extraction and durable deduplication by `deliveryId` for correlation r
 The client provisions a TLS syslog log source, typically port 6514, with **single-line newline framing**, not octet counting. Configure LEEF 2.0 parsing, the approved log-source identifier, event-ID mappings and custom properties for scope/delivery IDs. YASK/CIEM is a custom source; the client must validate its DSM/property mapping rather than assume automatic classification.
 
 | Setting | Example or requirement |
-|---|---|
+| --- | --- |
 | `Kind` | `QRadarTls` |
 | `Url` | `tls://qradar.example.internal:6514` (explicit port required) |
 | `LogSourceIdentifier` | `yask-client` (1-255 ASCII letters, digits, `.`, `-`, `_`) |
@@ -91,7 +91,7 @@ The client provisions a Log Analytics workspace enabled for Sentinel, a custom t
 - Grant the selected server managed identity **Monitoring Metrics Publisher** on the DCR. Confirm the principal and DCR belong to the appropriate destination tenant.
 
 | Setting | Example or requirement |
-|---|---|
+| --- | --- |
 | `Kind` | `SentinelLogs` |
 | `Url` | The DCR/DCE HTTPS ingestion root ending in `.ingest.monitor.azure.com`, with no path/query/fragment |
 | `RuleId` | DCR immutable ID, e.g. `dcr-...` (not its ARM resource ID) |
@@ -189,7 +189,7 @@ Nothing polls a SIEM at sign-in, during a scan or when reading saved alerts. The
 ### Product mapping boundary
 
 | Source | Client mapping responsibility |
-|---|---|
+| --- | --- |
 | Splunk | Read approved saved-search/Enterprise Security notable results or use a client alert action. Supply a stable notable ID and the actual revision/update time, not the polling time. Normalize local urgency and investigation state with an agreed mapping. |
 | QRadar | Read authorized offense API results. Map offense ID, actual last-updated time, severity and status. Severity scale and ID namespace are client/version-specific; use `Unknown` when not established. |
 | Sentinel | Read workspace incidents or use a client incident playbook. Map stable incident ARM ID, `lastModifiedTimeUtc`, title, severity and state (`New` to `Open`, `Active` to `Investigating`, `Closed` to `Closed`). Keep the workspace/source stable within the alias. |

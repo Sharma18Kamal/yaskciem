@@ -161,6 +161,14 @@ Disabled controls normally need a selection, valid fields, permission, license,
 configured server capability or completed preceding step. Read the tooltip/status;
 do not grant broader cloud roles merely to enable an unsupported feature.
 
+Starting with Desktop 1.0.0.68, the mouse wheel scrolls the table or multiline
+editor under the pointer first, then the containing page when that control reaches
+its top/bottom edge. Empty tables and horizontal-only panels do not trap vertical
+scrolling. Over a closed dropdown, the wheel scrolls the page without changing
+the selection; open the dropdown to scroll its choices. Sidebar scrolling remains
+independent. Scrolling respects Windows wheel line/page settings; this does not
+add middle-button auto-scroll.
+
 ## 4. Cloud Accounts
 
 ### 4.1 Provider connection cards

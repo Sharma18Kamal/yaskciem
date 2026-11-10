@@ -29,7 +29,7 @@ public partial class MainWindow : Window
         };
         PreviewMouseMove += UserActivity;
         PreviewMouseDown += UserActivity;
-        PreviewMouseWheel += UserActivity;
+        AddHandler(Mouse.PreviewMouseWheelEvent, new MouseWheelEventHandler(UserActivity), handledEventsToo: true);
         PreviewKeyDown += UserActivity;
         PreviewTouchDown += UserActivity;
     }

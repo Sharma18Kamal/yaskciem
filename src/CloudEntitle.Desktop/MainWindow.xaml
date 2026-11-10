@@ -4,7 +4,8 @@
         xmlns:vm="clr-namespace:CloudEntitle.Desktop.ViewModels"
         xmlns:views="clr-namespace:CloudEntitle.Desktop.Views"
         Title="YASK-CIEM" Width="1440" Height="900" MinWidth="900" MinHeight="600"
-        WindowStyle="None" ResizeMode="CanResize" WindowStartupLocation="CenterScreen" Background="{StaticResource WindowBrush}">
+        WindowStyle="None" ResizeMode="CanResize" WindowStartupLocation="CenterScreen" Background="{StaticResource WindowBrush}"
+        views:MouseWheelScrolling.IsEnabled="True">
     <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
         <Border Grid.Row="0" Background="{StaticResource HeaderBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="28,12" MouseLeftButtonDown="WindowHeader_MouseLeftButtonDown">

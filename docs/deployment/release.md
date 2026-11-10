@@ -7,6 +7,39 @@ for verified artifact fingerprints, fresh test results and remaining Store
 release gates. Desktop acceptance is separate from Azure backend provisioning,
 which remains on hold. Passing tests does not certify the installed package.
 
+## Local candidate 1.0.0.68
+
+- Desktop mouse-wheel routing applies throughout the main window, including all
+  workspaces and sidebar navigation. Nested tables and multiline editors retain
+  their own scrolling while they can move, then hand off to the containing page
+  at either edge. Empty tables and horizontal-only panels no longer trap the wheel.
+- Closed dropdowns scroll the containing page instead of changing selections.
+  Open dropdowns retain native behavior. Table logical scrolling/virtualization
+  stays native; pixel scrolling respects partial wheel deltas and Windows
+  line/page preferences without queued animations.
+- Adds rendered WPF regressions for nested boundaries in both directions,
+  populated/empty tables, multiline text, closed/open selectors, independent
+  sidebar scrolling and wheel-distance calculations. Scrolling still counts as
+  user activity for the inactivity timer, including handled wheel events.
+  The shell contract verifies the behavior is enabled in the main-window XAML.
+- This is a Desktop-only package update. It includes the earlier 1.0.0.67 source
+  fixes; existing License Server 1.0.0.67 deployments need no server upgrade for
+  this UI change. **345 Desktop tests passed, zero failed/skipped.** Final TRX is
+  under `artifacts/validation-1.0.0.68-final`.
+- Designated packages are under `artifacts/native-installers-1.0.0.68-final`.
+  MSI and Setup signatures verify locally with the existing development
+  certificate (trusted testing only). Published Desktop/Setup version is
+  1.0.0.68, MSI ProductVersion is 1.0.68, and the published Desktop includes the
+  scrolling behavior. Each installer has an adjacent SHA-256 file.
+- No installed application, cloud configuration or running server is changed.
+  Clean-machine installation/upgrade and physical-device wheel/trackpad acceptance
+  remain separate gates.
+
+| File | SHA-256 |
+| --- | --- |
+| `YASK-CIEM-Setup-1.0.0.68.exe` | `275941E3A62E08B471A2BDAEA3B51701C0B9F760BBED4B21E1F4AFDE6479FCA5` |
+| `YASK-CIEM-1.0.0.68.msi` | `E7FB4D2DE4A77ED143618B5CB51CDB65134B5DCCE39DA23E73FA9975E0114A7D` |
+
 ## Local candidate 1.0.0.67
 
 - Rebuilds the current source under a new version instead of replacing the

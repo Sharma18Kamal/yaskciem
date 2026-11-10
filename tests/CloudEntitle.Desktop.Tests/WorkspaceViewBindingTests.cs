@@ -78,6 +78,8 @@ public sealed class WorkspaceViewBindingTests
         var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         var document = XDocument.Load(Path.Combine(workspaceRoot, "src", "CloudEntitle.Desktop", "MainWindow.xaml"));
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace views = "clr-namespace:CloudEntitle.Desktop.Views";
+        Assert.Equal("True", (string?)document.Root!.Attribute(views + "MouseWheelScrolling.IsEnabled"));
         var navigation = Assert.Single(document.Descendants(presentation + "ItemsControl"), control =>
             (string?)control.Attribute("ItemsSource") == "{Binding NavigationItems}");
         var scrollViewer = Assert.Single(navigation.Ancestors(presentation + "ScrollViewer"));
