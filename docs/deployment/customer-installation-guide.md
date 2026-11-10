@@ -11,7 +11,7 @@ storage URLs, credentials or subscription IDs.
 ## 1. Understand the components and sign-ins
 
 | Component | Purpose | Where it runs |
-|---|---|---|
+| --- | --- | --- |
 | Desktop | Interactive discovery, scans, analysis and reports | Each operator's Windows PC |
 | License Server/API | Trial/license validation, shared organizations and background workers | Organization-managed Windows server; laptop for development testing only |
 | PostgreSQL | Central subscription, shared workspace and audit state | Protected database host; local instance for laptop tests |
@@ -84,7 +84,7 @@ permission is distinct from the Azure CLI Graph read permissions used for scans.
 Server authentication must use:
 
 | Setting | Value |
-|---|---|
+| --- | --- |
 | `AzureAd:Instance` | `https://login.microsoftonline.com/` |
 | `AzureAd:TenantId` | Approved tenant GUID for single tenant; `organizations` for the designed multitenant deployment |
 | `AzureAd:ClientId` | API application client GUID |
@@ -96,7 +96,7 @@ sign-in errors.
 
 ### 3.2 Choose one hosting path
 
-**A. Laptop development/test**
+#### A. Laptop development/test
 
 1. Obtain the current source, install PostgreSQL, .NET SDK, Azure CLI and
    PowerShell 7.
@@ -130,7 +130,7 @@ their own `localhost`. This path is not a production hosting configuration.
 Missing archive configuration may leave readiness at 503 even if licensing
 works; that is incomplete setup, not production acceptance.
 
-**B. Organization-hosted deployment**
+#### B. Organization-hosted deployment
 
 1. Follow [PostgreSQL installation](postgresql-installation.md) and
    [database configuration](../../infra/postgres/README.md).
@@ -385,7 +385,7 @@ Follow [security connector setup](security-connectors.md) and
 ## 12. Troubleshooting
 
 | Symptom | Check/action |
-|---|---|
+| --- | --- |
 | API URL configuration error | Set all three Desktop variables; use the HTTPS API URL, never a Blob URL; relaunch with a refreshed environment. |
 | Sign-in required | Use Organizations sign-in; cloud CLI authentication is separate. |
 | Organizations Sign in disabled | Enter a valid tenant GUID. |
