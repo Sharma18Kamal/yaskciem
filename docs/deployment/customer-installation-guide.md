@@ -1,5 +1,8 @@
 # YASK-CIEM: installation and first-use guide
 
+After setup, use the [complete Desktop user manual](../user-guide/user-manual.md)
+for screen-by-screen options and operating procedures.
+
 This guide is for an organization installing YASK-CIEM in its own environment.
 It covers the Windows Desktop, the separate License Server, and read-only
 onboarding for Azure, AWS, Google Cloud and optional Kubernetes.

@@ -30,7 +30,7 @@ equivalent or operationally safe replacements.
 
 ## Prediction boundaries
 
--   `ModeledAccessLost` / `ModeledAccessAdded` mean the offline model changed its
+- `ModeledAccessLost` / `ModeledAccessAdded` mean the offline model changed its
   decision for the selected action. They are **not** provider-confirmed denial or
   grant.
 - `RetainedByAlternative` requires a remaining grant for the identical action,

@@ -1,5 +1,13 @@
 # YASK-CIEM Study Material
 
+> Historical training notes. Use the current
+> [YASK-CIEM user manual](user-manual.md) for screen-by-screen instructions.
+> The free-edition and no-cloud-write statements below describe older builds;
+> current source uses server-managed licensing and supports separately approved
+> live cloud administration/JIT workflows. Provider selection, simulator
+> availability and monitoring instructions have also changed. Do not use these
+> historical notes as the current operating procedure.
+
 A step-by-step guide to every screen, button and option in YASK-CIEM (Cloud Infrastructure Entitlement Management).
 
 ---

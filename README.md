@@ -58,6 +58,9 @@ for build, configuration and the 72-hour freshness policy.
 
 ## Running locally
 
+For daily operation and step-by-step instructions for every Desktop workspace,
+see the [YASK-CIEM user manual](docs/user-guide/user-manual.md).
+
 For an organization installing in its own environment, follow the
 [step-by-step installation and cloud onboarding guide](docs/deployment/customer-installation-guide.md)
 for License Server setup, Desktop sign-in, Azure, AWS, GCP and Kubernetes.
