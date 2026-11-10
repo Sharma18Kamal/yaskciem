@@ -58,6 +58,10 @@ for build, configuration and the 72-hour freshness policy.
 
 ## Running locally
 
+For an organization installing in its own environment, follow the
+[step-by-step installation and cloud onboarding guide](docs/deployment/customer-installation-guide.md)
+for License Server setup, Desktop sign-in, Azure, AWS, GCP and Kubernetes.
+
 For installation instructions for released Windows packages, see [Install YASK-CIEM](docs/deployment/installation.md). For development setup, testing, and first-run details, see [Getting Started](docs/development/getting-started.md).
 
 1. Install the .NET 10 SDK selected by `global.json`.

@@ -1,5 +1,9 @@
 # Install YASK-CIEM on Windows
 
+For the complete administrator/operator workflow, including License Server
+setup, trial activation and Azure/AWS/GCP/Kubernetes onboarding, use the
+[step-by-step environment installation guide](customer-installation-guide.md).
+
 ## Current server-managed trial candidate: 1.0.0.66
 
 Version 1.0.0.65 replaces the unlimited free edition with a server-managed 30-day
