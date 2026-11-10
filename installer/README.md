@@ -67,7 +67,7 @@ The package script requires WiX 5, SignTool, and the YASK-CIEM signing certifica
 
 ```powershell
 .\scripts\package-native-installers.ps1 `
-  -PackageVersion 1.0.0.64 `
+  -PackageVersion 1.0.0.67 `
   -WixExePath "$env:TEMP\yask-wix-tools-v5\wix.exe"
 ```
 
@@ -125,7 +125,9 @@ To sign it:
 2. Replace the generated placeholder PNG assets in the package script with branded assets.
 3. Use a certificate whose subject exactly matches the manifest `Publisher` value.
 4. Sign the package and install it on a clean Windows 10/11 test VM.
-5. Verify SQLite initialization, CLI readiness messaging, scan execution, report export, and free-edition access without a trial lock.
+5. Verify SQLite initialization, explicit provider selection, organization sign-in,
+   server-managed trial/license validation, scan execution and report export.
+   Current builds are not the historical free standalone edition.
 6. Publish checksums and the signed installer through the release channel.
 
 The local development machine may not contain `MakeAppx.exe`; in that case package creation must run on a Windows SDK build agent. The package is not trusted for distribution until signed with the organization certificate.

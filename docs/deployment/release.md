@@ -7,6 +7,67 @@ for verified artifact fingerprints, fresh test results and remaining Store
 release gates. Desktop acceptance is separate from Azure backend provisioning,
 which remains on hold. Passing tests does not certify the installed package.
 
+## Local candidate 1.0.0.67
+
+- Rebuilds the current source under a new version instead of replacing the
+  November 9 version 1.0.0.66 installer with an indistinguishable rebuild.
+  Desktop, native setup and License Server use version 1.0.0.67; native MSI
+  ProductVersion is encoded as 1.0.67.
+- Includes conditional permission evaluation fixes: conditions must match before
+  contributing their original Allow/Deny effect, unsupported compound expressions
+  remain unresolved, and explanations report matched/not-matched/required context.
+  Normalization preserves conditional Allow and Deny as separate records.
+- Carries current explicit cloud-provider selection, organization/API sign-in
+  guidance, API v2 audience setup and unmapped JWT claim handling. Provider CLI
+  authentication remains separate from organization authentication.
+- Includes current server-managed licensing and Azure Blob/S3 audit archive
+  support. Existing local credentials, database records and archive provisioning
+  are not replaced by building packages.
+- Adds the [current Desktop user manual](../user-guide/user-manual.md) and
+  [installation guide](customer-installation-guide.md). The older study material
+  is historical; its licensing and no-cloud-write claims are not current behavior.
+- Release solution validation: **965 passed, 49 skipped, 0 failed** across 23
+  test projects. PostgreSQL integration tests were not enabled; no live database
+  was used for this run. TRX results are under `artifacts/validation-1.0.0.67`.
+- Native MSI and Setup EXE signatures verify locally using the existing
+  development certificate. The MSI Property/File tables confirm ProductVersion
+  1.0.67 and embedded Desktop, EffectiveAccess and Normalization DLL version
+  1.0.0.67. Setup reports 1.0.0.67; self-contained Desktop/ASP.NET runtimes are
+  present. The License Server ZIP manifest and inspected application/library
+  versions are 1.0.0.67; all 16 numbered SQL files match current source.
+- Local development signatures are for trusted testing only, not public release.
+  Clean-machine installation/upgrade, authenticated real-cloud acceptance and
+  production signing remain separate gates. No installer was executed or running
+  License Server replaced by this packaging task. MSIX was not rebuilt.
+
+### Candidate files and SHA-256
+
+Each package has an adjacent `.sha256` file. Paths are relative to the repository
+root. Older package directories are preserved.
+
+| File | SHA-256 |
+| --- | --- |
+| `artifacts/native-installers-1.0.0.67/YASK-CIEM-Setup-1.0.0.67.exe` | `0B23C027DD96EF94AE181A2F25F607EF5CCBFC7FF0F19E556189A130C3AB52E7` |
+| `artifacts/native-installers-1.0.0.67/YASK-CIEM-1.0.0.67.msi` | `44FED2187FE2112931F72974E1858FE8725A3B54E88400ABA943E370531182CE` |
+| `artifacts/license-server-1.0.0.67/YASK-CIEM-LicenseServer-win-x64-1.0.0.67.zip` | `D9A49B8EDC960EA64806047E5FC746983A566DF3C4F0CDFF3ACAFE070A577228` |
+
+### Upgrading from an earlier candidate
+
+1. Back up supported Desktop local data from Settings. For shared-server upgrade,
+   separately back up PostgreSQL and retain protected settings/secret access.
+2. Close Desktop and run the new native Setup EXE or MSI as administrator; do not
+   install both native and MSIX editions for the same test.
+3. Confirm Settings/header reports 1.0.0.67 and that existing local data loads.
+4. For License Server, arrange a maintenance window, stop the supervised old
+   process, extract the new ZIP into a separate versioned directory, and apply
+   the existing protected configuration using the
+   [hosting procedure](license-server-hosting.md). Do not overwrite credentials
+   with example settings or start a second worker set against production.
+5. Verify liveness and readiness, then organization sign-in, license refresh and
+   one approved read-only account scan. Keep archive/coverage gaps visible.
+6. Follow the [installation acceptance gates](customer-installation-guide.md)
+   before treating the upgraded installation as accepted.
+
 ## Local candidate 1.0.0.64
 
 - Moves the rotating hourglass to a persistent shell control aligned to the
