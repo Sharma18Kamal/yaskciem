@@ -30,7 +30,7 @@ It connects to Azure, AWS and Google Cloud through the cloud CLI you are already
 ### 1.2 Key terms
 
 | Term | Meaning |
-|---|---|
+| --- | --- |
 | Identity / principal | A user, group, service principal, managed identity or service account |
 | Role | A named bundle of permissions (for example Owner, Global Administrator) |
 | Permission | A single allowed action (for example `Microsoft.Storage/*/read`) |
@@ -67,6 +67,7 @@ Two installers are provided. Install only one on a machine.
 2. **MSIX installer** - run `YASK-CIEM-Setup-<version>.exe` from the MSIX folder. It asks you to type `TRUST` to trust the publisher certificate (this is a development-signed package), then installs for your account.
 
 Notes:
+
 - The installer writes `%TEMP%\YASK-CIEM-Setup.log` (native). Send this file if an install fails.
 - Version 1.0.0.63 native setup delegates upgrades to Windows Installer without pre-uninstalling the old version; same-version runs can enter maintenance mode.
 
@@ -79,7 +80,7 @@ Notes:
 ### 2.4 Window layout
 
 | Area | What it contains |
-|---|---|
+| --- | --- |
 | Header, left | Logo, application name and tagline |
 | Header, right | Free edition pill, **Connect Cloud**, **Disconnect Cloud**, **Settings**, minimize, maximize, close |
 | Left menu | Dashboard, Cloud Accounts, Identities, Resources, Entitlements, Effective Access, Access Paths, Risk Findings, Recommendations, Remediation, Organizations, Access Reviews, Scan History (and Feedback, Settings) |
@@ -116,7 +117,7 @@ For AWS, **Disconnect** stops AWS use in the current app session without deletin
 ### 3.2 Permissions needed
 
 | Provider | Recommended access |
-|---|---|
+| --- | --- |
 | Azure | Reader on intended subscriptions. Entra enrichment needs tenant-approved Graph read permissions. Optional PIM schedules require separate Graph read consent. Do not grant Owner, Contributor, or User Access Administrator for scans. |
 | AWS | Prefer IAM Identity Center SSO with SecurityAudit or an approved least-privilege equivalent. Each target account requires a working profile; an Organizations roster does not grant member-account access. |
 | Google Cloud | Project Viewer and the connector's IAM, service-account, and Cloud Asset Inventory read permissions at intended project scopes. Inherited policy discovery additionally needs read access on ancestor folders/organization. |
@@ -137,7 +138,7 @@ The exact permissions and optional data-source requirements are listed in [Azure
 ### 4.1 Buttons
 
 | Button | What it does |
-|---|---|
+| --- | --- |
 | **Scan Now** | Scans the connected provider using read-only CLI calls |
 | **Stop Scan** | Cancels the running scan |
 | **Generate Report** | Saves findings as JSON or CSV to a folder you choose |
@@ -157,7 +158,7 @@ The scan includes all connected providers and selected accounts/contexts for eac
 ### 4.3 Dashboard cards
 
 | Card | Meaning |
-|---|---|
+| --- | --- |
 | Cloud accounts / Identities / Resources / Entitlements | Counts from the latest scan |
 | Privileged identities | Identities with administrator-level access |
 | Risk findings / Critical findings | Total and critical risk findings |
@@ -188,20 +189,24 @@ Exports are signed evidence snapshots, not a compliance certification or auditor
 All grid pages have a search box. Type to filter; sort by clicking column headers.
 
 ### 5.1 Identities
+
 Users, groups and service identities. Useful columns: Type, Email, Owner, **Privileged**, Last activity, Credential rotated / expires, Federation trust and whether it is verified.
 
 Use it to find privileged users, ownerless workload identities and expiring credentials.
 
 ### 5.2 Resources
+
 Normalized resources with name, type, resource ID, scope and location. Use it to see what the scan could enumerate.
 
 ### 5.3 Entitlements
+
 Role and permission grants: provider, subject, grant, scope, assignment type and source. Also shows discovered roles and permissions.
 
 ### 5.4 Effective Access
+
 Modeled access per principal, role, permission and resource, with decision (Allow, Conditional, Deny, Unknown), path, source, last used, last changed and privileged flag.
 
-**Permission simulator**
+#### Permission simulator
 
 1. Choose a **Principal**, a **Resource** and a **Permission**.
 2. Click **Evaluate**.
@@ -210,9 +215,11 @@ Modeled access per principal, role, permission and resource, with decision (Allo
 Simulation uses scan data only; it does not call the cloud.
 
 ### 5.5 Access Paths
+
 Select a path to see its evidence (each hop from identity to resource) and its **blast radius**: related assignments, related roles and observed resources. A caveat reminds you counts are a lower bound.
 
 ### 5.6 Risk Findings
+
 Findings with provider, severity, priority score, title, principal, resource, evidence and recommendation. Examples of what the rules detect:
 
 - privileged identities, privileged service accounts and privileged group memberships,
@@ -225,6 +232,7 @@ Findings with provider, severity, priority score, title, principal, resource, ev
 Work through Critical and High first.
 
 ### 5.7 Scan History
+
 Previous scans (retained for 7 days) with coverage details and access changes observed between scans. Use it to see what changed since the last scan and to read scan messages (for example, which data source was denied).
 
 ---
@@ -232,6 +240,7 @@ Previous scans (retained for 7 days) with coverage details and access changes ob
 ## Part 6 - Acting on findings
 
 ### 6.1 Recommendations
+
 Evidence-backed least-privilege proposals: type, title, provider, state, current and suggested values, and priority.
 
 1. Select a recommendation.
@@ -253,7 +262,7 @@ Cloud changes are disabled in this build; the workflow produces approvals and dr
 
 ### 6.3 Access Reviews
 
-**Create a campaign**
+#### Create a campaign
 
 1. Choose a template:
    - All effective access (30 days)
@@ -264,13 +273,13 @@ Cloud changes are disabled in this build; the workflow produces approvals and dr
 4. In local mode, confirm the **actor name**. Shared mode records the signed-in organization identity instead.
 5. Click **Create from Current Scan**. Each item is assigned to the identity owner when the owner is an eligible reviewer, otherwise to the fallback reviewer if eligible, otherwise left unassigned.
 
-**Who can be a reviewer**
+#### Who can be a reviewer
 
 - In local/offline mode: an active Azure, AWS, or Google Cloud user with an active qualifying privileged grant. Eligible-only PIM roles do not count; the list is built from the latest scan.
 - In shared mode: an active organization member with `ManageRemediations` authorization (Organization Admin, Security Analyst, or an approved custom role). The campaign creator is excluded to enforce separation of duties; only the assigned reviewer can decide an item.
 - The License Server verifies membership, role, assignment, and actor from authenticated Entra identity. Client-supplied reviewer or actor names do not authorize a decision.
 
-**Review an item**
+#### Review an item
 
 Shared campaigns and decisions are saved centrally for authorized team members and remain available across devices. Each decision records the authenticated actor, UTC time, rationale, audit correlation ID, and SHA-256 digest of the captured evidence. The evidence snapshot is locked when the campaign is created and cannot be changed after a decision. Without shared API configuration, reviews remain in the local store and preserve offline behavior.
 
@@ -291,6 +300,7 @@ In shared mode, **Organization governance** shows completion and overdue work by
 ## Part 7 - Teams and organizations
 
 ### 7.1 Organizations page
+
 Used for multi-user workspaces and tenant membership.
 
 1. **Sign in** with Microsoft Entra SSO.
@@ -318,7 +328,7 @@ Scheduled scans require shared mode (`YASK_CIEM_API_BASE_URL`, HTTPS), an accoun
 ## Part 8 - Settings
 
 | Section | What to do |
-|---|---|
+| --- | --- |
 | Application | Shows version and the data location |
 | **Demo mode** | **Load Demo Data** fills the app with synthetic Azure, AWS and GCP data (no cloud access). **Reset Demo Data** clears it |
 | **Continuous monitoring** | Optional local Desktop schedule; it runs only while the app is open. For cross-device, per-account server schedules and job outcomes, use **Organizations > Scheduled full scans** with shared mode configured. |
@@ -340,6 +350,7 @@ Open **Settings > Local Data Backup**:
 ---
 
 ## Part 10 - Feedback
+
 Open **Feedback**, fill in **Your feedback** and **Suggestions** (both required), then **Submit Feedback**. It is stored locally.
 
 ---
@@ -347,7 +358,7 @@ Open **Feedback**, fill in **Your feedback** and **Suggestions** (both required)
 ## Part 11 - Where data is stored
 
 | Item | Location |
-|---|---|
+| --- | --- |
 | Application data, reports, scan history | `%LOCALAPPDATA%\YASK-CIEM\` |
 | Database | `%LOCALAPPDATA%\CloudEntitle\Data\cloudentitle.db` |
 | Application logs | `%LOCALAPPDATA%\CloudEntitle\Logs\application-<date>.log` |
@@ -375,7 +386,7 @@ The application log lists every cloud CLI command with its duration, which helps
 ## Part 13 - Troubleshooting
 
 | Symptom | Likely cause and action |
-|---|---|
+| --- | --- |
 | "No active CLI sign-in" | Run `az login` (or the AWS/GCP command) and click Refresh sign-in status |
 | Scan stays in progress | Follow the current provider/account/source in the dashboard. Check **Source coverage** and the application log for a slow CLI command; use **Stop Scan** if needed |
 | Dashboard shows zeros | No scan yet, or the scan found no data; read Scan History messages |
@@ -398,7 +409,8 @@ The application log lists every cloud CLI command with its duration, which helps
 7. What is the difference between an Active and an Eligible PIM role?
 8. Where would you look to find why a data source was missing from a scan?
 
-**Answers**
+### Answers
+
 1. All access is read-only through your existing CLI identity; no write operations exist.
 2. An entitlement is one grant; effective access is the combined result after inheritance and groups.
 3. Azure, AWS and Google Cloud may all remain connected; only one interactive sign-in flow runs at a time.
