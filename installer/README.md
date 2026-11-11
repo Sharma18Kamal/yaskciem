@@ -79,6 +79,15 @@ package version must match `Directory.Build.props`. Earlier 1.0.0.62 native
 packages were framework-dependent and required .NET 9 Desktop and ASP.NET Core
 runtimes.
 
+New Desktop builds also bundle `Guides\getting-started.html`, a standalone offline
+setup and cloud sign-in guide. The Desktop project copies it into build/publish
+output, so native MSI/Setup, MSIX, ZIP and per-user publishes include the same
+guide. The app's **Setup guide** button opens it; native MSI adds a Start Menu
+shortcut and the native Setup EXE offers to open it after installation.
+Provider CLIs and PostgreSQL are not bundled or installed automatically.
+PostgreSQL is a separate License Server prerequisite, not a Desktop dependency.
+Rebuild installers to deliver these changes; existing packages are unchanged.
+
 The MSI is the unattended installation candidate (`msiexec /i <package.msi> /qn
 /norestart /l*v <log>`); it still requires elevation for per-machine installation.
 The interactive Setup EXE prompts and is not an unattended Store installer.

@@ -2,6 +2,8 @@ using System.IO.Compression;
 using System.Security;
 using System.Text;
 using System.Text.Json;
+using System.Xml;
+using System.Xml.Linq;
 using CloudEntitle.Reporting.Models;
 
 namespace CloudEntitle.Reporting.Services;
@@ -19,6 +21,7 @@ public sealed class ReportGenerator
             ReportFormat.Json => JsonSerializer.Serialize(payload, JsonOptions),
             ReportFormat.Html => $"<html><head><meta charset=\"utf-8\"><title>{type} Report</title></head><body><h1>{type} Report</h1><p>Generated {snapshot.GeneratedAt:O}. Evidence snapshot only; not a certification or attestation.</p><pre>{System.Net.WebUtility.HtmlEncode(JsonSerializer.Serialize(payload, JsonOptions))}</pre></body></html>",
             ReportFormat.Csv => CreateCsv(rows),
+            ReportFormat.Xml => CreateXml(JsonSerializer.SerializeToElement(payload, JsonOptions)).ToString(),
             ReportFormat.Pdf => string.Empty,
             ReportFormat.Excel => string.Empty,
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported report format.")
@@ -30,6 +33,29 @@ public sealed class ReportGenerator
             ReportFormat.Excel => report with { BinaryContent = CreateExcel(type, snapshot.GeneratedAt, rows) },
             _ => report
         };
+    }
+
+    private static XElement CreateXml(JsonElement value, string name = "Report")
+    {
+        var element = new XElement(XmlConvert.EncodeLocalName(name),
+            new XAttribute("kind", value.ValueKind.ToString()));
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in value.EnumerateObject())
+                    element.Add(CreateXml(property.Value, property.Name));
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                    element.Add(CreateXml(item, "Item"));
+                break;
+            case JsonValueKind.Null:
+                break;
+            default:
+                element.Value = value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
+                break;
+        }
+        return element;
     }
 
     private static (object Payload, IReadOnlyList<(string Section, string Value)> Rows) BuildReport(ReportingSnapshot snapshot, ReportType type)

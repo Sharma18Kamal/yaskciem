@@ -76,6 +76,7 @@ public sealed class WorkspaceNavigationRenderingTests
                     ticketingCredentialStore: new EmptyCredentials(), postureWebhookCredentialStore: new EmptyWebhook());
                 var pages = new WorkspaceViewModel[] { dashboard, new CloudAccountsViewModel(demo),
                     new IdentitiesViewModel(demo), new ResourcesViewModel(demo), new EntitlementsViewModel(demo),
+                    new EffectiveAccessViewModel(demo), new AccessPathExplorerViewModel(demo), new ScanHistoryViewModel(demo),
                     new WhatIfSimulatorViewModel(demo, new EmptyWhatIfData(), new(new EffectiveAccessEngine()),
                         new DialogService(), new AuthenticatedOrganizationContext(), new OrganizationManagementService()), settings };
                 var cached = new Dictionary<WorkspaceViewModel, object>();
@@ -94,6 +95,17 @@ public sealed class WorkspaceNavigationRenderingTests
                         firstWorkspace ??= view;
                         Assert.Same(firstWorkspace, view);
                         var host = (ContentControl)view.FindName("PageHost");
+                        if (page is AccessPathExplorerViewModel)
+                        {
+                            Assert.NotNull(view.ActiveScroller);
+                            Assert.Equal("TabScroller", view.ActiveScroller.Name);
+                        }
+                        if (page == settings)
+                        {
+                            var sections = WorkspaceSections.Find(view);
+                            Assert.Contains(sections, section => section.Title == "TICKETING CONNECTION");
+                            Assert.Contains(sections, section => section.Title == "LOCAL DATA BACKUP");
+                        }
                         if (cached.TryGetValue(page, out var previous)) Assert.Same(previous, host.Content);
                         else cached.Add(page, host.Content);
                         Assert.True(indicator.IsVisible);
@@ -110,6 +122,87 @@ public sealed class WorkspaceNavigationRenderingTests
                     window.UpdateLayout();
                     Pump();
                 }
+                var picker = new ReportFormatDialog { Resources = app.Resources, Owner = window };
+                try
+                {
+                    picker.Show();
+                    Pump();
+                    var selector = (ComboBox)picker.FindName("FormatSelector");
+                    Assert.Equal(new[] { ".json", ".csv", ".html", ".xml", ".pdf", ".xlsx" },
+                        ReportFormatDialog.Formats.Select(format => format.Extension));
+                    foreach (var format in ReportFormatDialog.Formats)
+                    {
+                        selector.SelectedItem = format;
+                        Pump();
+                        Assert.Same(format, picker.SelectedFormat);
+                        Assert.Equal(format.Description, ((TextBlock)picker.FindName("FormatDescription")).Text);
+                    }
+                }
+                finally { picker.Close(); }
+                var navigation = new TestNavigation(dashboard, settings);
+                var main = new MainWindow(new MainWindowViewModel(navigation)) { ShowInTaskbar = false };
+                try
+                {
+                    main.Show();
+                    Pump();
+                    navigation.NavigateTo<SettingsViewModel>();
+                    main.UpdateLayout();
+                    Pump();
+                    var sections = (ComboBox)main.FindName("SectionSelector");
+                    var scroller = main.ActiveWorkspaceScroller!;
+                    Assert.NotNull(scroller);
+                    Assert.Contains(sections.Items.Cast<WorkspaceSections.Section>(),
+                        section => section.Title == "TICKETING CONNECTION");
+                    sections.SelectedItem = sections.Items.Cast<WorkspaceSections.Section>()
+                        .Single(section => section.Title == "TICKETING CONNECTION");
+                    Pump();
+                    var ticketing = sections.Items.Cast<WorkspaceSections.Section>()
+                        .Single(section => section.Title == "TICKETING CONNECTION");
+                    Assert.Equal("Ticketing", Assert.Single(ticketing.Tabs).Header);
+                    Assert.True(ticketing.Tabs[0].IsSelected);
+                    Assert.True(ticketing.Target.IsVisible);
+                    var credential = Assert.Single(Descendants<PasswordBox>(main),
+                        box => box.Name == "TicketingCredentialBox");
+                    credential.Password = "unsaved-test-draft";
+                    var application = sections.Items.Cast<WorkspaceSections.Section>()
+                        .Single(section => section.Title == "APPLICATION");
+                    sections.SelectedItem = application;
+                    Pump();
+                    sections.SelectedItem = ticketing;
+                    Pump();
+                    Assert.Same(credential, Assert.Single(Descendants<PasswordBox>(main),
+                        box => box.Name == "TicketingCredentialBox"));
+                    Assert.Equal("unsaved-test-draft", credential.Password);
+                    credential.Clear();
+                    var back = (Button)main.FindName("BackToTopButton");
+                    back.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Pump();
+                    Assert.Equal(0, main.ActiveWorkspaceScroller!.VerticalOffset);
+                    foreach (var size in new[] { new Size(900, 600), new Size(1440, 900) })
+                    {
+                        main.Width = size.Width;
+                        main.Height = size.Height;
+                        main.UpdateLayout();
+                        Pump();
+                        var position = sections.TranslatePoint(new Point(), main);
+                        Assert.True(position.X >= 0 && position.X + sections.ActualWidth <= main.ActualWidth);
+                        Assert.True(position.Y >= 0 && position.Y + sections.ActualHeight <= main.ActualHeight);
+                        Assert.True(main.ActiveWorkspaceScroller!.ViewportHeight > 100);
+                    }
+                    navigation.NavigateTo<DashboardViewModel>();
+                    main.UpdateLayout();
+                    Pump();
+                    var assessment = sections.Items.Cast<WorkspaceSections.Section>()
+                        .Single(section => section.Title == "Standards and assessment history");
+                    Assert.False(((Expander)assessment.Target).IsExpanded);
+                    sections.SelectedItem = assessment;
+                    Pump();
+                    Assert.True(((Expander)assessment.Target).IsExpanded);
+                    Assert.True(assessment.Target.IsVisible);
+                    Assert.Equal("Compliance", Assert.Single(assessment.Tabs).Header);
+                    VerifyAllWorkspaceTabs(main, firstWorkspace!);
+                }
+                finally { main.Close(); }
             }
 
             catch (Exception exception) { failure = exception; }
@@ -121,8 +214,79 @@ public sealed class WorkspaceNavigationRenderingTests
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "WPF navigation regression exceeded 30 seconds.");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(90)), "WPF navigation regression exceeded 90 seconds.");
         Assert.Null(failure);
+    }
+
+    private static void VerifyAllWorkspaceTabs(MainWindow main, WorkspaceView resources)
+    {
+        var host = (ContentControl)main.FindName("WorkspaceContent");
+        var templates = resources.Resources.Keys.OfType<DataTemplateKey>().ToArray();
+        foreach (var size in new[] { new Size(900, 600), new Size(1440, 900) })
+        {
+            main.Width = size.Width;
+            main.Height = size.Height;
+            foreach (var key in templates)
+            {
+                var content = (FrameworkElement)((DataTemplate)resources.Resources[key]).LoadContent();
+                content.DataContext = key.DataType is Type type && type == typeof(OrganizationViewModel)
+                    ? new OrganizationLayoutData()
+                    : new object();
+                host.Content = content;
+                main.UpdateLayout();
+                Pump();
+                foreach (var tabs in Descendants<TabControl>(content).ToArray())
+                    VerifyTabs(tabs, key, size);
+            }
+        }
+
+        void VerifyTabs(TabControl tabs, DataTemplateKey key, Size size)
+        {
+            foreach (var tab in tabs.Items.Cast<TabItem>())
+            {
+                tabs.SelectedItem = tab;
+                main.UpdateLayout();
+                Pump();
+                var header = tab.TranslatePoint(new Point(), main);
+                Assert.True(tab.IsVisible, $"{key.DataType}: {tab.Header} header is hidden.");
+                Assert.True(header.X >= 0 && header.X + tab.ActualWidth <= main.ActualWidth,
+                    $"{key.DataType}: {tab.Header} header overflows horizontally at {size}.");
+                Assert.True(header.Y >= 0 && header.Y + tab.ActualHeight <= main.ActualHeight - 33,
+                    $"{key.DataType}: {tab.Header} header overflows vertically at {size}.");
+                if (tab.Content is TabControl nested)
+                {
+                    VerifyTabs(nested, key, size);
+                    continue;
+                }
+                var scroller = (ScrollViewer)tabs.Template.FindName("TabScroller", tabs);
+                Assert.True(scroller.ViewportHeight > 100,
+                    $"{key.DataType}: {tab.Header} viewport is only {scroller.ViewportHeight} at {size}.");
+                var position = scroller.TranslatePoint(new Point(), main);
+                foreach (var button in Descendants<Button>(scroller).Where(button => button.IsVisible))
+                {
+                    var point = button.TranslatePoint(new Point(), scroller);
+                    Assert.True(point.X >= -1 && point.X + button.ActualWidth <= scroller.ViewportWidth + 1,
+                        $"{key.DataType}: {tab.Header} button '{button.Content}' overflows horizontally at {size}.");
+                }
+                scroller.ScrollToBottom();
+                main.UpdateLayout();
+                Pump();
+                Assert.Equal(header, tab.TranslatePoint(new Point(), main));
+                Assert.True(position.Y + scroller.ActualHeight <= main.ActualHeight - 33,
+                    $"{key.DataType}: {tab.Header} viewport extends below the workspace.");
+            }
+        }
+    }
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        if (root is T match)
+        {
+            yield return match;
+            yield break;
+        }
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            foreach (var child in Descendants<T>(VisualTreeHelper.GetChild(root, index))) yield return child;
     }
 
     private sealed class ScanState : INotifyPropertyChanged
@@ -134,8 +298,35 @@ public sealed class WorkspaceNavigationRenderingTests
             get => _isScanning;
             set { _isScanning = value; PropertyChanged?.Invoke(this, new(nameof(IsScanning))); }
         }
+
         public string ScanStatusMessage => "Synthetic scan";
         public string ScanElapsedText => "1 sec";
+    }
+
+    private sealed class OrganizationLayoutData
+    {
+        public OrganizationLayoutData() => SelectedOrganization = Organizations[0];
+        public string StatusMessage => "Sign in with Microsoft Entra ID to manage organizations and view tenant data.";
+        public string ErrorMessage => string.Empty;
+        public IReadOnlyList<OrganizationLayoutSelection> Organizations { get; } = [new()];
+        public OrganizationLayoutSelection? SelectedOrganization { get; set; }
+        public string CurrentRole => "Administrator";
+    }
+
+    private sealed class OrganizationLayoutSelection
+    {
+        public string Name => "Example organization";
+    }
+
+    private sealed class TestNavigation(params WorkspaceViewModel[] pages) : INavigationService
+    {
+        public object CurrentViewModel { get; private set; } = pages[0];
+        public event EventHandler? CurrentViewModelChanged;
+        public void NavigateTo<TViewModel>() where TViewModel : class
+        {
+            CurrentViewModel = pages.Single(page => page is TViewModel);
+            CurrentViewModelChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private sealed class EmptyDemoData : IDemoDataService

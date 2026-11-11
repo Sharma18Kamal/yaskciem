@@ -534,9 +534,12 @@ Infrastructure alone does not satisfy P2.3. Follow the existing
 - Configure an approved supervisor under a dedicated Windows service identity.
   Install only the provider CLIs required by staging accounts, and configure
   that identity's least-privilege provider authentication.
-- Apply migrations `001` through `005` using the DBA identity. Create separate
-  runtime, archive, backup, and disposable-restore logins with the documented
-  grants. Never run the API with the PostgreSQL administrator account.
+- Apply every numbered migration shipped in the matching release, in filename
+  order, using the DBA identity. Follow the package manifest; gaps in sequence
+  numbers are allowed and must not be filled by renaming or inventing scripts.
+  Create separate runtime, archive, backup, and disposable-restore logins with
+  the documented grants. Never run the API with the PostgreSQL administrator
+  account.
 - Configure the database connection with `SSL Mode=VerifyFull` and the trusted
   server certificate chain. Preserve archive HMAC keys and Object Lock
   COMPLIANCE retention; configure Credential Manager under the same Windows

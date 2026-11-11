@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using Microsoft.Win32;
+using CloudEntitle.Desktop.Views;
 
 namespace CloudEntitle.Desktop.Services;
 
@@ -39,13 +40,15 @@ public sealed class DialogService : IDialogService
 
     public string? ChooseReportPath()
     {
+        var picker = new ReportFormatDialog { Owner = System.Windows.Application.Current.MainWindow };
+        if (picker.ShowDialog() != true) return null;
+        var format = picker.SelectedFormat;
         var reportDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YASK-CIEM", "reports");
         var dialog = new SaveFileDialog
         {
-            Title = "Save YASK-CIEM report",
-            Filter = "PDF report (*.pdf)|*.pdf|Excel workbook (*.xlsx)|*.xlsx|CSV report (*.csv)|*.csv|JSON report (*.json)|*.json|HTML report (*.html)|*.html",
-            FilterIndex = 1,
-            DefaultExt = ".pdf",
+            Title = $"Save YASK-CIEM report - {format.Label}",
+            Filter = $"{format.Label}|*{format.Extension}",
+            DefaultExt = format.Extension,
             AddExtension = true,
             OverwritePrompt = true,
             InitialDirectory = Directory.Exists(reportDirectory) ? reportDirectory : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -57,17 +60,13 @@ public sealed class DialogService : IDialogService
             return null;
         }
 
-        var extension = dialog.FilterIndex switch
+        var path = Path.ChangeExtension(dialog.FileName, format.Extension);
+        if (!string.Equals(path, dialog.FileName, StringComparison.OrdinalIgnoreCase) && File.Exists(path)
+            && !Confirm($"The selected format uses {format.Extension}.\n\n{path}\n\nThis file already exists. Replace it?"))
         {
-            1 => ".pdf",
-            2 => ".xlsx",
-            3 => ".csv",
-            4 => ".json",
-            _ => ".html"
-        };
-        return string.Equals(Path.GetExtension(dialog.FileName), extension, StringComparison.OrdinalIgnoreCase)
-            ? dialog.FileName
-            : Path.ChangeExtension(dialog.FileName, extension);
+            return null;
+        }
+        return path;
     }
 
     public string? ChoosePolicyDraftPath()

@@ -83,7 +83,7 @@ Use this method when the target server cannot access the internet. Stage files o
    ```
 
    Do not use `--ignore-security-hash` to bypass a failed verification.
-3. Also stage the YASK-CIEM License Server deployment package, this repository's migrations `001-schema.sql` through `007-cloud-activity.sql` in `infra/postgres`, and the approved Object Lock archive setup materials. Verify each artifact using its publisher-provided signature or checksum.
+3. Also stage the matching YASK-CIEM License Server deployment package, all numbered migration files included in that release under `infra/postgres`, and the approved Object Lock archive setup materials. Follow the package manifest for migration order; sequence gaps are allowed. Verify each artifact using its publisher-provided signature or checksum.
 4. On the offline target, sign in with an administrator account and run the staged PostgreSQL Windows installer interactively. Select Database Server and Command Line Tools, retain port `5432` unless instructed otherwise, and set the `postgres` administrator password at the installer prompt. Do not place passwords in a response file or command-line argument.
 5. Follow the online guide from step 4 to verify the service, create the database, apply the schema, create separate service logins, and configure the License Server secret provider. Keep the service local-only when co-located; for a separate database host, configure only the approved private-network access.
 

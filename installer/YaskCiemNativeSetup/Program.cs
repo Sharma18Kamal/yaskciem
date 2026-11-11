@@ -15,7 +15,7 @@ internal static class Program
         var title = $"YASK-CIEM Setup {BuildLabel()}";
         try
         {
-            if (MessageBoxW(IntPtr.Zero, $"Install YASK-CIEM?\n\n{BuildLabel()}", title, 0x21) != 1) return 2;
+            if (MessageBoxW(IntPtr.Zero, $"Install YASK-CIEM?\n\n{BuildLabel()}\n\n.NET 10 runtimes and an offline setup/cloud sign-in guide are included.\nPostgreSQL is a separate License Server prerequisite, not required on each Desktop PC.", title, 0x21) != 1) return 2;
             await using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream(MsiResourceName)
                 ?? throw new InvalidOperationException("The embedded YASK-CIEM MSI is missing."))
             await using (var output = File.Create(extractedMsiPath))
@@ -37,10 +37,24 @@ internal static class Program
 
             if (installer.ExitCode is 0 or 3010)
             {
+                var installationDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "YASK-CIEM");
+                if (MessageBoxW(IntPtr.Zero, "Open the setup and cloud sign-in guide?\n\nIt explains API/trial sign-in, Azure/AWS/Google Cloud connections and your first scan.\nYou can reopen it from the app's Setup guide button or the YASK-CIEM Start Menu folder.", title, 0x24) == 6)
+                {
+                    var guidePath = Path.Combine(installationDirectory, "Guides", "getting-started.html");
+                    try
+                    {
+                        if (!File.Exists(guidePath)) throw new FileNotFoundException("The installed setup guide is missing. Repair the installation.", guidePath);
+                        Process.Start(new ProcessStartInfo(guidePath) { UseShellExecute = true });
+                    }
+                    catch (Exception exception) when (exception is IOException or Win32Exception or InvalidOperationException)
+                    {
+                        MessageBoxW(IntPtr.Zero, $"YASK-CIEM is installed, but the guide could not be opened: {exception.Message}\n\nYou can find it at {guidePath}.", title, 0x30);
+                    }
+                }
                 var launch = MessageBoxW(IntPtr.Zero, $"YASK-CIEM was installed successfully.\n\n{BuildLabel()}\n\nLaunch it now?", title, 0x24) == 6;
                 if (launch)
                 {
-                    var appPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "YASK-CIEM", "CloudEntitle.Desktop.exe");
+                    var appPath = Path.Combine(installationDirectory, "CloudEntitle.Desktop.exe");
                     if (File.Exists(appPath)) Process.Start(new ProcessStartInfo(appPath) { UseShellExecute = true });
                 }
                 return installer.ExitCode;

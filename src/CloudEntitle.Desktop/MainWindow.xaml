@@ -5,16 +5,16 @@
         xmlns:views="clr-namespace:CloudEntitle.Desktop.Views"
         Title="YASK-CIEM" Width="1440" Height="900" MinWidth="900" MinHeight="600"
         WindowStyle="None" ResizeMode="CanResize" WindowStartupLocation="CenterScreen" Background="{StaticResource WindowBrush}"
-        views:MouseWheelScrolling.IsEnabled="True">
+        views:MouseWheelScrolling.IsEnabled="True" views:MouseWheelScrolling.IsSmoothEnabled="True">
     <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
-        <Border Grid.Row="0" Background="{StaticResource HeaderBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="28,12" MouseLeftButtonDown="WindowHeader_MouseLeftButtonDown">
+        <Border Grid.Row="0" Background="{StaticResource HeaderBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="20,8" MouseLeftButtonDown="WindowHeader_MouseLeftButtonDown">
             <Grid>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <Grid Grid.Column="0" VerticalAlignment="Center">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Width="42" Height="42" CornerRadius="11" Margin="0,0,14,0" VerticalAlignment="Center">
+                    <Border Grid.Column="0" Width="34" Height="34" CornerRadius="8" Margin="0,0,12,0" VerticalAlignment="Center">
                         <Border.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                 <GradientStop Color="#2F79BF" Offset="0"/>
@@ -22,10 +22,10 @@
                             </LinearGradientBrush>
                         </Border.Background>
                         <Border.Effect><DropShadowEffect Color="#2F79BF" BlurRadius="12" ShadowDepth="2" Opacity="0.35"/></Border.Effect>
-                        <TextBlock Text="Y" Foreground="White" FontFamily="Segoe UI Variable Display, Segoe UI" FontSize="24" FontWeight="Black" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+                        <TextBlock Text="Y" Foreground="White" FontFamily="Segoe UI Variable Display, Segoe UI" FontSize="20" FontWeight="Black" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
                     </Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="YASK-CIEM" FontFamily="Segoe UI Variable Display, Segoe UI Semibold, Segoe UI" FontSize="26" FontWeight="ExtraBold">
+                        <TextBlock Text="YASK-CIEM" FontFamily="Segoe UI Variable Display, Segoe UI Semibold, Segoe UI" FontSize="22" FontWeight="ExtraBold">
                             <TextBlock.Foreground>
                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
                                     <GradientStop Color="#193B5D" Offset="0"/>
@@ -41,20 +41,20 @@
                         <TextBlock Text="kamal18sharma@hotmail.com" FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Grid>
-                <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Width="250" Margin="20,0,0,0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="12" CornerRadius="8">
+                <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Width="250" Margin="20,0,0,0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="8" CornerRadius="8" ToolTip="Connect multiple cloud providers. Scans are read-only and do not modify cloud resources.">
                     <StackPanel>
                         <TextBlock Text="SECURITY WORKSPACE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold"/>
                         <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource PrimaryBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                        <TextBlock Text="Connect multiple cloud providers. Scans are read-only and do not modify cloud resources." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Border>
-                <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,10,0,0">
+                <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,6,0,0">
                     <Border Style="{StaticResource StatusPill}" MaxWidth="260" ToolTip="{Binding EditionDisplayName}"><TextBlock Text="{Binding EditionDisplayName}" TextWrapping="Wrap" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold"/></Border>
                     <Button Content="Start 30-day trial" Command="{Binding StartTrialCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Sign in under Organizations first. Starts the tenant's single server-managed trial; repeated requests do not reset it."/>
                     <Button Content="Refresh license" Command="{Binding RefreshLicenseCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Read the current trial or license from the License Server without starting a new trial."/>
                     <Button Content="Connect Cloud" Command="{Binding NavigateCommand}" CommandParameter="{Binding CloudAccountsNavigationItem}" Style="{StaticResource PrimaryButton}" Margin="12,0,0,0" ToolTip="Connect Azure, AWS, or GCP using its official CLI"/>
                     <Button Content="{Binding DisconnectCloudButtonLabel}" Command="{Binding OpenCloudDisconnectCommand}" IsEnabled="{Binding CanDisconnectCloud}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Disconnect the active CLI or cancel a pending sign-in"/>
                     <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="{Binding SettingsNavigationItem}" Style="{StaticResource QuietButton}" Margin="12,0,0,0" ToolTip="Open application settings"/>
+                    <Button Content="Setup guide" Click="SetupGuideButton_Click" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Open the offline installation and cloud sign-in guide"/>
                     <Button Content="−" Style="{StaticResource WindowChromeButton}" Margin="16,0,0,0" Click="MinimizeButton_Click" ToolTip="Minimize window" AutomationProperties.Name="Minimize window"/>
                     <Button Content="□" Style="{StaticResource WindowChromeButton}" Click="MaximizeButton_Click" ToolTip="Maximize or restore window" AutomationProperties.Name="Maximize or restore window"/>
                     <Button Content="×" Style="{StaticResource WindowChromeButton}" Click="CloseButton_Click" ToolTip="Close YASK-CIEM" AutomationProperties.Name="Close YASK-CIEM"/>
@@ -63,36 +63,53 @@
         </Border>
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions><ColumnDefinition Width="250"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0" Padding="16,22">
+            <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0" Padding="12,16">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top">
+                        <TextBlock Text="WORKSPACES" Style="{StaticResource CardLabel}" Margin="2,0,0,8"/>
+                        <TextBox Text="{Binding NavigationSearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Find a workspace by name" AutomationProperties.Name="Find workspace"/>
+                        <Button Content="Clear search" Command="{Binding ClearNavigationSearchCommand}" Style="{StaticResource QuietButton}" Margin="0,0,0,8" HorizontalAlignment="Left" ToolTip="Show all workspaces without changing the current page."/>
+                        <TextBlock Text="No matching workspaces." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasMatchingWorkspaces}" Value="False"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding NavigationItems}">
+                    <ItemsControl ItemsSource="{Binding FilteredNavigationItems}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:NavigationItem}">
                                 <Button Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Style="{StaticResource NavigationButton}" ToolTip="{Binding Title}">
-                                    <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Icon}" Style="{StaticResource NavIcon}"/><TextBlock Text="{Binding Title}" VerticalAlignment="Center"/></StackPanel>
+                                    <Grid Width="198"><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Icon}" Style="{StaticResource NavIcon}"/><TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center" TextWrapping="Wrap"/></Grid>
                                 </Button>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+                </DockPanel>
             </Border>
             <Grid Grid.Column="1">
-                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <views:ScanProgressView DataContext="{Binding ScanProgress}" HorizontalAlignment="Right" Margin="24,12,24,0"/>
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" Padding="24,20">
-                <Grid HorizontalAlignment="Stretch">
+                <Border Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="20,8">
+                    <WrapPanel>
+                        <TextBlock Text="Jump to section" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <ComboBox x:Name="SectionSelector" Width="280" MinHeight="30" IsEditable="True" IsReadOnly="False" IsTextSearchEnabled="True"
+                                  DisplayMemberPath="Title" TextSearch.TextPath="Title" ToolTip="Type a section name or select it to jump directly to its content."
+                                  AutomationProperties.Name="Jump to section" SelectionChanged="SectionSelector_SelectionChanged" DropDownOpened="SectionSelector_DropDownOpened"/>
+                        <Button x:Name="BackToTopButton" Content="Back to top" Click="BackToTop_Click" Style="{StaticResource QuietButton}" Margin="10,0,0,0" ToolTip="Return to the workspace title and its search controls"/>
+                    </WrapPanel>
+                </Border>
+                <Grid Grid.Row="2" HorizontalAlignment="Stretch" Margin="20,10,12,8">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                    <Grid Margin="0,0,0,24">
+                    <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock Text="{Binding CurrentNavigationItem.Title}" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding CurrentViewModel.Title}" Foreground="{StaticResource PrimaryBrush}" FontSize="30" FontWeight="SemiBold" Margin="0,7,0,0" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding CurrentViewModel.Subtitle}" Foreground="{StaticResource MutedBrush}" FontSize="13" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding CurrentViewModel.Title}" Foreground="{StaticResource PrimaryBrush}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding CurrentViewModel.Subtitle}" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" MaxHeight="34" TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentViewModel.Subtitle}"/>
                         </StackPanel>
                     </Grid>
-                    <ContentControl Grid.Row="1" Content="{Binding CurrentViewModel}"/>
+                    <ContentControl x:Name="WorkspaceContent" Grid.Row="1" Content="{Binding CurrentViewModel, NotifyOnTargetUpdated=True}"
+                                    Loaded="WorkspaceContent_Loaded" TargetUpdated="WorkspaceContent_TargetUpdated"/>
                 </Grid>
-            </ScrollViewer>
             </Grid>
         </Grid>
         <Border Grid.Row="2" Background="{StaticResource HeaderBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="28,0">

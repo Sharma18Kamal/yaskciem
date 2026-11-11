@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'" />
+  <title>YASK-CIEM - Setup and cloud sign-in</title>
+  <style>
+    body { font: 17px/1.6 "Segoe UI", sans-serif; color: #193047; background: #f3f6fa; margin: 0; }
+    main { max-width: 900px; margin: auto; padding: 32px 24px 60px; background: white; }
+    h1, h2, h3 { line-height: 1.25; }
+    h2 { margin-top: 40px; border-bottom: 2px solid #dce5ef; padding-bottom: 8px; }
+    a { color: #145da0; }
+    nav { padding: 16px 24px; background: #edf4fb; border-radius: 8px; }
+    .note { padding: 12px 18px; border-left: 4px solid #2369a5; background: #edf4fb; }
+    .warning { border-color: #96620d; background: #fff7e6; }
+    pre { padding: 16px; background: #eef2f6; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    code { font: 0.9em Consolas, monospace; }
+    li { margin-bottom: 8px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: 10px; text-align: left; vertical-align: top; border: 1px solid #cbd6e2; }
+    @media print { body, main { background: white; } main { max-width: none; padding: 0; } pre { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>YASK-CIEM: setup and cloud sign-in</h1>
+  <p>Start here after installing YASK-CIEM. This guide opens locally in your browser and
+    needs no internet to read. Signing in and scanning require network access.</p>
+  <div class="note">
+    <strong>Using the native MSI or Setup EXE?</strong> The required .NET 10 runtimes are
+    already included. You do not need the .NET SDK or a separate runtime installer.
+    <strong>Do not install PostgreSQL on each Desktop PC.</strong> Desktop stores its
+    local results in SQLite; PostgreSQL belongs on the separate License Server.
+  </div>
+  <nav aria-label="Guide contents">
+    <strong>Your first scan</strong>
+    <ol>
+      <li><a href="#install">Install and collect your organization settings</a></li>
+      <li><a href="#app-sign-in">Sign in to YASK-CIEM and activate the trial</a></li>
+      <li><a href="#cloud-sign-in">Sign in to Azure, AWS or Google Cloud</a></li>
+      <li><a href="#first-scan">Select an account and run a read-only scan</a></li>
+    </ol>
+    <a href="#troubleshooting">Troubleshooting</a> |
+    <a href="#server">Administrator: License Server and PostgreSQL</a>
+  </nav>
+
+  <h2 id="install">1. Install and collect your organization settings</h2>
+  <ol>
+    <li>Use the installer supplied through your organization's trusted release channel.
+      Verify the publisher/signature. Do not bypass Windows publisher warnings or
+      import a development certificate on a customer PC.</li>
+    <li>Close YASK-CIEM before upgrading. Run the MSI or Setup EXE and approve the Windows
+      administrator prompt if authorized. Installation does not delete your existing scan data.</li>
+    <li>Open <strong>YASK-CIEM</strong> from Start. Run the app as your normal Windows user,
+      not as administrator.</li>
+    <li>Ask your administrator for the four values below. If no server exists yet,
+      the administrator must complete <a href="#server">server setup</a> first.</li>
+  </ol>
+  <table>
+    <thead><tr><th>Setting</th><th>Example (replace placeholders)</th></tr></thead>
+    <tbody>
+      <tr><td>License Server HTTPS URL</td><td><code>https://ciem.example.org/</code></td></tr>
+      <tr><td>Microsoft Entra tenant ID</td><td>Your organization's tenant GUID</td></tr>
+      <tr><td>Desktop application client ID</td><td>The Desktop public-client GUID, not the API client ID</td></tr>
+      <tr><td>API delegated scope</td><td><code>api://&lt;api-client-guid&gt;/access_as_user</code></td></tr>
+    </tbody>
+  </table>
+  <p>Install only the official cloud CLI tools for the providers you will scan. Follow
+    your organization's software-installation policy:</p>
+  <ul>
+    <li><a href="https://learn.microsoft.com/cli/azure/install-azure-cli-windows">Azure CLI installation</a> (internet required)</li>
+    <li><a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html">AWS CLI v2 installation</a> (internet required)</li>
+    <li><a href="https://cloud.google.com/sdk/docs/install">Google Cloud CLI installation</a> (internet required)</li>
+  </ul>
+  <p>These CLI tools, cloud credentials and the License Server are not installed or
+    provisioned by the Desktop installer. Use dedicated, approved read-only identities.</p>
+
+  <h2 id="app-sign-in">2. Sign in to YASK-CIEM and activate the trial</h2>
+  <p>Open PowerShell as the Windows user who will use Desktop. Replace the three
+    placeholder values below with the administrator-provided settings, then run:</p>
+  <pre><code>[Environment]::SetEnvironmentVariable('YASK_CIEM_API_BASE_URL', 'https://ciem.example.org/', 'User')
+[Environment]::SetEnvironmentVariable('YASK_CIEM_ENTRA_CLIENT_ID', '&lt;desktop-client-guid&gt;', 'User')
+[Environment]::SetEnvironmentVariable('YASK_CIEM_API_SCOPE', 'api://&lt;api-client-guid&gt;/access_as_user', 'User')</code></pre>
+  <ol>
+    <li>Save your work, close YASK-CIEM, and sign out of Windows and back in so that
+      newly launched programs receive the settings. Reopen YASK-CIEM from Start.</li>
+    <li>Open <strong>Organizations &gt; Organization &gt; Sign-in</strong>, enter the actual tenant GUID, then select
+      <strong>Sign in</strong>. Complete the browser sign-in. If approval is required,
+      ask your Entra administrator; do not bypass consent.</li>
+    <li>Select <strong>Start 30-day trial</strong>, then <strong>Refresh license</strong>.
+      Confirm the header shows an active trial or license.</li>
+  </ol>
+  <div class="note warning">
+    <strong>There are two different sign-ins.</strong> Organizations sign-in authenticates
+    you to the YASK-CIEM API, even when scanning only AWS or Google Cloud. Cloud Accounts
+    sign-in authenticates the provider CLI. Neither replaces the other.
+    Reinstalling the app does not restart the tenant's trial.
+  </div>
+
+  <h2 id="cloud-sign-in">3. Sign in to your cloud</h2>
+  <p>Use a new PowerShell terminal after installing a CLI. Run these commands under the
+    same Windows user as YASK-CIEM. Only connect providers and scopes approved by your
+    administrator. Signing in does not grant missing cloud permissions.</p>
+
+  <h3 id="azure">Microsoft Azure</h3>
+  <ol>
+    <li>Ask the Azure administrator for read-only access, normally <strong>Reader</strong>
+      on the approved subscriptions. Directory/Graph and PIM reads need separate approved
+      permissions and consent; subscription Reader alone does not provide them.</li>
+    <li>Verify the CLI and sign in, replacing the tenant and subscription placeholders:</li>
+  </ol>
+  <pre><code>az --version
+az login --tenant '&lt;tenant-guid&gt;'
+az account list --output table
+az account set --subscription '&lt;subscription-guid&gt;'
+az account show --output table</code></pre>
+  <p>In YASK-CIEM, open <strong>Cloud Accounts</strong>, select Azure
+    <strong>Connect</strong>, and complete or reuse the CLI sign-in. Continue to
+    <a href="#first-scan">your first scan</a>. Never grant Owner or Contributor just
+    to make a read-only scan work.</p>
+
+  <h3 id="aws">Amazon Web Services</h3>
+  <p>Prefer IAM Identity Center SSO with an administrator-approved read-only permission
+    set. Ask for the SSO start URL, SSO region, account and permission set.</p>
+  <pre><code>aws --version
+aws configure sso --profile ciem-audit
+aws sso login --profile ciem-audit
+aws sts get-caller-identity --profile ciem-audit
+aws configure list-profiles</code></pre>
+  <p>Repeat with a distinct profile name for each approved account/permission set.
+    In <strong>Cloud Accounts</strong>, select AWS <strong>Connect</strong>. The current
+    launcher may open <code>aws configure --profile yask-ciem</code>, which configures IAM
+    keys, not SSO. If using SSO, prepare the profiles above and close that unused terminal;
+    do not create long-lived keys merely because it opens. The app can detect working SSO
+    profiles. Verify account and profile names before selecting rows for a scan.</p>
+
+  <h3 id="gcp">Google Cloud</h3>
+  <p>Ask the administrator for approved read-only project/IAM access and Cloud Asset
+    Inventory permissions. The administrator must enable the required API; the scanner
+    does not do that. Inherited policies and audit logs may need additional reads.</p>
+  <pre><code>gcloud --version
+gcloud auth login
+gcloud auth list
+gcloud projects list
+gcloud config set project '&lt;project-id&gt;'
+gcloud projects get-iam-policy '&lt;project-id&gt;' --format=json</code></pre>
+  <p>In <strong>Cloud Accounts</strong>, select Google Cloud <strong>Connect</strong>.
+    The app uses the active <code>gcloud</code> account; Application Default Credentials
+    login is not a replacement for this check.</p>
+
+  <h3 id="kubernetes">Optional: Kubernetes</h3>
+  <p>Install <code>kubectl</code> and the required authentication plugin. Have your
+    administrator supply an approved, read-only kubeconfig/context. The app does not
+    create contexts or refresh cluster credentials. Check the context with
+    <code>kubectl config get-contexts</code>, then select the intended Kubernetes rows
+    during discovery. Selecting a cloud account does not select all its clusters.
+    Never grant <code>cluster-admin</code> just for scanning.</p>
+
+  <h2 id="first-scan">4. Run your first read-only scan</h2>
+  <ol>
+    <li>Confirm the header shows an active trial/license. Connect each intended provider
+      in <strong>Cloud Accounts</strong> for this app session; cached CLI credentials alone
+      do not select a provider.</li>
+    <li>Open <strong>Dashboard &gt; Discover accounts</strong>.</li>
+    <li>Start with one approved non-production account, project, subscription or cluster.
+      Inspect the provider, account ID, AWS profile/permission set and Kubernetes context.
+      Do not use Select all for the first test.</li>
+    <li>Select <strong>Scan Now</strong>. Use <strong>Stop Scan</strong> to cancel.</li>
+    <li>Review completion and per-source coverage. Denied, Unavailable, Unsupported,
+      Unknown or partial results are evidence gaps, not a clean security assessment.</li>
+    <li>Review <strong>Risk Findings</strong>, <strong>Recommendations</strong>,
+      <strong>Effective Access</strong> and <strong>Scan History</strong>. Use
+      <strong>Generate Report</strong>, choose JSON, CSV, HTML, XML, PDF or Excel,
+      then select the save location.</li>
+  </ol>
+  <p>Discovery, scans and offline what-if analysis do not change cloud resources.
+    Separate cloud-administration/JIT workflows can write when explicitly configured
+    and approved; leave them disabled for initial onboarding. Protect reports and
+    exported evidence under your organization's security policy.</p>
+  <p>Use <strong>Find workspace</strong> in the left menu. Long workspaces are divided
+    into named subtabs that stay above the scrolling content. Organizations groups
+    these under <strong>Organization, Scans, Evidence, Security, Alerts, Admin, and
+    People &amp; audit</strong>. Select an organization under
+    <strong>Organization &gt; Organizations</strong>; account bindings are under
+    <strong>Admin &gt; Account bindings</strong>, and members under
+    <strong>People &amp; audit &gt; Members</strong>.</p>
+  <p>The fixed <strong>Jump to section</strong> selector opens the matching group and
+    subtab, including collapsed sections. <strong>Back to top</strong> returns to the
+    beginning of the current subtab. Form drafts and selections are preserved when
+    switching tabs; switching tabs alone never starts a scan or cloud operation.
+    The mouse wheel scrolls the area under the pointer, then hands off to the
+    containing page at its edges; closed dropdown values do not change.</p>
+
+  <h2 id="troubleshooting">Troubleshooting</h2>
+  <table>
+    <thead><tr><th>Problem</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td>API not configured</td><td>Check all three user environment variables. Use the HTTPS API URL, not a Blob URL or a different PC's localhost. Relaunch with refreshed environment settings.</td></tr>
+      <tr><td>Organizations Sign in is disabled</td><td>Enter a valid tenant GUID.</td></tr>
+      <tr><td>Consent/admin approval needed</td><td>Ask the Entra administrator to review the requested permissions and tenant policy.</td></tr>
+      <tr><td>401 or 403 from the API</td><td>Ask the administrator to check API audience/scope, tenant and organization membership. Cloud CLI sign-in is separate.</td></tr>
+      <tr><td>Trial unavailable or expired</td><td>Check server availability and Refresh license. Obtain an approved entitlement; do not delete trial history or reset the database.</td></tr>
+      <tr><td>CLI not found or cloud not connected</td><td>Install the official CLI, open a fresh terminal, verify the commands above, then select Connect under the same Windows user.</td></tr>
+      <tr><td>Cloud AccessDenied or missing accounts</td><td>Check the specific approved read permissions and scope. For AWS, verify a working SSO profile for each account; listing an organization does not grant member-account access.</td></tr>
+      <tr><td>TLS/certificate failure</td><td>Have the administrator correct certificate trust, hostname and validity. Do not bypass TLS validation.</td></tr>
+      <tr><td>Server readiness 503</td><td>The administrator must check schema, database, workers and immutable archive readiness. Liveness 200 alone is insufficient.</td></tr>
+    </tbody>
+  </table>
+  <p>Desktop logs: <code>%LOCALAPPDATA%\CloudEntitle\Logs</code>. Share only sanitized
+    error codes, timestamps and affected scope. Never share tokens, credentials,
+    Authorization headers or unredacted sensitive exports.</p>
+
+  <h2 id="server">Administrator: License Server and PostgreSQL</h2>
+  <div class="note">
+    <strong>Set this up once per environment, not once per Desktop.</strong>
+    Users joining an existing installation need only its approved settings.
+    The Desktop installer does not install or configure the server, PostgreSQL,
+    cloud identities, archive storage or a trial.
+  </div>
+  <ol>
+    <li>Choose an organization-managed server and obtain the matching License Server
+      bundle. Native Desktop packages and the self-contained server bundle already
+      include their .NET 10 runtimes. Source builds require the repository-selected
+      .NET 10 SDK.</li>
+    <li>Install PostgreSQL 15+ on a protected database host using the organization's
+      approved installer. Keep it private; do not expose port 5432 to the internet.
+      Establish backups and separate DBA, runtime and archive identities.</li>
+    <li>Back up existing data before upgrades. Using the DBA identity, apply every numbered
+      SQL migration shipped with the matching release in filename order, including
+      subscriptions. Follow the package manifest where provided. Sequence gaps are
+      allowed; do not invent, rename or renumber scripts. Production startup does not
+      apply migrations. Never delete trial history.</li>
+    <li>Register separate Microsoft Entra API and Desktop public-client applications.
+      Configure v2 API tokens, expose <code>access_as_user</code>, authorize the Desktop
+      delegated permission, and set its interactive redirect URI to
+      <code>http://localhost</code>. Complete consent according to tenant policy.
+      The Desktop public client does not need a client secret.</li>
+    <li>Configure the API tenant/client settings, database secrets, audit integrity keys,
+      approved immutable archive, trusted HTTPS and process supervision. A production
+      Azure archive needs an authorized host managed identity; it cannot inherit a
+      Desktop CLI login. Scheduled scans need separate server-identity CLI authentication.</li>
+    <li>Verify the approved HTTPS endpoint: <code>/health/live</code> and
+      <code>/api/v1/readiness</code> must return 200 after complete provisioning.
+      Unauthenticated subscription requests must return 401. Test backup/restore and
+      archive verification before production sign-off.</li>
+    <li>Give operators the HTTPS URL, tenant GUID, Desktop client GUID and API scope.
+      Do not distribute server secrets.</li>
+  </ol>
+  <p>For detailed administrator permissions, server hosting, database installation,
+    local development and archive procedures, see the
+    <a href="https://github.com/Sharma18Kamal/yaskciem/blob/HEAD/docs/deployment/customer-installation-guide.md">complete installation guide</a>
+    (internet and repository access required; use the documentation matching your release).</p>
+  <p>You can reopen this local guide using <strong>Setup guide</strong> in the app.
+    Native MSI installations also add <strong>YASK-CIEM Setup and Cloud Sign-in Guide</strong>
+    to the YASK-CIEM Start Menu folder. For portable packages, open
+    <code>Guides\getting-started.html</code> beside the app executable.</p>
+</main>
+</body>
+</html>

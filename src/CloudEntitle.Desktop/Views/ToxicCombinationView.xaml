@@ -1,10 +1,9 @@
 <UserControl x:Class="CloudEntitle.Desktop.Views.ToxicCombinationView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
-        <StackPanel Margin="24">
-            <TextBlock Text="{Binding Title}" FontSize="26" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}"/>
-            <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,18"/>
+    <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Toxic combination sections">
+        <TabItem Header="Overview &amp; search">
+        <StackPanel>
             <WrapPanel Margin="0,0,0,8">
                 <Button Content="Refresh saved findings" Command="{Binding ReloadCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8"/>
                 <Button Content="Load Demo Mode" Command="{Binding LoadDemoCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8"/>
@@ -25,8 +24,9 @@
                 <Border Style="{StaticResource MetricCard}" MinWidth="150"><StackPanel><TextBlock Text="ENABLED RULES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding EnabledRuleCount}" Style="{StaticResource CardValue}"/></StackPanel></Border>
             </WrapPanel>
 
-            <TabControl MinHeight="390">
-                <TabItem Header="Toxic combination dashboard">
+        </StackPanel>
+        </TabItem>
+                <TabItem Header="Findings">
                     <DataGrid ItemsSource="{Binding FilteredFindings}" SelectedItem="{Binding SelectedFinding, Mode=TwoWay}"
                               IsReadOnly="True" AutoGenerateColumns="False" CanUserSortColumns="True" AlternationCount="2" MinHeight="360">
                         <DataGrid.Columns>
@@ -56,7 +56,7 @@
                         </DataGrid.Columns>
                     </DataGrid>
                 </TabItem>
-                <TabItem Header="Dangerous permission combinations">
+                <TabItem Header="Permission combinations">
                     <DataGrid ItemsSource="{Binding FilteredEvidence}" IsReadOnly="True" AutoGenerateColumns="False"
                               CanUserSortColumns="True" AlternationCount="2" MinHeight="360">
                         <DataGrid.Columns>
@@ -196,7 +196,5 @@
                         </ScrollViewer>
                     </DockPanel>
                 </TabItem>
-            </TabControl>
-        </StackPanel>
-    </ScrollViewer>
+    </TabControl>
 </UserControl>

@@ -9,7 +9,7 @@ public enum ReportType
     Executive, Technical, Identity, Entitlement, Risk, Recommendation,
     IdentityRisk, PermissionUsage, ToxicCombination, AttackPath, Remediation, ComplianceAssessment, AuditHistory
 }
-public enum ReportFormat { Json, Csv, Html, Pdf, Excel }
+public enum ReportFormat { Json, Csv, Html, Pdf, Excel, Xml }
 public enum ReportSchedule { Daily, Weekly, Monthly }
 
 public sealed record ReportingSnapshot(

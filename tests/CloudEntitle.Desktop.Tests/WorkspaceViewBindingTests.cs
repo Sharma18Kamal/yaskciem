@@ -7,6 +7,34 @@ namespace CloudEntitle.Desktop.Tests;
 
 public sealed class WorkspaceViewBindingTests
 {
+    [Theory]
+    [InlineData("DashboardViewModel", "Scan scope", "Evidence coverage")]
+    [InlineData("CloudAccountsViewModel", "Approved scope", "Source coverage")]
+    [InlineData("SettingsViewModel", "Backup & restore", "Ticketing")]
+    [InlineData("EffectiveAccessViewModel", "Access records", "Permission simulator")]
+    [InlineData("AccessPathExplorerViewModel", "Attack paths", "Edge evidence")]
+    [InlineData("RecommendationsViewModel", "Proposals", "Policy draft & ticketing")]
+    [InlineData("RemediationViewModel", "Create plan", "Provider execution")]
+    [InlineData("AccessReviewViewModel", "Review items", "Evidence & decisions")]
+    [InlineData("ScanHistoryViewModel", "Scans", "Drift alerts")]
+    [InlineData("OrganizationViewModel", "Account bindings", "Audit trail")]
+    public void LongWorkspaces_ShouldExposeIndependentNamedTabs(string viewModel, string first, string second)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var document = XDocument.Load(Path.Combine(root, "src", "CloudEntitle.Desktop", "Views", "WorkspaceView.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var template = Assert.Single(document.Descendants(presentation + "DataTemplate"),
+            element => (string?)element.Attribute("DataType") == $"{{x:Type vm:{viewModel}}}");
+        var headers = template.Descendants(presentation + "TabItem")
+            .Select(tab => (string?)tab.Attribute("Header")).ToArray();
+        Assert.Contains(first, headers);
+        Assert.Contains(second, headers);
+        Assert.Equal(headers.Length, headers.Distinct().Count());
+        Assert.All(template.Descendants(presentation + "TabControl"),
+            tabs => Assert.Contains((string?)tabs.Attribute("Style"),
+                new[] { "{StaticResource WorkspaceTabs}", "{StaticResource WorkspaceTabGroups}" }));
+    }
+
     [Fact]
     public void ServerTrial_ShouldPreserveWorkspaceNavigationAndExposeRegistration()
     {
@@ -81,7 +109,7 @@ public sealed class WorkspaceViewBindingTests
         XNamespace views = "clr-namespace:CloudEntitle.Desktop.Views";
         Assert.Equal("True", (string?)document.Root!.Attribute(views + "MouseWheelScrolling.IsEnabled"));
         var navigation = Assert.Single(document.Descendants(presentation + "ItemsControl"), control =>
-            (string?)control.Attribute("ItemsSource") == "{Binding NavigationItems}");
+            (string?)control.Attribute("ItemsSource") == "{Binding FilteredNavigationItems}");
         var scrollViewer = Assert.Single(navigation.Ancestors(presentation + "ScrollViewer"));
 
         Assert.Equal("Auto", (string?)scrollViewer.Attribute("VerticalScrollBarVisibility"));

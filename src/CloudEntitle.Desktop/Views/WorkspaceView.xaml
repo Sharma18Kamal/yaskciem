@@ -17,18 +17,21 @@
             <Setter Property="ToolTip" Value="Click sortable column headers to reorder rows. Select a row where selection is enabled."/>
         </Style>
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
-            <StackPanel>
-            <WrapPanel Margin="0,0,0,16">
+            <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <WrapPanel Margin="0,0,0,4">
                 <Button Content="Scan Now" Command="{Binding ScanCommand}" MinWidth="100" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" ToolTip="Scan all connected providers and selected accounts or Kubernetes contexts using read-only access."/>
                 <Button Content="Stop Scan" Command="{Binding StopScanCommand}" IsEnabled="{Binding IsScanning}" MinWidth="100" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Cancel the active scan and terminate its provider CLI request"/>
                 <ComboBox ItemsSource="{Binding ReportCategories}" SelectedItem="{Binding SelectedReportCategory, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="150" Margin="0,0,8,8" ToolTip="Choose an enterprise report category"/>
-                <Button Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Generate an evidence-based report as JSON, CSV, HTML, PDF, or Excel"/>
+                <Button Content="Generate Report" Command="{Binding GenerateReportCommand}" MinWidth="120" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Choose JSON, CSV, HTML, XML, PDF, or Excel, then save an evidence-based report."/>
                 <Button Content="Discover accounts" Command="{Binding DiscoverAccountsCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Refresh connected-provider accounts and local Kubernetes contexts for scan selection."/>
                 <TextBlock Text="{Binding DataContext.CloudConnectionStatus, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,12,8" TextWrapping="Wrap" MaxWidth="180" ToolTip="Cloud CLI connection status"/>
                 <ComboBox ItemsSource="{Binding ComplianceFrameworks}" SelectedItem="{Binding SelectedComplianceFramework, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="145" Margin="0,0,8,8" ToolTip="Compliance framework for the exported evidence bundle"/>
                 <Button Content="Export evidence bundle" Command="{Binding ExportComplianceBundleCommand}" IsEnabled="{Binding CanExportComplianceBundle}" Style="{StaticResource QuietButton}" Margin="0,0,8,8" ToolTip="Export organization-scoped controls, evidence, gaps, and assessment metadata"/>
                 <TextBlock Text="{Binding ScanStatusMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,12,8" TextWrapping="Wrap" MaxWidth="240" ToolTip="{Binding ScanStatusMessage}"/>
             </WrapPanel>
+            <TabControl Grid.Row="1" Style="{StaticResource WorkspaceTabs}" SelectedIndex="2" AutomationProperties.Name="Dashboard sections">
+            <TabItem Header="Compliance">
             <Expander Header="Standards and assessment history" IsExpanded="False" Margin="0,0,0,14" ToolTip="Choose compliance frameworks, record time-limited control exceptions, and review saved assessments.">
                 <StackPanel>
                     <TextBlock Text="Standards included in the assessment crosswalk" Style="{StaticResource CardLabel}" Margin="0,8,0,4"/>
@@ -105,6 +108,8 @@
                     </ItemsControl>
                 </StackPanel>
             </Expander>
+            </TabItem>
+            <TabItem Header="Scan scope">
             <Expander Header="{Binding AccountSelectionMessage}" IsExpanded="False" Margin="0,0,0,14" ToolTip="Choose cloud accounts and Kubernetes contexts included in the next scan.">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
@@ -123,9 +128,9 @@
                     </DataGrid>
                 </StackPanel>
             </Expander>
-            <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
-            <TextBlock Text="{Binding ComplianceExportStatus}" Foreground="{StaticResource SuccessBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
-            <UniformGrid Columns="2" Rows="4">
+            </TabItem>
+            <TabItem Header="Overview">
+            <WrapPanel ItemWidth="240" ItemHeight="110">
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CLOUD ACCOUNTS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CloudAccounts}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="IDENTITIES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding Identities}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="RESOURCES" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding Resources}" Style="{StaticResource CardValue}"/></StackPanel></Border>
@@ -134,7 +139,9 @@
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="RISK FINDINGS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding RiskFindings}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL FINDINGS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding CriticalFindings}" Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="LAST SCAN" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding LastScan}" Foreground="{StaticResource PrimaryBrush}" FontSize="18" FontWeight="SemiBold" Margin="0,12,0,0"/></StackPanel></Border>
-            </UniformGrid>
+            </WrapPanel>
+            </TabItem>
+            <TabItem Header="Evidence coverage">
             <UniformGrid Columns="3" Rows="2" Margin="0,4,0,8">
                 <Border Style="{StaticResource MetricCard}" ToolTip="{Binding EvidenceAgeDetails}"><StackPanel><TextBlock Text="EVIDENCE AGE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding EvidenceAge}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding EvidenceAgeDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}" ToolTip="{Binding SourceCoverageDetails}"><StackPanel><TextBlock Text="SOURCE COVERAGE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding SourceCoverageSummary}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding SourceCoverageDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
@@ -143,13 +150,21 @@
                 <Border Style="{StaticResource MetricCard}" ToolTip="{Binding UnknownEvaluationDetails}"><StackPanel><TextBlock Text="UNKNOWN EVALUATIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding UnknownEvaluationTotal}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding UnknownEvaluationDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
                 <Border Style="{StaticResource MetricCard}" ToolTip="{Binding UnsupportedEvaluationDetails}"><StackPanel><TextBlock Text="UNSUPPORTED EVALUATIONS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding UnsupportedEvaluationTotal}" Style="{StaticResource CardValue}"/><TextBlock Text="{Binding UnsupportedEvaluationDetails}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></Border>
             </UniformGrid>
+            </TabItem>
+            <TabItem Header="Risk breakdown">
             <Grid Margin="0,4,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="RISK BY PROVIDER" Style="{StaticResource CardLabel}"/><ItemsControl ItemsSource="{Binding FindingsByProvider}" Margin="0,10,0,0"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,3"><TextBlock Text="{Binding Label}" Foreground="{StaticResource PrimaryBrush}"/><TextBlock Text="{Binding Value}" DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}"/></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
                 <Border Grid.Column="1" Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="RISK BY SEVERITY" Style="{StaticResource CardLabel}"/><ItemsControl ItemsSource="{Binding FindingsBySeverity}" Margin="0,10,0,0"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,3"><TextBlock Text="{Binding Label}" Foreground="{StaticResource PrimaryBrush}"/><TextBlock Text="{Binding Value}" DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}"/></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
                 <Border Grid.Column="2" Style="{StaticResource SectionCard}"><StackPanel><TextBlock Text="ACCESS DECISIONS" Style="{StaticResource CardLabel}"/><ItemsControl ItemsSource="{Binding AccessByDecision}" Margin="0,10,0,0"><ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,3"><TextBlock Text="{Binding Label}" Foreground="{StaticResource PrimaryBrush}"/><TextBlock Text="{Binding Value}" DockPanel.Dock="Right" Foreground="{StaticResource AccentBrush}"/></DockPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
             </Grid>
+            </TabItem>
+            </TabControl>
+            <StackPanel Grid.Row="2">
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding ComplianceExportStatus}" Foreground="{StaticResource SuccessBrush}" TextWrapping="Wrap"/>
             </StackPanel>
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:FeedbackViewModel}">
             <StackPanel MaxWidth="820">
@@ -230,6 +245,8 @@
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:EffectiveAccessViewModel}">
+            <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Effective access sections">
+            <TabItem Header="Access records">
             <StackPanel>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search effective access"/>
                 <TextBlock Text="{Binding DataCoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
@@ -251,6 +268,9 @@
                 <TextBlock Text="No modeled effective-access records match this search." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                 </TextBlock>
+            </StackPanel>
+            </TabItem>
+            <TabItem Header="Permission simulator">
                 <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
                     <StackPanel>
                         <TextBlock Text="PERMISSION SIMULATOR" Style="{StaticResource CardLabel}"/>
@@ -305,12 +325,18 @@
                         </Grid>
                     </StackPanel>
                 </Border>
-            </StackPanel>
+            </TabItem>
+            </TabControl>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:AccessPathExplorerViewModel}">
-            <StackPanel>
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <StackPanel>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search access paths"/>
                 <TextBlock Text="{Binding CoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                </StackPanel>
+                <TabControl Grid.Row="1" Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Access path sections">
+                <TabItem Header="Attack paths">
                 <Border Style="{StaticResource SectionCard}" Margin="0,0,0,14">
                     <StackPanel>
                         <TextBlock Text="CROSS-CLOUD ATTACK PATH OVERVIEW" Style="{StaticResource CardLabel}"/>
@@ -331,6 +357,12 @@
                                 <DataGridTextColumn Header="Evidence" Binding="{Binding Evidence}" Width="*"/>
                             </DataGrid.Columns>
                         </DataGrid>
+                    </StackPanel>
+                </Border>
+                </TabItem>
+                <TabItem Header="Edge evidence">
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
                         <TextBlock Text="PATH EDGE EVIDENCE" Style="{StaticResource CardLabel}" Margin="0,10,0,6"/>
                         <DataGrid ItemsSource="{Binding SelectedAttackPathEvidence}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="80" MaxHeight="220" CanUserSortColumns="True">
                             <DataGrid.Columns>
@@ -348,6 +380,9 @@
                         </ItemsControl>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                <TabItem Header="Access paths &amp; evidence">
+                <StackPanel>
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="1.1*"/><ColumnDefinition Width="0.9*"/></Grid.ColumnDefinitions>
                     <DataGrid Grid.Column="0" ItemsSource="{Binding Paths}" SelectedItem="{Binding SelectedPath, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="220" MaxHeight="520" CanUserSortColumns="True" Margin="0,0,10,0">
@@ -411,7 +446,10 @@
                 <TextBlock Text="No provider-reported access paths match this search." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                 </TextBlock>
-            </StackPanel>
+                </StackPanel>
+                </TabItem>
+                </TabControl>
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RiskFindingsViewModel}">
             <StackPanel>
@@ -434,7 +472,11 @@
             </StackPanel>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:CloudAccountsViewModel}">
-            <StackPanel>
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Cloud account sections">
+                <TabItem Header="Connect providers">
+                <StackPanel>
                 <TextBlock Text="CONNECT A CLOUD PROVIDER" Style="{StaticResource CardLabel}"/>
                 <TextBlock Text="Use dedicated, organization-approved read-only identities and grant access only at intended account scopes. CLI authentication is not proof of scan permissions: run a read-only scan and check source coverage for denied, partial, unavailable, and unsupported data. YASK-CIEM does not receive or store cloud credentials. Prefer short-lived or federated credentials where your provider supports them." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
@@ -442,7 +484,7 @@
                     <TextBlock Text="{Binding CloudConnectionStatus}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
                 <ItemsControl ItemsSource="{Binding Providers}">
-                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="280"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Border Style="{StaticResource SectionCard}" Margin="0,0,12,12">
@@ -464,6 +506,9 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                </StackPanel>
+                </TabItem>
+                <TabItem Header="Account discovery">
                 <Border Style="{StaticResource SectionCard}" Padding="18" Margin="0,8,0,14">
                     <StackPanel>
                         <TextBlock Text="ACCOUNT DISCOVERY" Style="{StaticResource CardLabel}" Margin="0,0,0,8"/>
@@ -482,6 +527,12 @@
                                 <DataGridTextColumn Header="Scan access" Binding="{Binding ScanAccess}" Width="*"/>
                             </DataGrid.Columns>
                         </DataGrid>
+                    </StackPanel>
+                </Border>
+                </TabItem>
+                <TabItem Header="Approved scope">
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
                         <TextBlock Text="YOUR ADMINISTRATOR-APPROVED SCOPE" Style="{StaticResource CardLabel}" Margin="0,16,0,8"/>
                         <TextBlock Text="Select a discovered row to fill the provider/account/profile, or enter your own approved scope below. Configure CLI authentication externally first. These are scope identifiers only: never enter passwords, tokens or access keys. Nothing is saved as an organization binding by this check." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                         <Grid>
@@ -505,10 +556,12 @@
                         <TextBlock Text="{Binding VerificationStatus}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap"/>
                         <Button Content="Scan verified account" Command="{Binding ScanVerifiedAccountCommand}" IsEnabled="{Binding CanScanVerifiedAccount}" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Margin="0,12,0,6" ToolTip="Recheck the verified identity and collect only that account/profile. Other providers, provider-wide directory/organization queries and Kubernetes contexts are excluded. No account binding or cloud permission change is made."/>
                         <TextBlock Text="{Binding VerifiedScanStatus}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap"/>
-                        <TextBlock Text="Review source coverage below after collection. Provider scope discovery may list other accounts, but their inventory is not collected by Scan verified account. Broader directory/organization/cluster sources are intentionally skipped. Dashboard still has independent scan selection. Bind later in Organizations only when approved. Do not change CLI credentials while a scan runs; point-in-time identity checks cannot lock external CLI configuration. GCP impersonation and credential/token-file overrides are not supported by this check." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="Review the Source coverage tab after collection. Provider scope discovery may list other accounts, but their inventory is not collected by Scan verified account. Broader directory/organization/cluster sources are intentionally skipped. Dashboard still has independent scan selection. Bind later in Organizations only when approved. Do not change CLI credentials while a scan runs; point-in-time identity checks cannot lock external CLI configuration. GCP impersonation and credential/token-file overrides are not supported by this check." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                         <TextBlock Text="An account listed here is visible to the current CLI identity; it is not proof that every inventory source is readable. AWS Organizations members are listed separately from accounts scanned through configured profiles. Prefer IAM Identity Center SSO profiles and configure access for each target account/permission set." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                <TabItem Header="Source coverage">
                 <Border Style="{StaticResource SectionCard}" Padding="18" Margin="0,0,0,14">
                     <StackPanel>
                         <TextBlock Text="LATEST PERMISSION AND SOURCE COVERAGE" Style="{StaticResource CardLabel}"/>
@@ -525,12 +578,19 @@
                         <TextBlock Text="Collected and NoData are successful query outcomes. Denied, Partial, Unavailable, Unsupported, and Skipped are distinct coverage states; none of the latter should be interpreted as safe or complete." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                </TabControl>
+                <StackPanel Grid.Row="1">
                 <TextBlock Text="{Binding ConnectionGuidance}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                 <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
-            </StackPanel>
+                </StackPanel>
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
-            <StackPanel>
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Settings sections">
+                <TabItem Header="Application">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="APPLICATION" Style="{StaticResource CardLabel}"/>
@@ -540,6 +600,8 @@
                         <TextBlock Text="{Binding DataLocation}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                <TabItem Header="Backup &amp; restore">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="LOCAL DATA BACKUP" Style="{StaticResource CardLabel}"/>
@@ -551,6 +613,8 @@
                         <TextBlock Text="{Binding LocalDataBackupStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                <TabItem Header="Demo mode">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="DEMO MODE" Style="{StaticResource CardLabel}"/>
@@ -562,12 +626,16 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                <TabItem Header="Monitoring">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="CONTINUOUS MONITORING" Style="{StaticResource CardLabel}"/>
-                        <TextBlock Text="Cloud scans and monitoring run in the managed License Server background workers, independently of this desktop app. Configure per-account scan schedules in Organization &gt; Scan Operations. Scheduled JIT revocation is processed by the server worker; the desktop is not required to remain open." Foreground="{StaticResource MutedBrush}" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="Cloud scans and monitoring run in the managed License Server background workers, independently of this desktop app. Configure per-account scan schedules in Organizations &gt; Scans &gt; Scheduled scans. Scheduled JIT revocation is processed by the server worker; the desktop is not required to remain open." Foreground="{StaticResource MutedBrush}" Margin="0,12,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                <TabItem Header="Posture alerts">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="POSTURE ALERTS" Style="{StaticResource CardLabel}"/>
@@ -580,12 +648,16 @@
                         <TextBlock Text="{Binding PostureWebhookStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                <TabItem Header="Cloud connections">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="CLOUD CONNECTIONS" Style="{StaticResource CardLabel}"/>
                         <TextBlock Text="Use Connect Cloud in the application header to authenticate with Azure, AWS, or Google Cloud." Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
+                </TabItem>
+                <TabItem Header="Ticketing">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="TICKETING CONNECTION" Style="{StaticResource CardLabel}"/>
@@ -613,12 +685,17 @@
                         <TextBlock Text="Credentials are stored in Windows Credential Manager. Native connectors are available for Jira, Jira Service Management, and ServiceNow; other providers use the signed webhook URL." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
-                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
-            </StackPanel>
+                </TabItem>
+                </TabControl>
+                <TextBlock Grid.Row="1" Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RecommendationsViewModel}">
-            <StackPanel>
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search recommendations"/>
+                <TabControl Grid.Row="1" Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Recommendation sections">
+                <TabItem Header="Proposals">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="EVIDENCE-BACKED PROPOSALS" Style="{StaticResource CardLabel}"/>
@@ -638,6 +715,10 @@
                         <TextBlock Text="No recommendations are stored or generated from the latest scan." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
                             <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                         </TextBlock>
+                    </StackPanel>
+                </Border>
+                </TabItem>
+                <TabItem Header="Policy draft &amp; ticketing">
                         <Border Style="{StaticResource SectionCard}" Margin="0,14,0,0">
                             <StackPanel>
                                 <TextBlock Text="POLICY DRAFT WORKBENCH" Style="{StaticResource CardLabel}"/>
@@ -687,16 +768,19 @@
                                     </Hyperlink>
                                 </TextBlock>
                                 <TextBlock Text="{Binding TicketingClosureMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0" TextWrapping="Wrap"/>
-                                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
-                    </StackPanel>
-                </Border>
-            </StackPanel>
+                </TabItem>
+                </TabControl>
+                <TextBlock Grid.Row="2" Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RemediationViewModel}">
-            <StackPanel>
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search recommendations and remediation plans"/>
+                <TabControl Grid.Row="1" Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Remediation sections">
+                <TabItem Header="Create plan">
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
                         <TextBlock Text="EVIDENCE-BACKED RECOMMENDATIONS" Style="{StaticResource CardLabel}"/>
@@ -717,9 +801,9 @@
                         </Grid>
                     </StackPanel>
                 </Border>
-                <Grid Margin="0,12,0,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="1.1*"/></Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                </TabItem>
+                <TabItem Header="Plans">
+                    <StackPanel>
                         <TextBlock Text="REMEDIATION PLANS" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
                         <DataGrid ItemsSource="{Binding Plans}" SelectedItem="{Binding SelectedPlan, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" MaxHeight="380" SelectionMode="Single">
                             <DataGrid.Columns>
@@ -729,17 +813,24 @@
                             </DataGrid.Columns>
                         </DataGrid>
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                </TabItem>
+                <TabItem Header="Review &amp; approval">
+                    <StackPanel>
                         <TextBlock Text="APPROVAL-GATED WORKFLOW" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
                         <TextBlock Text="{Binding SelectedPlan.SafetyNotice}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                         <TextBlock Text="{Binding PreviewFingerprint}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                        <WrapPanel Margin="0,10,0,0">
                             <Button Content="{Binding ApprovalButtonText}" Command="{Binding ApprovePlanCommand}" IsEnabled="{Binding CanApprovePlan}" Style="{StaticResource PrimaryButton}" ToolTip="Approve the selected plan after reviewing its evidence and proposed changes. This does not apply cloud changes."/>
                             <Button Content="Reject" Command="{Binding RejectPlanCommand}" IsEnabled="{Binding CanRejectPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Reject the selected remediation plan and record the review decision."/>
                             <Button Content="Run dry run" Command="{Binding RunDryRunCommand}" IsEnabled="{Binding CanRunDryRun}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Simulate the proposed change against stored evidence; provider policies are not changed."/>
                             <Button Content="Verify provider state" Command="{Binding VerifyPlanCommand}" IsEnabled="{Binding CanVerifyPlan}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Read provider state again and compare it with the approved after-state; this does not write."/>
                             <Button Content="Prepare rollback" Command="{Binding PrepareRollbackCommand}" IsEnabled="{Binding CanPrepareRollback}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Create a separate non-executable rollback draft for review; no rollback is applied."/>
-                        </StackPanel>
+                        </WrapPanel>
+                        <TextBlock Text="{Binding SimulationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding VerificationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </TabItem>
+                <TabItem Header="Provider execution">
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="PROVIDER PREVIEW AND GUARDED EXECUTION" Style="{StaticResource CardLabel}"/>
@@ -772,9 +863,9 @@
                                 </StackPanel>
                             </StackPanel>
                         </Border>
-                        <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SuccessBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding SimulationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding VerificationSummary}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                </TabItem>
+                <TabItem Header="Changes &amp; audit">
+                    <StackPanel>
                         <TextBlock Text="PROPOSED CHANGES" Style="{StaticResource CardLabel}" Margin="0,12,0,6"/>
                         <ItemsControl ItemsSource="{Binding SelectedChanges}">
                             <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,2"><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"><Run Text="{Binding ChangeType, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Target, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding BeforeState, Mode=OneWay}"/><Run Text=" -> "/><Run Text="{Binding ProposedState, Mode=OneWay}"/><Run Text=" | Executable: "/><Run Text="{Binding Executable, Mode=OneWay}"/></TextBlock><TextBlock Text="{Binding Rationale}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap"/></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
@@ -788,16 +879,26 @@
                             <ItemsControl.ItemTemplate><DataTemplate><TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Timestamp, Mode=OneWay, StringFormat=g}"/><Run Text=" | "/><Run Text="{Binding Actor, Mode=OneWay}"/><Run Text=" ("/><Run Text="{Binding ActorUserId, Mode=OneWay}"/><Run Text=") | "/><Run Text="{Binding Action, Mode=OneWay}"/><Run Text=" | "/><Run Text="{Binding Details, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </StackPanel>
-                </Grid>
-                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
-            </StackPanel>
+                </TabItem>
+                </TabControl>
+                <StackPanel Grid.Row="2">
+                    <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SuccessBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:OrganizationViewModel}">
-            <StackPanel>
-                <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
-                <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="0.8*"/><ColumnDefinition Width="1.2*"/></Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <WrapPanel Margin="0,0,0,4">
+                    <TextBlock Text="{Binding SelectedOrganization.Name, StringFormat=Organization: {0}}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold" ToolTip="Change the selected organization under Organization > Organizations."/>
+                    <TextBlock Text="{Binding CurrentRole}" Foreground="{StaticResource AccentBrush}" Margin="12,0,0,0"/>
+                </WrapPanel>
+                <TabControl Grid.Row="1" Style="{StaticResource WorkspaceTabGroups}" AutomationProperties.Name="Organization groups">
+                <TabItem Header="Organization">
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Organization sections">
+                    <TabItem Header="Organizations">
+                    <StackPanel>
                         <TextBlock Text="ORGANIZATIONS" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
                         <DataGrid ItemsSource="{Binding Organizations}" SelectedItem="{Binding SelectedOrganization, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" MaxHeight="220" SelectionMode="Single">
                             <DataGrid.Columns>
@@ -806,6 +907,9 @@
                                 <DataGridTextColumn Header="Tenant" Binding="{Binding EntraTenantId}" Width="190"/>
                             </DataGrid.Columns>
                         </DataGrid>
+                    </StackPanel>
+                    </TabItem>
+                    <TabItem Header="Sign-in">
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="MICROSOFT ENTRA SSO" Style="{StaticResource CardLabel}"/>
@@ -820,6 +924,8 @@
                                 <TextBlock Text="{Binding CentralAuditSyncStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                    <TabItem Header="Create organization">
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="CREATE ORGANIZATION" Style="{StaticResource CardLabel}"/>
@@ -829,8 +935,9 @@
                                 <Button Content="Create and become admin" Command="{Binding CreateOrganizationCommand}" IsEnabled="{Binding CanCreateOrganization}" Style="{StaticResource PrimaryButton}" Margin="0,8,0,0" ToolTip="Create a local organization workspace and assign yourself its administrator role."/>
                             </StackPanel>
                         </Border>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                    </TabItem>
+                    <TabItem Header="Overview">
+                    <StackPanel>
                         <Grid Margin="0,4,0,8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="{Binding SelectedOrganization.Name}" Style="{StaticResource CardLabel}" VerticalAlignment="Center"/>
@@ -845,6 +952,13 @@
                             <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CRITICAL / EFFECTIVE ACCESS" Style="{StaticResource CardLabel}"/><TextBlock Foreground="{StaticResource CriticalBrush}" Style="{StaticResource CardValue}"><Run Text="{Binding ConsolidatedCriticalFindings, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding ConsolidatedEffectiveAccess, Mode=OneWay}"/></TextBlock></StackPanel></Border>
                         </UniformGrid>
                         <TextBlock Text="{Binding ConsolidatedCoverage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    </TabItem>
+                </TabControl>
+                </TabItem>
+                <TabItem Header="Scans">
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Organization scan sections">
+                    <TabItem Header="Shared scans">
                         <Border Style="{StaticResource SectionCard}" Margin="0,0,0,12">
                             <StackPanel>
                                 <TextBlock Text="SHARED SCAN HISTORY" Style="{StaticResource CardLabel}"/>
@@ -873,6 +987,8 @@
                                 </DataGrid>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                    <TabItem Header="Scheduled scans">
                         <Border Style="{StaticResource SectionCard}" Margin="0,0,0,12">
                             <StackPanel>
                                 <TextBlock Text="SCHEDULED FULL SCANS" Style="{StaticResource CardLabel}"/>
@@ -914,6 +1030,12 @@
                                 <Button Content="Cancel selected job" Command="{Binding CancelScanJobCommand}" IsEnabled="{Binding CanCancelScanJob}" Style="{StaticResource QuietButton}" Margin="0,8,0,0" ToolTip="Request cancellation of the selected queued or running scan job"/>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                </TabControl>
+                </TabItem>
+                <TabItem Header="Evidence">
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Organization evidence sections">
+                    <TabItem Header="Cloud activity">
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="ON-DEMAND CLOUD ACTIVITY (30 / 60 / 90 DAYS)" Style="{StaticResource CardLabel}"/>
@@ -950,6 +1072,12 @@
                                     </DataGrid.Columns>
                                 </DataGrid>
                                 <TextBlock Text="{Binding ActivityStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </TabItem>
+                    <TabItem Header="Permission evidence">
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
                                 <TextBlock Text="Provider permission documents and observed history" FontWeight="SemiBold" Margin="0,12,0,0"/>
                                 <TextBlock Text="{Binding EntitlementSetupInstructions}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                 <CheckBox Content="I configured/connected the account and authorize one live permission-document read" IsChecked="{Binding EntitlementReadConsent}" Margin="0,8,0,0"
@@ -1001,6 +1129,16 @@
                                         <DataGridTextColumn Header="Compatibility (not historical proof)" Binding="{Binding Status}" Width="*"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                            </StackPanel>
+                        </Border>
+                    </TabItem>
+                </TabControl>
+                </TabItem>
+                <TabItem Header="Security">
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Organization access and security sections">
+                    <TabItem Header="JIT access">
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
                                 <TextBlock Text="Multi-cloud JIT - Azure PIM / AWS client-owned broker / GCP PAM" FontWeight="Bold" Margin="0,16,0,6"/>
                                 <TextBlock Text="Connect server-allowlisted targets. AWS requires a client-owned native bounded human-session broker, not direct STS issuance. GCP uses native PAM and a configured requester-to-human mapping; native policies may require additional approvals. One or two distinct non-requester approvals are configurable (default: two). Each request shows a low-confidence screening score, not a full provider permission-risk evaluation. Standard at most 60 minutes and shorter emergency at most 15. Native expiration is independent of this app." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
                                 <WrapPanel Margin="0,8,0,0">
@@ -1050,10 +1188,16 @@
                                         <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="*"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
-                                <views:BreakGlassReportsView/>
-                                <views:TrustCredentialMonitoringView/>
-                                <views:ContinuousChangeFeedsView/>
-                                <views:AuthoritativeDecisionsView DataContext="{Binding AuthoritativeDecisions}"/>
+                            </StackPanel>
+                        </Border>
+                    </TabItem>
+                    <TabItem Header="Break-glass"><views:BreakGlassReportsView/></TabItem>
+                    <TabItem Header="Trust &amp; credentials"><views:TrustCredentialMonitoringView/></TabItem>
+                    <TabItem Header="Change feeds"><views:ContinuousChangeFeedsView/></TabItem>
+                    <TabItem Header="Access decisions"><views:AuthoritativeDecisionsView DataContext="{Binding AuthoritativeDecisions}"/></TabItem>
+                    <TabItem Header="Behavior analysis">
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
                                 <Button Content="Analyze saved behavior and document changes" Command="{Binding AnalyzeSavedSecurityCommand}" HorizontalAlignment="Left" Style="{StaticResource QuietButton}" Margin="0,16,0,0" ToolTip="Analyze the loaded saved activity/documents using server-configured baselines and business hours. Emits deduplicated potential review events to existing notification/ticket rules; no live cloud polling."/>
                                 <TextBlock Text="{Binding PriorityTwoStatus}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0"/>
                                 <DataGrid ItemsSource="{Binding BehaviorAnomalies}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="180" Margin="0,8,0,0">
@@ -1098,6 +1242,16 @@
                                         <DataGridTextColumn Header="Failed 90d" Binding="{Binding Failed90Days}" Width="80"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
+                            </StackPanel>
+                        </Border>
+                    </TabItem>
+                </TabControl>
+                </TabItem>
+                <TabItem Header="Alerts">
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Organization alert sections">
+                    <TabItem Header="Alerts &amp; delivery">
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
                                 <TextBlock Text="CENTRAL DRIFT AND ALERT DELIVERY" Style="{StaticResource CardLabel}"/>
                                 <TextBlock Text="Compare complete scans centrally. Channel aliases reference organization-specific secrets configured on the server; never enter webhook URLs here." Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -1193,6 +1347,8 @@
                                 </DataGrid>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                    <TabItem Header="SIEM alerts">
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="INBOUND SIEM ALERTS (CLIENT BRIDGE)" Style="{StaticResource CardLabel}"/>
@@ -1213,6 +1369,12 @@
                                 </DataGrid>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                </TabControl>
+                </TabItem>
+                <TabItem Header="Admin">
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Organization administration sections">
+                    <TabItem Header="Cloud administration">
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="LIVE CLOUD ADMINISTRATION (OPT-IN READ / WRITE)" Style="{StaticResource CardLabel}"/>
@@ -1256,6 +1418,8 @@
                                 <TextBlock Text="{Binding AdministrationStatus}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                    <TabItem Header="Account bindings">
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="CLOUD ACCOUNT BINDINGS" Style="{StaticResource CardLabel}"/>
@@ -1273,6 +1437,12 @@
                                 </DataGrid>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                </TabControl>
+                </TabItem>
+                <TabItem Header="People &amp; audit">
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Organization people and audit sections">
+                    <TabItem Header="Members">
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="ORGANIZATION MEMBERS" Style="{StaticResource CardLabel}"/>
@@ -1298,6 +1468,8 @@
                                 </StackPanel>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                    <TabItem Header="Roles">
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="CUSTOM ROLES" Style="{StaticResource CardLabel}"/>
@@ -1330,6 +1502,8 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
+                    </TabItem>
+                    <TabItem Header="Audit trail">
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="ADMIN AUDIT TRAIL" Style="{StaticResource CardLabel}"/>
@@ -1344,14 +1518,22 @@
                                 </DataGrid>
                             </StackPanel>
                         </Border>
-                    </StackPanel>
-                </Grid>
-                <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SuccessBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
-                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
-            </StackPanel>
+                    </TabItem>
+                </TabControl>
+                </TabItem>
+                </TabControl>
+                <StackPanel Grid.Row="2">
+                    <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SuccessBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:AccessReviewViewModel}">
-            <StackPanel>
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Access review sections">
+                <TabItem Header="Overview &amp; create">
+                <StackPanel>
                 <TextBlock Text="{Binding CoverageMessage}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
                 <UniformGrid Columns="3" Margin="0,0,0,8">
                     <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="OPEN CAMPAIGNS" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding OpenCampaigns}" Style="{StaticResource CardValue}"/></StackPanel></Border>
@@ -1374,13 +1556,13 @@
                             <Button Content="Refresh" Command="{Binding RefreshCampaignsCommand}" Style="{StaticResource QuietButton}" Margin="8,0,0,0" ToolTip="Reload campaigns and reevaluate reminders, deadlines, and expired exceptions."/>
                             <TextBlock Text="{Binding ReviewerEligibilityMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding ReminderMessage}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>
-                <Grid Margin="0,4,0,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="0.85*"/><ColumnDefinition Width="1.15*"/></Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                </StackPanel>
+                </TabItem>
+                <TabItem Header="Campaigns">
+                    <StackPanel>
                         <TextBlock Text="REVIEW CAMPAIGNS" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
                         <DataGrid ItemsSource="{Binding FilteredCampaigns}" SelectedItem="{Binding SelectedCampaign, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" MaxHeight="440" SelectionMode="Single">
                             <DataGrid.Columns>
@@ -1394,7 +1576,9 @@
                             <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasCampaigns}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                         </TextBlock>
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                </TabItem>
+                <TabItem Header="Review items">
+                    <StackPanel>
                         <TextBlock Text="ACCESS REVIEW ITEMS" Style="{StaticResource CardLabel}" Margin="0,4,0,8"/>
                         <DataGrid ItemsSource="{Binding ReviewItems}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" MaxHeight="300" SelectionMode="Single">
                             <DataGrid.Columns>
@@ -1413,6 +1597,9 @@
                         <TextBlock Text="Select a review item to see evidence and record a decision." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap">
                             <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasReviewItems}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                         </TextBlock>
+                    </StackPanel>
+                </TabItem>
+                <TabItem Header="Evidence &amp; decisions">
                         <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="REVIEW EVIDENCE" Style="{StaticResource CardLabel}"/>
@@ -1446,8 +1633,8 @@
                                 </ItemsControl>
                             </StackPanel>
                         </Border>
-                    </StackPanel>
-                </Grid>
+                </TabItem>
+                <TabItem Header="Governance">
                 <Border Style="{StaticResource SectionCard}" Margin="0,12,0,0">
                     <StackPanel>
                         <TextBlock Text="ORGANIZATION GOVERNANCE" Style="{StaticResource CardLabel}"/>
@@ -1503,9 +1690,14 @@
                         </Expander>
                     </StackPanel>
                 </Border>
-            </StackPanel>
+                </TabItem>
+                </TabControl>
+                <TextBlock Grid.Row="1" Text="{Binding ErrorMessage}" Foreground="{StaticResource CriticalBrush}" TextWrapping="Wrap"/>
+            </Grid>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ScanHistoryViewModel}">
+            <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Scan history sections">
+            <TabItem Header="Scans">
             <StackPanel>
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" ToolTip="Search scan history"/>
                 <DataGrid ItemsSource="{Binding Scans}" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="180" CanUserSortColumns="True">
@@ -1524,6 +1716,9 @@
                 <TextBlock Text="No completed scans are available." Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap">
                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasResults}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                 </TextBlock>
+            </StackPanel>
+            </TabItem>
+            <TabItem Header="Access changes">
                 <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
                     <StackPanel>
                         <TextBlock Text="ACCESS-CHANGE TIMELINE" Style="{StaticResource CardLabel}"/>
@@ -1548,6 +1743,8 @@
                         </TextBlock>
                     </StackPanel>
                 </Border>
+            </TabItem>
+            <TabItem Header="Coverage">
                 <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
                     <StackPanel>
                         <TextBlock Text="SCAN COVERAGE AND PERMISSIONS" Style="{StaticResource CardLabel}"/>
@@ -1566,6 +1763,8 @@
                         </TextBlock>
                     </StackPanel>
                 </Border>
+            </TabItem>
+            <TabItem Header="Posture trends">
                 <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
                     <StackPanel>
                         <TextBlock Text="POSTURE HISTORY" Style="{StaticResource CardLabel}"/>
@@ -1589,6 +1788,8 @@
                         </DataGrid>
                     </StackPanel>
                 </Border>
+            </TabItem>
+            <TabItem Header="Drift alerts">
                 <Border Style="{StaticResource SectionCard}" Margin="0,16,0,0">
                     <StackPanel>
                         <TextBlock Text="DRIFT ALERTS AND NOTIFICATION DELIVERY" Style="{StaticResource CardLabel}"/>
@@ -1609,11 +1810,12 @@
                         </TextBlock>
                     </StackPanel>
                 </Border>
-            </StackPanel>
+            </TabItem>
+            </TabControl>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:WorkspaceViewModel}">
             <Border Style="{StaticResource EmptyStateCard}"><StackPanel><TextBlock Text="○" Foreground="{StaticResource AccentBrush}" FontSize="28" HorizontalAlignment="Center"/><TextBlock Text="{Binding DemoRecords}" Foreground="{StaticResource PrimaryBrush}" FontSize="30" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,12,0,0"/><TextBlock Text="{Binding DemoStatus}" Foreground="{StaticResource MutedBrush}" FontSize="12" HorizontalAlignment="Center" Margin="0,6,0,0"/><TextBlock Text="Demo Mode data uses the normalized CIEM model and SQLite persistence." Foreground="{StaticResource MutedBrush}" FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,0" TextWrapping="Wrap"/></StackPanel></Border>
         </DataTemplate>
     </UserControl.Resources>
-    <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch"/>
+    <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
 </UserControl>

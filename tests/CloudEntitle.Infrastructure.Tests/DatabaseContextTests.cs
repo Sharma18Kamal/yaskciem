@@ -132,14 +132,21 @@ public class DatabaseContextTests
             var excelPath = Path.Combine(reportDirectory, "usage.xlsx");
             await service.GenerateEnterpriseReportAsync("Executive", pdfPath);
             await service.GenerateEnterpriseReportAsync("PermissionUsage", excelPath);
+            var xmlPath = Path.Combine(reportDirectory, "executive.xml");
+            await service.GenerateEnterpriseReportAsync("Executive", xmlPath);
 
             Assert.Contains("Owner access", await File.ReadAllTextAsync(jsonPath));
             Assert.Contains("Owner access", await File.ReadAllTextAsync(csvPath));
             Assert.StartsWith("%PDF-1.4", System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(pdfPath)));
             using var workbook = new System.IO.Compression.ZipArchive(File.OpenRead(excelPath), System.IO.Compression.ZipArchiveMode.Read);
             Assert.Contains(workbook.Entries, entry => entry.FullName == "xl/worksheets/sheet1.xml");
+            var xml = System.Xml.Linq.XDocument.Load(xmlPath);
+            Assert.Equal("Report", xml.Root!.Name.LocalName);
+            Assert.Equal("0", xml.Root.Element("Accounts")!.Value);
             await using var historyContext = new CloudEntitleDbContext(options);
-            Assert.Equal(4, await historyContext.ReportExecutionHistory.CountAsync());
+            Assert.Equal(5, await historyContext.ReportExecutionHistory.CountAsync());
+            Assert.Contains(await historyContext.ReportExecutionHistory.ToListAsync(),
+                item => item.Format == "Xml" && item.OutputFileName == "executive.xml" && item.Status == "Succeeded");
         }
         finally
         {

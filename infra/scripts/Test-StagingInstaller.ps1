@@ -8,20 +8,26 @@ New-Item -ItemType Directory -Path $root | Out-Null
 try {
     $bundle = Join-Path $root 'bundle'
     New-Item -ItemType Directory -Path $bundle | Out-Null
+    $repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $migrations = @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'infra\postgres') -File -Filter '*.sql' |
+        Where-Object Name -Match '^\d{3}-' | Sort-Object Name)
     $files = @(
-        'infra\postgres\015-jit-safety-guards.sql', 'infra\postgres\017-subscriptions.sql',
         'publish\CloudEntitle.LicenseServer.exe', 'publish\wwwroot\console\index.html',
-        'infra\postgres\001-schema.sql', 'infra\postgres\002-central-monitoring.sql',
-        'infra\postgres\003-governance-deadlines.sql', 'infra\postgres\004-operational-integrations.sql',
-        'infra\postgres\005-operations-scale.sql', 'infra\postgres\006-security-connectors.sql', 'infra\postgres\007-cloud-activity.sql', 'infra\postgres\008-inbound-security.sql', 'infra\postgres\009-entitlement-evidence.sql', 'infra\postgres\010-priority-two.sql', 'infra\postgres\011-trust-credential-monitoring.sql', 'infra\postgres\012-break-glass-reports.sql', 'infra\postgres\013-continuous-change-feeds.sql', 'infra\postgres\014-authoritative-decisions.sql', 'infra\postgres\backup-roles.sql'
-    )
+        'infra\postgres\backup-roles.sql'
+    ) + @($migrations | ForEach-Object { Join-Path 'infra\postgres' $_.Name })
     foreach ($name in $files) {
         $path = Join-Path $bundle $name
         $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path))
-        'offline fixture only' | Set-Content -LiteralPath $path
+        if ($name -match '^infra\\postgres\\\d{3}-') {
+            Copy-Item -LiteralPath (Join-Path $repositoryRoot $name) -Destination $path
+        }
+        else {
+            'offline fixture only' | Set-Content -LiteralPath $path
+        }
     }
     $manifest = @{
         runtime = 'win-x64'; version = '1.0.0.1'; includesWebConsole = $true
+        migrations = @($migrations | ForEach-Object { $_.Name.Substring(0, 3) })
         files = @($files | ForEach-Object {
             @{ path = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $bundle $_)).Hash }
         })
@@ -42,6 +48,15 @@ try {
         try { & $Action } catch { $rejected = $true }
         if (-not $rejected) { throw 'Unsafe package was accepted.' }
     }
+    $incompleteBundle = Join-Path $root 'incomplete-bundle'
+    Copy-Item -LiteralPath $bundle -Destination $incompleteBundle -Recurse
+    $incompleteManifestPath = Join-Path $incompleteBundle 'package-manifest.json'
+    $incompleteManifest = Get-Content -LiteralPath $incompleteManifestPath -Raw | ConvertFrom-Json
+    $incompleteManifest.migrations = @($incompleteManifest.migrations | Select-Object -SkipLast 1)
+    $incompleteManifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $incompleteManifestPath
+    $incompleteZip = Join-Path $root 'incomplete-migrations.zip'
+    Compress-Archive -Path (Join-Path $incompleteBundle '*') -DestinationPath $incompleteZip
+    Assert-Rejected { & $installer -PackagePath $incompleteZip -ExpectedSha256 (Get-FileHash $incompleteZip).Hash -Destination (Join-Path $root 'incomplete-migrations') }
     Assert-Rejected { & $installer -PackagePath $zip -ExpectedSha256 $hash -Destination $target }
     Assert-Rejected { & $installer -PackagePath $zip -ExpectedSha256 ('0' * 64) -Destination (Join-Path $root 'wrong-hash') }
     # Probe the actual verified stream while the installer holds it open.
@@ -70,6 +85,6 @@ try {
     'changed content' | Set-Content -LiteralPath (Join-Path $bundle $files[0])
     Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $tampered
     Assert-Rejected { & $installer -PackagePath $tampered -ExpectedSha256 (Get-FileHash $tampered).Hash -Destination (Join-Path $root 'tampered') }
-    Write-Output 'Installer tests passed: WhatIf, extraction, overwrite refusal, checksum, archive write/replacement lock, traversal, reserved names, production config, unlisted files and file tampering.'
+    Write-Output 'Installer tests passed: migration inventory completeness, WhatIf, extraction, overwrite refusal, checksum, archive write/replacement lock, traversal, reserved names, production config, unlisted files and file tampering.'
 }
 finally { Remove-Item -LiteralPath $root -Recurse -Force }

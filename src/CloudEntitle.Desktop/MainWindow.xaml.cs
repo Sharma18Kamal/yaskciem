@@ -1,7 +1,13 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Threading;
 using CloudEntitle.Desktop.ViewModels;
+using CloudEntitle.Desktop.Views;
 
 namespace CloudEntitle.Desktop;
 
@@ -10,6 +16,7 @@ public partial class MainWindow : Window
     private static readonly TimeSpan SessionIdleTimeout = TimeSpan.FromMinutes(5);
     private readonly MainWindowViewModel _viewModel;
     private readonly DispatcherTimer _idleTimer;
+    private bool _updatingSections;
 
     public MainWindow(MainWindowViewModel viewModel)
     {
@@ -65,6 +72,85 @@ public partial class MainWindow : Window
         WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void WorkspaceContent_Loaded(object sender, RoutedEventArgs e) => RefreshSections();
+
+    private void WorkspaceContent_TargetUpdated(object sender, DataTransferEventArgs e)
+    {
+        if (e.TargetObject == WorkspaceContent) RefreshSections();
+    }
+
+    private void RefreshSections()
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            ScrollWorkspaceToTop();
+            SectionSelector.ItemsSource = WorkspaceSections.Find(WorkspaceContent);
+            SectionSelector.SelectedIndex = -1;
+            SectionSelector.Text = string.Empty;
+        }));
+    }
+
+    private void SectionSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingSections || SectionSelector.SelectedItem is not WorkspaceSections.Section section) return;
+        if (ActiveWorkspaceScroller is { } scroller) MouseWheelScrolling.StopAnimation(scroller);
+        WorkspaceSections.Navigate(section);
+    }
+
+    private void SectionSelector_DropDownOpened(object? sender, EventArgs e)
+    {
+        var title = SectionSelector.Text;
+        _updatingSections = true;
+        try
+        {
+            SectionSelector.ItemsSource = WorkspaceSections.Find(WorkspaceContent);
+            SectionSelector.Text = title;
+        }
+        finally { _updatingSections = false; }
+    }
+
+    private void BackToTop_Click(object sender, RoutedEventArgs e)
+    {
+        ScrollWorkspaceToTop();
+        SectionSelector.SelectedIndex = -1;
+        SectionSelector.Text = string.Empty;
+    }
+
+    internal ScrollViewer? ActiveWorkspaceScroller => FindWorkspace(WorkspaceContent)?.ActiveScroller;
+
+    private void ScrollWorkspaceToTop()
+    {
+        if (ActiveWorkspaceScroller is not { } scroller) return;
+        MouseWheelScrolling.StopAnimation(scroller);
+        scroller.ScrollToTop();
+    }
+
+    private static WorkspaceView? FindWorkspace(DependencyObject root)
+    {
+        if (root is WorkspaceView workspace) return workspace;
+        for (var index = 0; index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var found = FindWorkspace(System.Windows.Media.VisualTreeHelper.GetChild(root, index));
+            if (found is not null) return found;
+        }
+        return null;
+    }
+    private void SetupGuideButton_Click(object sender, RoutedEventArgs e)
+    {
+        var guidePath = Path.Combine(AppContext.BaseDirectory, "Guides", "getting-started.html");
+        try
+        {
+            if (!File.Exists(guidePath))
+                throw new FileNotFoundException("The setup guide is missing. Repair or reinstall YASK-CIEM.", guidePath);
+            Process.Start(new ProcessStartInfo(guidePath) { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is IOException or Win32Exception or InvalidOperationException)
+        {
+            MessageBox.Show(this, $"Unable to open the setup guide: {exception.Message}", "YASK-CIEM",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void UserActivity(object? sender, RoutedEventArgs e) => RestartIdleTimer();
 

@@ -856,10 +856,16 @@ public sealed class NavigationTests
         Assert.Equal(new[] { CloudProviderType.Azure, CloudProviderType.Gcp }, result.IdentityRecords.Select(identity => identity.CloudProvider).Distinct().OrderBy(provider => provider).ToArray());
     }
 
-    [Fact]
-    public async Task DashboardViewModel_ShouldGenerateReportAtChosenPathAndFormat()
+    [Theory]
+    [InlineData("json")]
+    [InlineData("csv")]
+    [InlineData("html")]
+    [InlineData("xml")]
+    [InlineData("pdf")]
+    [InlineData("xlsx")]
+    public async Task DashboardViewModel_ShouldGenerateReportAtChosenPathAndFormat(string extension)
     {
-        var outputPath = Path.Combine(Path.GetTempPath(), "selected-yask-report.csv");
+        var outputPath = Path.Combine(Path.GetTempPath(), $"selected-yask-report.{extension}");
         var dialogs = new RecordingDialogService(confirmationResult: true) { ReportPath = outputPath };
         var reports = new RecordingReportService();
         var liveScan = new LiveCloudScanService(new ICloudProvider[] { new FakeCloudProvider(CloudProviderType.Azure, connected: true) });
@@ -868,11 +874,44 @@ public sealed class NavigationTests
 
         await dashboard.GenerateReportAsync();
 
-        Assert.Equal("csv", reports.ReportType);
+        Assert.Equal(extension, reports.ReportType);
         Assert.Equal(outputPath, reports.OutputPath);
         Assert.Single(reports.CurrentScanFindings!);
         Assert.Contains(dialogs.InformationMessages, message => message.Contains(outputPath));
         Assert.Null(dashboard.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("unsupported.txt")]
+    public async Task DashboardReport_ShouldNotGenerateWhenCanceledOrUnsupported(string? path)
+    {
+        var reports = new RecordingReportService();
+        var dashboard = new DashboardViewModel(new NoopDemoDataService(), new NoopAnalyticsService(),
+            reportService: reports, dialogService: new RecordingDialogService(true) { ReportPath = path });
+        await dashboard.GenerateReportAsync();
+        Assert.Null(reports.OutputPath);
+        if (path == "unsupported.txt") Assert.Contains("XML", dashboard.ErrorMessage);
+        else Assert.Null(dashboard.ErrorMessage);
+    }
+
+    [Fact]
+    public void WorkspaceSearch_ShouldFilterWithoutChangingSelectionAndClearWithoutLosingItems()
+    {
+        var viewModel = new MainWindowViewModel(new TestNavigationService(new CloudAccountsViewModel(new NoopDemoDataService())));
+        var selected = viewModel.CurrentNavigationItem;
+        viewModel.NavigationSearchText = "  aCcEsS  ";
+        Assert.Equal(3, viewModel.FilteredNavigationItems.Count());
+        Assert.All(viewModel.FilteredNavigationItems, item => Assert.Contains("Access", item.Title));
+        Assert.Same(selected, viewModel.CurrentNavigationItem);
+        viewModel.NavigationSearchText = "no matching workspace";
+        Assert.False(viewModel.HasMatchingWorkspaces);
+        Assert.Empty(viewModel.FilteredNavigationItems);
+        viewModel.ClearNavigationSearchCommand.Execute(null);
+        Assert.Equal(18, viewModel.FilteredNavigationItems.Count());
+        Assert.True(viewModel.HasMatchingWorkspaces);
+        Assert.Same(selected, viewModel.CurrentNavigationItem);
     }
 
     [Fact]

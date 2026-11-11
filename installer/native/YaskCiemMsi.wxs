@@ -31,6 +31,10 @@
                     Name="YASK-CIEM"
                     Target="[INSTALLFOLDER]CloudEntitle.Desktop.exe"
                     WorkingDirectory="INSTALLFOLDER" />
+          <Shortcut Id="YaskCiemSetupGuideShortcut"
+                    Name="YASK-CIEM Setup and Cloud Sign-in Guide"
+                    Target="[INSTALLFOLDER]Guides\getting-started.html"
+                    WorkingDirectory="INSTALLFOLDER" />
           <RemoveFolder Id="RemoveYaskCiemStartMenuFolder" On="uninstall" />
           <RegistryValue Root="HKLM" Key="Software\YASK-CIEM" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
         </Component>

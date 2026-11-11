@@ -1,5 +1,11 @@
 # YASK-CIEM: installation and first-use guide
 
+For a shorter first-scan walkthrough, use the [offline setup and cloud sign-in
+guide](getting-started.html). New Desktop builds include it under **Setup guide**.
+Native MSI builds also add **YASK-CIEM Setup and Cloud Sign-in Guide** to Start;
+the Setup EXE offers to open it after installation. These additions require a
+new installer build; they do not update previously installed packages.
+
 After setup, use the [complete Desktop user manual](../user-guide/user-manual.md)
 for screen-by-screen options and operating procedures.
 
@@ -45,6 +51,9 @@ require hosting it on GCP. A Blob/container URL is never the License Server URL.
 - Self-contained packages include their runtime. Source builds require the
   .NET 10 SDK selected by the repository's `global.json`, Git and PowerShell 7
   for the laptop setup scripts.
+- The native MSI and Setup EXE include the .NET 10 runtimes and offline guide,
+  but not provider CLIs or PostgreSQL. Install only the required official CLIs.
+  PostgreSQL belongs on the License Server database host, not every Desktop PC.
 
 ### For the server administrator
 
@@ -144,7 +153,8 @@ works; that is incomplete setup, not production acceptance.
    [database configuration](../../infra/postgres/README.md).
 2. Apply **every numbered migration shipped with the matching release in
    filename order**, including the subscription migration, using the DBA
-   identity. Do not invent missing sequence numbers. Production startup does
+   identity. Follow the package manifest; gaps in sequence numbers are allowed.
+   Do not invent, rename or renumber migration files. Production startup does
    not migrate the database.
 3. Install the matching server bundle and configure the service identity using
    [License Server hosting](license-server-hosting.md).

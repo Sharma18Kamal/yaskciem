@@ -6,9 +6,11 @@ saved evidence reads never provision endpoints or activate cloud privileges.
 
 ## Deployment and capabilities
 
-Apply migrations 001 through [014-authoritative-decisions.sql](../../infra/postgres/014-authoritative-decisions.sql)
-with the DBA identity before deploying. Startup does not migrate. The staging
-installer packages schema files but neither applies them nor starts services.
+Apply every numbered migration shipped with the matching release, in filename
+order, with the DBA identity before deploying. Use the package manifest; sequence
+gaps are allowed and must not be filled by renaming or inventing scripts. Startup
+does not migrate. The staging installer packages schema files but neither
+applies them nor starts services.
 Readiness checks JIT tables, the valid status/time index and enabled audit guards.
 
 | Capability | Implemented boundary |

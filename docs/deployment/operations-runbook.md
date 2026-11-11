@@ -15,7 +15,9 @@ Defaults are 1,000 queued scans and 3,600 seconds maximum oldest queued age befo
 
 Defaults limit each tenant to 100 schedules and 25 queued/running scan jobs. Override with `Operations__Limits__MaxScanSchedulesPerTenant` and `Operations__Limits__MaxActiveScanJobsPerTenant`. Immediate duplicate requests remain idempotent; new work beyond the tenant limit returns HTTP 429. These limits protect queue capacity and are enforced under a per-tenant PostgreSQL transaction lock.
 
-Apply schema migrations `001` through `007` with the DBA identity, then run:
+Apply every numbered migration shipped with the matching release in filename
+order using the DBA identity; follow the package manifest and do not invent or
+renumber files to fill sequence gaps. Then run:
 
 ```powershell
 ./scripts/check-postgres-operations.ps1

@@ -97,6 +97,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private object _currentViewModel;
     private NavigationItem _currentNavigationItem;
     private string _statusMessage = "Ready";
+    private string _navigationSearchText = string.Empty;
     private readonly SubscriptionAccessService? _subscription;
 
     public MainWindowViewModel(
@@ -163,6 +164,7 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         });
         OpenCloudDisconnectCommand = new AsyncRelayCommand(DisconnectActiveCloudAsync);
+        ClearNavigationSearchCommand = new RelayCommand(() => NavigationSearchText = string.Empty);
         _ = RefreshCloudConnectionStatusAsync();
     }
 
@@ -195,12 +197,28 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool CanDisconnectCloud => _cloudConnectionState.HasConnections;
     public string DisconnectCloudButtonLabel => _cloudConnectionState.PendingProvider.HasValue ? "Cancel Sign-in" : "Disconnect Cloud";
     public IReadOnlyList<NavigationItem> NavigationItems { get; }
+    public IEnumerable<NavigationItem> FilteredNavigationItems => NavigationItems.Where(item =>
+        item.Title.Contains(NavigationSearchText.Trim(), StringComparison.OrdinalIgnoreCase));
+    public string NavigationSearchText
+    {
+        get => _navigationSearchText;
+        set
+        {
+            if (SetProperty(ref _navigationSearchText, value))
+            {
+                OnPropertyChanged(nameof(FilteredNavigationItems));
+                OnPropertyChanged(nameof(HasMatchingWorkspaces));
+            }
+        }
+    }
+    public bool HasMatchingWorkspaces => FilteredNavigationItems.Any();
     public NavigationItem CloudAccountsNavigationItem => NavigationItems[1];
     public NavigationItem SettingsNavigationItem => NavigationItems[^1];
     public object CurrentViewModel { get => _currentViewModel; private set => SetProperty(ref _currentViewModel, value); }
     public NavigationItem CurrentNavigationItem { get => _currentNavigationItem; private set => SetProperty(ref _currentNavigationItem, value); }
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public ParameterizedRelayCommand NavigateCommand { get; }
+    public RelayCommand ClearNavigationSearchCommand { get; }
     public AsyncRelayCommand OpenCloudDisconnectCommand { get; }
 
     public async Task RefreshCloudConnectionStatusAsync()
@@ -710,9 +728,9 @@ public sealed class DashboardViewModel : WorkspaceViewModel
         }
 
         var extension = Path.GetExtension(outputPath).TrimStart('.').ToLowerInvariant();
-        if (extension is not ("json" or "csv" or "html" or "pdf" or "xlsx"))
+        if (extension is not ("json" or "csv" or "html" or "xml" or "pdf" or "xlsx"))
         {
-            ErrorMessage = "Choose a JSON, CSV, HTML, PDF, or Excel report file.";
+            ErrorMessage = "Choose a JSON, CSV, HTML, XML, PDF, or Excel report file.";
             return;
         }
 

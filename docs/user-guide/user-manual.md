@@ -113,7 +113,7 @@ See [effective-access boundaries](../effective-access/effective-access.md).
 1. Have the administrator configure `YASK_CIEM_API_BASE_URL`,
    `YASK_CIEM_ENTRA_CLIENT_ID` and `YASK_CIEM_API_SCOPE` for your Windows user.
 2. Close Desktop and reopen it with the updated environment.
-3. Open **Organizations**, enter the tenant GUID and select **Sign in**.
+3. Open **Organizations > Organization > Sign-in**, enter the tenant GUID and select **Sign in**.
 4. Finish browser authentication and approved consent prompts.
 5. Select **Start 30-day trial**, then **Refresh license**.
 6. Confirm the header shows an active entitlement before collecting data.
@@ -125,7 +125,7 @@ users. Do not delete database history to resolve a licensing problem.
 
 ### 2.3 Safe first exercise
 
-1. Use **Settings > Load Demo Data** for training on a separate test profile.
+1. Use **Settings > Demo mode > Load Demo Data** for training on a separate test profile.
 2. Inspect Dashboard, Identities, Effective Access and What-if without cloud calls.
 3. Reset the demo when finished and verify which data is displayed.
 4. For a live test, connect one provider and explicitly select one approved
@@ -149,7 +149,10 @@ scanning, simulation or governance workflows.
 | **Disconnect Cloud** | Open Cloud Accounts/disconnect the selected provider; if a sign-in is pending, use **Cancel Sign-in** | Canceling the wait does not close an external CLI terminal |
 | **Settings** | Select to open configuration/backup options | See section 26 |
 | Minimize / maximize / close | Use the window buttons; drag the header to move the window | Closing Desktop does not stop independent server jobs |
-| Left navigation | Select a page; scroll the menu for lower entries | Advanced organization panels are inside Organizations, not separate main-menu entries |
+| Left navigation | Type in **Find workspace** to filter page names; **Clear search** restores the full menu | Selection and page data are preserved while filtering |
+| Workspace subtabs | Choose the named task below the workspace title; Organizations also has a group row | Tab headers wrap to fit the window and remain above the scrolling content; changing tabs does not run an operation |
+| **Jump to section** | Use the fixed toolbar to choose/type a section name | Selects the enclosing group/subtab and opens enclosing expanders; controls hidden by permissions remain hidden |
+| **Back to top** | Select from the fixed toolbar | Returns to the beginning of the current subtab without changing tabs |
 | Status/error text | Read the page status after every operation | A button click alone is not proof of success |
 
 On grid pages, use available search/filter boxes and sortable column headers.
@@ -166,8 +169,51 @@ editor under the pointer first, then the containing page when that control reach
 its top/bottom edge. Empty tables and horizontal-only panels do not trap vertical
 scrolling. Over a closed dropdown, the wheel scrolls the page without changing
 the selection; open the dropdown to scroll its choices. Sidebar scrolling remains
-independent. Scrolling respects Windows wheel line/page settings; this does not
-add middle-button auto-scroll.
+independent. Pixel-scrolled pages use a short eased animation and accumulate
+rapid wheel input; tables retain their native logical scrolling and virtualization.
+Windows wheel line/page settings and the Windows client-area animation setting
+are respected. Clicking or using the keyboard in a scrolling area interrupts its
+animation. This does not add middle-button auto-scroll.
+
+### 3.1 Where to find each workflow
+
+Long workspaces use the following subtabs instead of a single deep page.
+Selections, form drafts and page data remain in the cached workspace when changing
+tabs or visiting another workspace. Scrolling is local to the selected subtab;
+table columns can still scroll horizontally for long IDs and evidence.
+
+| Main workspace | Subtabs |
+| --- | --- |
+| Dashboard | Overview, Scan scope, Compliance, Evidence coverage, Risk breakdown; scan/report actions stay above the tabs |
+| Cloud Accounts | Connect providers, Account discovery, Approved scope, Source coverage |
+| Effective Access | Access records, Permission simulator |
+| Access Paths | Attack paths, Edge evidence, Access paths & evidence |
+| Recommendations | Proposals, Policy draft & ticketing |
+| Remediation | Create plan, Plans, Review & approval, Provider execution, Changes & audit |
+| Access Reviews | Overview & create, Campaigns, Review items, Evidence & decisions, Governance |
+| Scan History | Scans, Access changes, Coverage, Posture trends, Drift alerts |
+| Settings | Application, Backup & restore, Demo mode, Monitoring, Posture alerts, Cloud connections, Ticketing |
+| Permission Usage | Analyze & filter, Live collection, Overview, Permission usage, Identity / unused analysis, Historical activity, Risk findings & recommendations |
+| Toxic Combinations | Overview & search, Findings, Identity risk analysis, Permission combinations, Finding evidence, Cross-account trust paths, Remediation recommendations, Rule management |
+| What-if Simulator | Scenario, Impact summary, Attack paths, Access changes, Limitations |
+
+**Organizations** groups its workflows so that the tab strip itself does not become
+an oversized menu. The selected organization and role stay visible above the groups.
+Change the selected organization under **Organization > Organizations** before
+working in another group.
+
+| Organizations group | Subtabs |
+| --- | --- |
+| Organization | Organizations, Sign-in, Create organization, Overview |
+| Scans | Shared scans, Scheduled scans |
+| Evidence | Cloud activity, Permission evidence |
+| Security | JIT access, Break-glass, Trust & credentials, Change feeds, Access decisions, Behavior analysis |
+| Alerts | Alerts & delivery, SIEM alerts |
+| Admin | Cloud administration, Account bindings |
+| People & audit | Members, Roles, Audit trail |
+
+Simple inventory/table pages remain single pages. Authorization, consent,
+confirmation and license requirements are unchanged by this navigation layout.
 
 ## 4. Cloud Accounts
 
@@ -271,11 +317,19 @@ outcomes. Partial or denied sources must not become a conclusion of no risk.
 
 1. Choose a **report category** in the selector beside **Generate Report**.
 2. Select **Generate Report**.
-3. In the save dialog choose the offered format and destination. The UI supports
-   JSON, CSV, HTML, PDF or Excel reporting; available output depends on the
-   selected report workflow.
-4. Open the saved file and verify its scope, evidence age, gaps and counts.
-5. Distribute only through approved channels.
+3. In **Choose report format**, select **JSON**, **CSV**, **HTML**, **XML**, **PDF**
+   or **Excel**, then **Continue**. Canceling does not create a report.
+4. Choose the destination in the save dialog. The selected format determines the
+   file extension and file contents; renaming the extension does not switch formats.
+   Existing files require overwrite confirmation.
+5. Open the saved file and verify its scope, evidence age, gaps and counts.
+6. Distribute only through approved channels.
+
+XML uses a `Report` root, property elements and `Item` elements for array entries.
+Each element has a `kind` attribute preserving its JSON value type, including
+null, boolean and numeric values. CSV and Excel retain the existing
+section/JSON-record layout. These updates remain in Desktop 1.0.0.68; previously
+built installers must be rebuilt to include them.
 
 ### 5.4 Standards and assessment history
 
@@ -592,9 +646,9 @@ safe removal. For operation-specific fields and guards, see
 
 ### 14.1 Select or create an organization
 
-1. Open **Organizations**, enter tenant GUID and **Sign in** with Entra.
-2. Select an existing organization to load its workspace.
-3. To create one, enter **Organization name**, **Tenant key** and **Tenant ID**
+1. Open **Organizations > Organization > Sign-in**, enter tenant GUID and **Sign in** with Entra.
+2. Select an existing organization under **Organization > Organizations** to load its workspace.
+3. Under **Organization > Create organization**, enter **Organization name**, **Tenant key** and **Tenant ID**
    matching the authenticated identity, then **Create and become admin**.
 4. Read **Signed in as**, current role, consolidated inventory and status.
 5. Use **Sign out** to end the organization UI session; this is not provider
@@ -605,7 +659,7 @@ safe removal. For operation-specific fields and guards, see
 ### 14.2 Bind cloud accounts
 
 1. Discover the intended cloud account under Cloud Accounts.
-2. Select it in the Organizations binding controls.
+2. Select it under **Organizations > Admin > Account bindings**.
 3. Select **Bind account** with authorized **Manage connections** access.
 4. Confirm provider, external account ID and tenant mapping in the bindings list.
 

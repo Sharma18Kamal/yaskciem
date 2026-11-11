@@ -86,9 +86,10 @@ public sealed class SqliteReportService : IReportService
             "json" => ReportFormat.Json,
             "csv" => ReportFormat.Csv,
             "html" => ReportFormat.Html,
+            "xml" => ReportFormat.Xml,
             "pdf" => ReportFormat.Pdf,
             "xlsx" => ReportFormat.Excel,
-            _ => throw new ArgumentException("Report output must use JSON, CSV, HTML, PDF, or XLSX.", nameof(outputPath))
+            _ => throw new ArgumentException("Report output must use JSON, CSV, HTML, XML, PDF, or XLSX.", nameof(outputPath))
         };
 
         await using var context = new CloudEntitleDbContext(_options);

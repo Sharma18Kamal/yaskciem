@@ -242,6 +242,63 @@ public sealed class MouseWheelScrollingTests
         });
     }
 
+    [Fact]
+    public void SmoothScrolling_ShouldAccumulateRapidInputAndKeepTheFinalOffset()
+    {
+        RunSta(() =>
+        {
+            var viewer = new ScrollViewer { Content = new Border { Height = 2000 } };
+            WithWindow(viewer, () =>
+            {
+                MouseWheelScrolling.Scroll(viewer, -120, 3, smooth: true);
+                MouseWheelScrolling.Scroll(viewer, -120, 3, smooth: true);
+                WaitForAnimation();
+                Assert.Equal(96, viewer.VerticalOffset, 1);
+                WaitForAnimation();
+                Assert.Equal(96, viewer.VerticalOffset, 1);
+                MouseWheelScrolling.Scroll(viewer, 120, 3, smooth: true);
+                WaitForAnimation();
+                Assert.Equal(48, viewer.VerticalOffset, 1);
+                viewer.ScrollToBottom();
+                Pump();
+                MouseWheelScrolling.Scroll(viewer, -120, 3, smooth: true);
+                WaitForAnimation();
+                Assert.Equal(viewer.ScrollableHeight, viewer.VerticalOffset, 1);
+            });
+        });
+    }
+
+    [Fact]
+    public void SmoothScrolling_ShouldAllowDirectNavigationToInterruptAnimation()
+    {
+        RunSta(() =>
+        {
+            var viewer = new ScrollViewer { Content = new Border { Height = 2000 } };
+            WithWindow(viewer, () =>
+            {
+                MouseWheelScrolling.Scroll(viewer, -120, 3, smooth: true);
+                MouseWheelScrolling.StopAnimation(viewer);
+                viewer.ScrollToVerticalOffset(300);
+                Pump();
+                WaitForAnimation();
+                Assert.Equal(300, viewer.VerticalOffset, 1);
+                MouseWheelScrolling.Scroll(viewer, -30, 0, smooth: false);
+                Pump();
+                Assert.Equal(300, viewer.VerticalOffset, 1);
+            });
+        });
+    }
+
+    private static void WaitForAnimation()
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(350) };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start();
+        Dispatcher.PushFrame(frame);
+        Pump();
+    }
+
     private static MouseWheelEventArgs Wheel(UIElement source, int delta)
     {
         var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)

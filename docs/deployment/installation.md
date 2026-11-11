@@ -4,7 +4,75 @@ For the complete administrator/operator workflow, including License Server
 setup, trial activation and Azure/AWS/GCP/Kubernetes onboarding, use the
 [step-by-step environment installation guide](customer-installation-guide.md).
 
-## Current server-managed trial candidate: 1.0.0.66
+New Desktop builds include an [offline setup and cloud sign-in guide](getting-started.html).
+Open **Setup guide** in the app, or **YASK-CIEM Setup and Cloud Sign-in Guide**
+in the native installation's Start Menu folder. The native Setup EXE offers to
+open it after installation. The guide covers API/trial sign-in, Azure/AWS/GCP
+CLI sign-in, the first scan, and server-only PostgreSQL prerequisites.
+The current candidate below includes this guide; historical candidates do not.
+
+## Current subtab-navigation test candidate: 1.0.0.68
+
+This rebuild keeps version **1.0.0.68** and replaces deep workspace pages with
+named subtabs. Organizations uses compact workflow groups with a second row of
+task tabs. Settings, Dashboard, Cloud Accounts, access analysis, reviews,
+remediation and scan history also have dedicated subtabs. Tab headers stay
+visible while their content scrolls; section jumps select the correct group and
+tab. Sidebar labels wrap within the available width.
+
+- [Interactive Setup EXE](../../artifacts/native-installers-1.0.0.68-subtabs/YASK-CIEM-Setup-1.0.0.68.exe)
+- [Native MSI](../../artifacts/native-installers-1.0.0.68-subtabs/YASK-CIEM-1.0.0.68.msi)
+
+The packages retain the report-format picker, bundled .NET 10 runtimes, and
+offline setup/cloud sign-in guide. Close the app and preserve existing data
+before upgrading. Use this specific **subtabs** rebuild rather than an older
+same-version package. PostgreSQL remains a separate server-only prerequisite.
+
+These are development-signed **trusted-test candidates, not approved customer
+releases**. Do not import development certificates on customer PCs. Automated
+Desktop rendering and workflow tests do not replace clean-machine installation,
+upgrade, accessibility or real-cloud acceptance.
+
+Both package signatures were verified locally; SHA256 checksums:
+
+```text
+566CE21286AF460110117D3CC2FFC653A39817A47BDF80ABDA495B89CA914472  YASK-CIEM-1.0.0.68.msi
+772255A049A63FE66EEDF35728CE8075EFCDF181DFD3A2CD4515A5126387F28B  YASK-CIEM-Setup-1.0.0.68.exe
+```
+
+## Historical usability test candidate: 1.0.0.68
+
+This rebuild keeps version **1.0.0.68** and adds explicit report-format selection
+(JSON, CSV, HTML, XML, PDF, or Excel), smoother mouse-wheel scrolling, compact
+controls, workspace search, section jumps, and a back-to-top button.
+
+- [Interactive Setup EXE](../../artifacts/native-installers-1.0.0.68-usability/YASK-CIEM-Setup-1.0.0.68.exe)
+- [Native MSI](../../artifacts/native-installers-1.0.0.68-usability/YASK-CIEM-1.0.0.68.msi)
+
+Both self-contained x64 packages include .NET 10 runtimes and the offline setup
+and cloud sign-in guide. PostgreSQL is not bundled or required for Desktop;
+it remains a separately provisioned central License Server dependency.
+
+Close YASK-CIEM before upgrading and keep existing application data. For an
+existing MSI installation, use this MSI or Setup EXE rather than switching to
+MSIX. Use this specific usability rebuild: the version number alone cannot
+distinguish it from older 1.0.0.68 packages, and Windows Installer permits
+same-version replacements.
+
+SHA256 checksums:
+
+```text
+A41DECCCD9A0F5633B3BFFE8F22B37A524062E3A75354868276C8F27CAD73B0A  YASK-CIEM-1.0.0.68.msi
+CABA514E890A00CE1442E125EBE4CF1D10E25E6C56EAC0BD77B8D3C9D44FC045  YASK-CIEM-Setup-1.0.0.68.exe
+```
+
+Both signatures were verified locally. These packages use a development signing
+certificate and are **trusted-test candidates, not approved customer releases**.
+Do not import development certificates on customer PCs. Clean-machine installation,
+same-version upgrade, and real-cloud acceptance remain pending; the installers
+were built and inspected without installing them on the development machine.
+
+## Historical server-managed trial candidate: 1.0.0.66
 
 Version 1.0.0.65 replaces the unlimited free edition with a server-managed 30-day
 trial. Configure the License Server HTTPS URL and Entra registrations using the
@@ -42,7 +110,7 @@ while the interactive Setup EXE is not the unattended submission asset.
 
 Installed-app, upgrade and real-cloud acceptance remain pending. The older
 1.0.0.61 package instructions below describe historical test packages, not the
-current candidate. See [the release checklist](release.md) for current gates.
+current 1.0.0.68 candidate. See [the release checklist](release.md) for current gates.
 
 YASK-CIEM supports Windows 10/11. Choose the installation method supplied by your organization. For a normal release, use the signed MSIX or App Installer feed. Use the ZIP for a portable/manual installation, or the per-user script when installing from a source checkout.
 

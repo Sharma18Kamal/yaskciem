@@ -1,11 +1,9 @@
 <UserControl x:Class="CloudEntitle.Desktop.Views.PermissionUsageView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
-        <StackPanel Margin="24">
-            <TextBlock Text="{Binding Title}" FontSize="26" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}"/>
-            <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,18"/>
-
+    <TabControl Style="{StaticResource WorkspaceTabs}" AutomationProperties.Name="Permission usage sections">
+        <TabItem Header="Analyze &amp; filter">
+        <StackPanel>
             <WrapPanel>
                 <ComboBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}" DisplayMemberPath="Name"
                           MinWidth="250" Margin="0,0,10,10" ToolTip="Saved local cloud inventory; live collection is always on demand."/>
@@ -22,7 +20,9 @@
                 <Button Content="Load Demo Mode" Command="{Binding LoadDemoCommand}" Style="{StaticResource QuietButton}" Margin="0,0,8,10"/>
                 <Button Content="Export usage CSV" Command="{Binding ExportCommand}" IsEnabled="{Binding CanExport}" Style="{StaticResource QuietButton}" Margin="0,0,8,10"/>
             </WrapPanel>
-
+        </StackPanel>
+        </TabItem>
+        <TabItem Header="Live collection">
             <Border Style="{StaticResource SectionCard}">
                 <StackPanel>
                     <TextBlock Text="On-demand cloud activity collection" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}"/>
@@ -43,7 +43,9 @@
                     <TextBlock Text="{Binding ActivityStatus}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
                 </StackPanel>
             </Border>
-
+        </TabItem>
+        <TabItem Header="Overview">
+        <StackPanel>
             <Border Style="{StaticResource SectionCard}" Background="#EAF3FC">
                 <TextBlock Text="{Binding Notice}" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap"/>
             </Border>
@@ -55,7 +57,8 @@
                 <Border Style="{StaticResource MetricCard}" MinWidth="160"><StackPanel><TextBlock Text="INCONCLUSIVE" Style="{StaticResource CardLabel}"/><TextBlock Text="{Binding InconclusivePermissions}" Style="{StaticResource CardValue}"/></StackPanel></Border>
             </WrapPanel>
 
-            <TabControl MinHeight="360">
+        </StackPanel>
+        </TabItem>
                 <TabItem Header="Permission usage">
                     <DataGrid ItemsSource="{Binding FilteredPermissionRows}" IsReadOnly="True" AutoGenerateColumns="False"
                               CanUserSortColumns="True" CanUserResizeColumns="True" AlternationCount="2" MinHeight="340">
@@ -166,7 +169,5 @@
                                    Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="8"/>
                     </StackPanel>
                 </TabItem>
-            </TabControl>
-        </StackPanel>
-    </ScrollViewer>
+    </TabControl>
 </UserControl>

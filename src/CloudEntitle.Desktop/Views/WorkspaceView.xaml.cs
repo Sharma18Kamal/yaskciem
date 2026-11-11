@@ -1,4 +1,5 @@
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows;
 using System.Diagnostics;
 using System.Windows.Media;
@@ -17,6 +18,7 @@ public partial class WorkspaceView : UserControl
         InitializeComponent();
         DataContextChanged += (_, _) => ShowPage();
         Loaded += (_, _) => ShowPage();
+        AddHandler(Selector.SelectionChangedEvent, new SelectionChangedEventHandler(WorkspaceTabChanged));
     }
 
     private void ShowPage()
@@ -24,11 +26,21 @@ public partial class WorkspaceView : UserControl
         if (DataContext is not WorkspaceViewModel viewModel) return;
         if (!_pages.TryGetValue(viewModel, out var page))
         {
+            var template = (DataTemplate)Resources[new DataTemplateKey(viewModel.GetType())];
+            var content = (FrameworkElement)template.LoadContent();
             page = new ContentControl
             {
-                Content = viewModel,
-                ContentTemplate = (DataTemplate)Resources[new DataTemplateKey(viewModel.GetType())],
-                HorizontalContentAlignment = HorizontalAlignment.Stretch
+                Content = ContainsTabs(content) ? content : new ScrollViewer
+                {
+                    Content = content,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Padding = new Thickness(0, 0, 8, 0)
+                },
+                DataContext = viewModel,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Stretch
             };
             _pages.Add(viewModel, page);
         }
@@ -36,6 +48,29 @@ public partial class WorkspaceView : UserControl
         PageHost.Content = page;
         if (SystemParameters.ClientAreaAnimation)
             page.BeginAnimation(OpacityProperty, new DoubleAnimation(0.75, 1, TimeSpan.FromMilliseconds(120)));
+    }
+
+    internal ScrollViewer? ActiveScroller => PageHost.Content is ContentControl { Content: ScrollViewer scroller }
+        ? scroller
+        : FindVisualChild<ScrollViewer>(PageHost, "TabScroller");
+
+    private static bool ContainsTabs(DependencyObject root)
+    {
+        if (root is TabControl) return true;
+        if (root is ItemsControl) return false;
+        return LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>().Any(ContainsTabs);
+    }
+
+    private void WorkspaceTabChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (e.OriginalSource is not TabControl) return;
+        if (ActiveScroller is { } previous) MouseWheelScrolling.StopAnimation(previous);
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (ActiveScroller is not { } scroller) return;
+            MouseWheelScrolling.StopAnimation(scroller);
+            scroller.ScrollToTop();
+        }));
     }
 
     private async void SaveTicketingCredentials_Click(object sender, RoutedEventArgs e)

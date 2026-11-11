@@ -4,7 +4,7 @@ The License Server uses one PostgreSQL database for shared workspace data and ce
 
 ## Schema and Runtime Role
 
-As a PostgreSQL administrator, apply `001-schema.sql`, `002-central-monitoring.sql`, `003-governance-deadlines.sql`, then `004-operational-integrations.sql` to the target database. The base schema creates the required tables, indexes, append-only audit trigger, forced row-level security policies for audit events and tenant heads, and separate `yask_ciem_runtime` and `yask_ciem_archiver` NOLOGIN roles. The monitoring migration adds shared comparable-scan baselines, drift events, notification rules, deliveries, attempts, indexes, and runtime grants. Each audit transaction sets a transaction-local tenant ID; missing context matches no tenant. The archiver role can read audit rows across tenants and insert archive ledger rows, but cannot mutate audit events. Create separate login roles for the API and archive worker; do not run either service as the schema owner.
+Using a PostgreSQL administrator/migration identity, apply every numbered `*.sql` migration shipped with the matching release in filename order. The release manifest lists the migration sequence; sequence-number gaps are allowed and do not mean a file should be invented. Do not rename or renumber migrations. Production startup does not apply schema migrations; the local setup script is a development-only exception. The base schema creates the required tables, indexes, append-only audit trigger, forced row-level security policies for audit events and tenant heads, and separate `yask_ciem_runtime` and `yask_ciem_archiver` NOLOGIN roles. The monitoring migration adds shared comparable-scan baselines, drift events, notification rules, deliveries, attempts, indexes, and runtime grants. Each audit transaction sets a transaction-local tenant ID; missing context matches no tenant. The archiver role can read audit rows across tenants and insert archive ledger rows, but cannot mutate audit events. Create separate login roles for the API and archive worker; do not run either service as the schema owner.
 
 For example, after applying the schema, create a login using your organization's authentication policy and grant membership:
 
@@ -19,8 +19,8 @@ Do not put a password in a checked-in SQL file. Supply credentials using the dep
 
 ## License Server Configuration
 
-Version 1.0.0.65 also requires `017-subscriptions.sql` after all earlier numbered
-migrations. It preserves one 30-day trial per Entra tenant using database time.
+Version 1.0.0.65 also requires `017-subscriptions.sql` after the preceding
+migrations present in that release. It preserves one 30-day trial per Entra tenant using database time.
 Back up this table; never delete trial history to work around expiry. Runtime
 credentials may register a trial and read status but may not update dates, grant
 paid entitlements, delete or truncate subscriptions. Only the authorized licensing
@@ -36,7 +36,7 @@ Configure:
 - Optional operational controls: `Operations__RetentionDays=90`, `Operations__Limits__MaxScanSchedulesPerTenant=100`, `Operations__Limits__MaxActiveScanJobsPerTenant=25`, `Operations__Readiness__MaxQueueDepth=1000`, and `Operations__Readiness__MaxQueueAgeSeconds=3600`. Retention batches default to 500 rows, up to 20 batches daily; tune with `Operations__RetentionBatchSize` (1–5000) and `Operations__RetentionMaxBatchesPerRun` (1–100).
 - The existing Entra settings required by the License Server.
 
-Production startup does not create or migrate tables. Apply `005-operations-scale.sql` after migrations `001`–`004` using the DBA migration identity before deploying the updated server. `/api/v1/readiness` and `/health/ready` return HTTP 503 until the database, shared workspace tables, operations indexes, retention function, queue thresholds, and worker heartbeats are healthy. `/health/live` is an anonymous liveness check; `/metrics` requires the `operations.read` scope or `Ciem.Operations.Read` role. Keep application credentials separate from the DBA migration identity.
+Apply the full migration set for the matching release before deploying the updated server. Keep application credentials separate from the DBA migration identity. `/api/v1/readiness` and `/health/ready` return HTTP 503 until the database, shared workspace tables, operations indexes, retention function, queue thresholds, and worker heartbeats are healthy. `/health/live` is an anonymous liveness check; `/metrics` requires the `operations.read` scope or `Ciem.Operations.Read` role.
 
 The scan worker runs as part of the License Server process and uses that process identity's cloud CLI authentication. Install/configure the Azure CLI, AWS CLI, and/or Google Cloud CLI required by scheduled accounts under the service identity, and grant only the approved read permissions. The worker doesn't reuse a Desktop user's credentials. Schedule intervals are 5 minutes to 7 days; retry count is capped at four. Failed scans use bounded exponential retry, partial scans persist their source coverage and are terminal outcomes, and cancellation is stored durably for the worker to observe. Incremental scans/checkpoints are not used to resume cloud collection; checkpoints report source progress for job visibility only.
 
@@ -64,7 +64,7 @@ Apply [013-continuous-change-feeds.sql](013-continuous-change-feeds.sql) after 0
 
 Apply [014-authoritative-decisions.sql](014-authoritative-decisions.sql) after 013. It adds immutable native decision snapshots and scoped before/after analyses with deduplication and foreign keys. Runtime receives SELECT/INSERT only; readiness requires both tables, source/pair metadata, the valid source-time index and four immutable guards. Include saved source evidence, analyses and operational events in coordinated backups. Native capture remains explicitly opted-in and narrowly scoped; see [GCP Preview decision-transition setup](../../docs/deployment/authoritative-decisions.md).
 
-Staging packages include migrations 001 through 014. Deployments apply them with the DBA identity before the updated server; startup does not migrate, and staging extraction does not start services.
+Staging packages include all numbered migration files for the release; the package manifest lists their sequence. Apply them with the DBA identity before deploying the updated server. Startup does not migrate, and staging extraction does not start services.
 
 ## WORM Archive
 

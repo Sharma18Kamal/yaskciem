@@ -1,0 +1,21 @@
+<Window x:Class="CloudEntitle.Desktop.Views.ReportFormatDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Choose report format" Width="460" SizeToContent="Height"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource WindowBrush}">
+    <StackPanel Margin="24">
+        <TextBlock Text="Choose report format" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}"/>
+        <TextBlock Text="Select how you want to use this report, then choose where to save it."
+                   TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,16"/>
+        <ComboBox x:Name="FormatSelector" DisplayMemberPath="Label" SelectedIndex="0"
+                  MinHeight="36" AutomationProperties.Name="Report format" SelectionChanged="FormatSelector_SelectionChanged"/>
+        <TextBlock x:Name="FormatDescription" TextWrapping="Wrap" MinHeight="46"
+                   Margin="0,12,0,16" Foreground="{StaticResource MutedBrush}"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" IsCancel="True" Style="{StaticResource QuietButton}"/>
+            <Button Content="Continue" IsDefault="True" Click="Continue_Click"
+                    Style="{StaticResource PrimaryButton}" Margin="8,0,0,0"/>
+        </StackPanel>
+    </StackPanel>
+</Window>
