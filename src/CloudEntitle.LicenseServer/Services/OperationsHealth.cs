@@ -49,8 +49,7 @@ public sealed class OperationsReadinessHealthCheck(
         foreach (var (name, maximumAge) in WorkerFreshness)
         {
             if (!heartbeats.TryGetValue(name, out var heartbeat)
-                || now - heartbeat.LastHeartbeatUtc > maximumAge
-                || name == "retention" && (heartbeat.LastSuccessUtc is null || now - heartbeat.LastSuccessUtc > maximumAge))
+                || !heartbeat.IsFresh(name, now, maximumAge))
                 errors.Add($"Worker '{name}' heartbeat is unavailable or stale.");
         }
 

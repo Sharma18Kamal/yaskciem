@@ -283,9 +283,7 @@ app.MapGet("/api/v1/readiness", async (IAuditRetentionStore retentionStore, Shar
 	var workerStatuses = workerHealth.Snapshot();
 	var workersReady = new[] { "scan", "notifications", "governance", "operations", "retention" }
 		.All(name => workerStatuses.TryGetValue(name, out var status)
-			&& DateTime.UtcNow - status.LastHeartbeatUtc <= TimeSpan.FromSeconds(90)
-			&& (name != "retention" || status.LastSuccessUtc is DateTime success
-				&& DateTime.UtcNow - success <= TimeSpan.FromHours(36)));
+			&& status.IsFresh(name, DateTime.UtcNow, TimeSpan.FromSeconds(90)));
 	var archive = archiveStatus.Current;
 	var snapshot = operationsMetrics.Current;
 	var queueReady = snapshot is not null

@@ -22,7 +22,17 @@ public sealed record OperationsSnapshot(
     long ConnectorFailures24Hours,
     DateTime CollectedAtUtc);
 
-public sealed record WorkerHeartbeat(DateTime LastHeartbeatUtc, long Failures, DateTime? LastSuccessUtc);
+public sealed record WorkerHeartbeat(DateTime LastHeartbeatUtc, long Failures, DateTime? LastSuccessUtc)
+{
+    public bool IsFresh(string workerName, DateTime now, TimeSpan maximumAge)
+    {
+        if (workerName == "retention")
+            maximumAge = TimeSpan.FromHours(36);
+        return now - LastHeartbeatUtc <= maximumAge
+            && (workerName != "retention"
+                || LastSuccessUtc is DateTime success && now - success <= maximumAge);
+    }
+}
 
 public sealed class WorkerHealthRegistry
 {

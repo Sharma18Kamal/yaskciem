@@ -79,6 +79,11 @@ Do not replace SSPI rules or enable `trust` authentication.
 
 ## Run and test
 
+Readiness allows the daily operations-retention worker up to 36 hours since its
+last heartbeat and successful run. Other required workers must report within
+their short heartbeat windows. A live HTTPS response alone does not establish
+readiness; inspect `/api/v1/readiness` for dependency failures.
+
 In the first PowerShell terminal:
 
 ```powershell
@@ -86,8 +91,46 @@ In the first PowerShell terminal:
 ```
 
 This sets Development mode, loads the local non-secret settings, and binds HTTPS
-to `https://localhost:7443`. It does not expose a public server or install a
+to the current Windows user's `YASK_CIEM_API_BASE_URL`, falling back to
+`https://localhost:7443/` when unset. It does not install a
 Windows service. Keep it running; Ctrl+C stops it.
+
+### LAN testing on susa-pal
+
+The laptop's LAN test address is **https://susa-pal:7443/**. This is not a public
+customer endpoint. Use a dedicated certificate with the `susa-pal` DNS SAN in
+`CurrentUser\My`, trusted by the server user and each test client. Do not reuse
+certificates belonging to other installed software or disable TLS validation.
+
+```powershell
+.\scripts\start-local-license-server.ps1 `
+  -ServerUrl 'https://susa-pal:7443/' `
+  -CertificateThumbprint '<dedicated-server-certificate-thumbprint>'
+```
+
+The thumbprint can also be saved as the user setting
+`YASK_CIEM_LOCAL_TLS_THUMBPRINT`. The launcher validates hostname, validity,
+private-key availability and certificate trust before starting. Kestrel hostname
+bindings listen on network interfaces, not just the named interface. Restrict
+Windows Firewall to the approved VM's IP and server port; the launcher does not
+change firewall rules. Never expose PostgreSQL for Desktop access.
+
+For a self-signed LAN test certificate, transfer only the exported public `.cer`
+to the VM, verify its thumbprint through a trusted channel, and explicitly trust
+it in that test user's certificate store. Never transfer its private key. Set the
+VM's user-scoped `YASK_CIEM_API_BASE_URL` to `https://susa-pal:7443/`, retain its
+Desktop client ID/API scope, and restart its Windows session. Both hostname
+resolution and certificate validation must succeed. The Entra interactive
+redirect `http://localhost` is unrelated and must not be renamed.
+
+On the laptop, the dedicated public test certificate is exported to
+`%LOCALAPPDATA%\YASK-CIEM\LocalLicenseServer\susa-pal-lan-test.cer`.
+After checking its thumbprint, import it interactively into **Current User >
+Trusted Root Certification Authorities** on the laptop and the test VM.
+Windows may require an interactive confirmation that cannot be accepted by an
+automated terminal. Until that is completed, the launcher deliberately refuses
+the untrusted certificate. This trust is only for the controlled LAN test, not
+for public/customer distribution.
 
 Close old Desktop instances. In a second terminal:
 

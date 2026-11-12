@@ -11,6 +11,25 @@ namespace CloudEntitle.Integration.Tests;
 
 public sealed class OperationsScaleTests
 {
+    [Theory]
+    [InlineData("retention", 120, 120, true)]
+    [InlineData("retention", 86400, 86400, true)]
+    [InlineData("retention", 129600, 129600, true)]
+    [InlineData("retention", 129601, 129601, false)]
+    [InlineData("retention", 0, 129601, false)]
+    [InlineData("retention", 0, null, false)]
+    [InlineData("scan", 90, null, true)]
+    [InlineData("scan", 91, null, false)]
+    public void WorkerHeartbeat_ShouldRespectDailyRetentionSchedule(
+        string worker, int heartbeatAgeSeconds, int? successAgeSeconds, bool expected)
+    {
+        var now = new DateTime(2026, 11, 11, 12, 0, 0, DateTimeKind.Utc);
+        var heartbeat = new WorkerHeartbeat(now.AddSeconds(-heartbeatAgeSeconds), 0,
+            successAgeSeconds is int age ? now.AddSeconds(-age) : null);
+
+        Assert.Equal(expected, heartbeat.IsFresh(worker, now, TimeSpan.FromSeconds(90)));
+    }
+
     [PostgreSqlFact]
     public async Task MonitoringSchemas_ReadinessRequiresImmutableGuardsAndDecisionIndex()
     {
